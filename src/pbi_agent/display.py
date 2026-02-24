@@ -60,7 +60,7 @@ class Display:
 
     def user_prompt(self) -> str:
         """Display the prompt and return user input (blocking)."""
-        return self.console.input("[bold green]you>[/bold green] ")
+        return self.console.input("[bold green]>[/bold green] ")
 
     # -- assistant streaming ------------------------------------------------
 
