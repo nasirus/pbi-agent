@@ -92,22 +92,47 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+_BUILTIN_TOOLS: dict[str, str] = {
+    "apply_patch": "Create, update, or delete files using v4a diff patches.",
+    "shell": "Execute shell commands in the workspace directory.",
+}
+
+
+def _brief(description: str) -> str:
+    """Return the first sentence or line of a description."""
+    first_line = description.split("\n", 1)[0].strip()
+    dot = first_line.find(". ")
+    if dot != -1:
+        return first_line[: dot + 1]
+    return first_line
+
+
 def _handle_tools_command(args: argparse.Namespace) -> int:
     if args.tools_command == "list":
-        tools = get_tool_specs()
-        if not tools:
-            print("No tools registered.")
-            return 0
-        for tool in tools:
-            print(f"{tool.name}: {tool.description}")
+        # Built-in tools
+        for name, desc in _BUILTIN_TOOLS.items():
+            print(f"  {name} (built-in): {desc}")
+        # Registered function tools
+        for tool in get_tool_specs():
+            print(f"  {tool.name}: {_brief(tool.description)}")
         return 0
 
     if args.tools_command == "describe":
+        # Check built-in tools first
+        if args.name in _BUILTIN_TOOLS:
+            print(f"name: {args.name}")
+            print(f"type: built-in")
+            print(f"description: {_BUILTIN_TOOLS[args.name]}")
+            return 0
+        # Check registered function tools
         tool = get_tool_spec(args.name)
         if tool is None:
+            all_names = list(_BUILTIN_TOOLS.keys()) + [t.name for t in get_tool_specs()]
             print(f"Unknown tool: {args.name}")
+            print(f"Available: {', '.join(all_names)}")
             return 1
         print(f"name: {tool.name}")
+        print(f"type: function")
         print(f"description: {tool.description}")
         print(f"is_destructive: {tool.is_destructive}")
         print("parameters_schema:")

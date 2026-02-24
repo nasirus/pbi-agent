@@ -6,6 +6,11 @@ from pbi_agent.tools.types import ToolHandler, ToolSpec
 
 _REGISTRY: dict[str, tuple[ToolSpec, ToolHandler]] = {}
 
+# --- built-in function tools -----------------------------------------------
+from pbi_agent.tools.skill_knowledge import SPEC as _sk_spec, handle as _sk_handle  # noqa: E402
+
+_REGISTRY[_sk_spec.name] = (_sk_spec, _sk_handle)
+
 
 def get_tool_specs() -> list[ToolSpec]:
     return [item[0] for item in _REGISTRY.values()]
