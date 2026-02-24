@@ -27,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ws-url", help="Override Responses API websocket URL.")
     parser.add_argument("--api-key", help="Override OPENAI_API_KEY.")
     parser.add_argument(
+        "--reasoning-effort",
+        choices=["low", "medium", "high"],
+        default=None,
+        help="Set model reasoning effort (default: medium).",
+    )
+    parser.add_argument(
         "--max-tool-workers",
         type=int,
         default=None,

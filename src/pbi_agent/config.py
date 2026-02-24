@@ -22,6 +22,7 @@ class Settings:
     verbose: bool = False
     max_tool_workers: int = 4
     ws_max_retries: int = 2
+    reasoning_effort: str = "medium"
 
     def validate(self) -> None:
         if not self.api_key:
@@ -32,6 +33,8 @@ class Settings:
             raise ConfigError("--max-tool-workers must be >= 1.")
         if self.ws_max_retries < 0:
             raise ConfigError("--ws-max-retries must be >= 0.")
+        if self.reasoning_effort not in {"low", "medium", "high"}:
+            raise ConfigError("--reasoning-effort must be one of: low, medium, high.")
 
     def redacted(self) -> dict[str, str | int | bool]:
         return {
@@ -41,6 +44,7 @@ class Settings:
             "verbose": self.verbose,
             "max_tool_workers": self.max_tool_workers,
             "ws_max_retries": self.ws_max_retries,
+            "reasoning_effort": self.reasoning_effort,
         }
 
 
@@ -63,6 +67,9 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
     ws_max_retries = args.ws_max_retries
     if ws_max_retries is None:
         ws_max_retries = int(os.getenv("PBI_AGENT_WS_MAX_RETRIES", "2"))
+    reasoning_effort = (
+        args.reasoning_effort or os.getenv("PBI_AGENT_REASONING_EFFORT") or "medium"
+    )
 
     return Settings(
         api_key=api_key,
@@ -71,4 +78,5 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         verbose=bool(args.verbose),
         max_tool_workers=max_tool_workers,
         ws_max_retries=ws_max_retries,
+        reasoning_effort=reasoning_effort,
     )

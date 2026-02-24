@@ -58,7 +58,13 @@ class Display:
 
     # -- lifecycle ----------------------------------------------------------
 
-    def welcome(self, *, interactive: bool = True) -> None:
+    def welcome(
+        self,
+        *,
+        interactive: bool = True,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
+    ) -> None:
         logo = Text(justify="center")
         bar_1 = "#F6E27A"
         bar_2 = "#F2C811"
@@ -98,11 +104,25 @@ class Display:
                 "[dim]Single prompt mode:[/dim] Running one request from [bold]--prompt[/bold].",
                 justify="center",
             )
+        model_bits: list[str] = []
+        if model:
+            model_bits.append(f"[dim]Model:[/dim] [bold]{model}[/bold]")
+        if reasoning_effort:
+            model_bits.append(
+                f"[dim]Reasoning:[/dim] [bold]{reasoning_effort}[/bold]"
+            )
+        model_line = (
+            Text.from_markup("  [dim]·[/dim]  ".join(model_bits), justify="center")
+            if model_bits
+            else None
+        )
 
         panel_width = min(72, max(54, self.console.size.width - 4))
         self.console.print(
             Panel(
-                Group(logo, Text(""), title, subtitle, tips),
+                Group(logo, Text(""), title, subtitle, tips, model_line)
+                if model_line
+                else Group(logo, Text(""), title, subtitle, tips),
                 width=panel_width,
                 border_style="#F2C811",
                 title="[bold #F2C811]Welcome[/bold #F2C811]",

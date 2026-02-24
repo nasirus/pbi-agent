@@ -32,7 +32,11 @@ from pbi_agent.tools.registry import get_openai_tool_definitions
 
 
 def run_single_turn(prompt: str, settings: Settings, display: Display) -> AgentOutcome:
-    display.welcome(interactive=False)
+    display.welcome(
+        interactive=False,
+        model=settings.model,
+        reasoning_effort=settings.reasoning_effort,
+    )
     tools = get_openai_tool_definitions()
     instructions = get_system_prompt()
     session_usage = TokenUsage()
@@ -45,6 +49,7 @@ def run_single_turn(prompt: str, settings: Settings, display: Display) -> AgentO
             previous_response_id=None,
             stream_output=True,
             instructions=instructions,
+            reasoning_effort=settings.reasoning_effort,
             ws_max_retries=settings.ws_max_retries,
             display=display,
             session_usage=session_usage,
@@ -68,7 +73,10 @@ def run_single_turn(prompt: str, settings: Settings, display: Display) -> AgentO
 
 
 def run_chat_loop(settings: Settings, display: Display) -> int:
-    display.welcome()
+    display.welcome(
+        model=settings.model,
+        reasoning_effort=settings.reasoning_effort,
+    )
     tools = get_openai_tool_definitions()
     instructions = get_system_prompt()
     previous_response_id: str | None = None
@@ -92,6 +100,7 @@ def run_chat_loop(settings: Settings, display: Display) -> int:
                 previous_response_id=previous_response_id,
                 stream_output=True,
                 instructions=instructions,
+                reasoning_effort=settings.reasoning_effort,
                 ws_max_retries=settings.ws_max_retries,
                 display=display,
                 session_usage=session_usage,
@@ -218,6 +227,7 @@ def _run_tool_iterations(
             previous_response_id=response.response_id,
             stream_output=True,
             instructions=instructions,
+            reasoning_effort="medium",
             ws_max_retries=ws_max_retries,
             display=display,
             session_usage=session_usage,
@@ -239,6 +249,7 @@ def _request_turn(
     previous_response_id: str | None,
     stream_output: bool,
     instructions: str | None,
+    reasoning_effort: str,
     ws_max_retries: int,
     display: Display,
     session_usage: TokenUsage,
@@ -250,6 +261,7 @@ def _request_turn(
         previous_response_id=previous_response_id,
         store=True,
         instructions=instructions,
+        reasoning_effort=reasoning_effort,
     )
     last_error: Exception | None = None
     for attempt in range(ws_max_retries + 1):
