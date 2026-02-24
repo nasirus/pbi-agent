@@ -21,6 +21,7 @@ class Settings:
     model: str = DEFAULT_MODEL
     verbose: bool = False
     max_tool_workers: int = 4
+    ws_max_retries: int = 2
 
     def validate(self) -> None:
         if not self.api_key:
@@ -29,6 +30,8 @@ class Settings:
             )
         if self.max_tool_workers < 1:
             raise ConfigError("--max-tool-workers must be >= 1.")
+        if self.ws_max_retries < 0:
+            raise ConfigError("--ws-max-retries must be >= 0.")
 
     def redacted(self) -> dict[str, str | int | bool]:
         return {
@@ -37,6 +40,7 @@ class Settings:
             "model": self.model,
             "verbose": self.verbose,
             "max_tool_workers": self.max_tool_workers,
+            "ws_max_retries": self.ws_max_retries,
         }
 
 
@@ -56,6 +60,9 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
     max_tool_workers = args.max_tool_workers
     if max_tool_workers is None:
         max_tool_workers = int(os.getenv("PBI_AGENT_MAX_TOOL_WORKERS", "4"))
+    ws_max_retries = args.ws_max_retries
+    if ws_max_retries is None:
+        ws_max_retries = int(os.getenv("PBI_AGENT_WS_MAX_RETRIES", "2"))
 
     return Settings(
         api_key=api_key,
@@ -63,4 +70,5 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         model=model,
         verbose=bool(args.verbose),
         max_tool_workers=max_tool_workers,
+        ws_max_retries=ws_max_retries,
     )

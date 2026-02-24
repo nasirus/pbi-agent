@@ -30,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum parallel workers for tool execution.",
     )
     parser.add_argument(
+        "--ws-max-retries",
+        type=int,
+        default=None,
+        help="Maximum retries for transient websocket request/response failures.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logs.",

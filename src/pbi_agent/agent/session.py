@@ -13,7 +13,11 @@ from pbi_agent.agent.protocol import (
 from pbi_agent.agent.shell_runtime import execute_shell_calls
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import execute_tool_calls, to_function_call_output_items
-from pbi_agent.agent.ws_client import ResponsesWebSocketClient
+from pbi_agent.agent.ws_client import (
+    ResponsesWebSocketClient,
+    WebSocketClientError,
+    WebSocketClientTransientError,
+)
 from pbi_agent.config import Settings
 from pbi_agent.models.messages import AgentOutcome, CompletedResponse
 from pbi_agent.tools.registry import get_openai_tool_definitions
@@ -31,6 +35,7 @@ def run_single_turn(prompt: str, settings: Settings) -> AgentOutcome:
             previous_response_id=None,
             stream_output=True,
             instructions=instructions,
+            ws_max_retries=settings.ws_max_retries,
         )
         response, had_tool_errors = _run_tool_iterations(
             ws=ws,
@@ -38,6 +43,7 @@ def run_single_turn(prompt: str, settings: Settings) -> AgentOutcome:
             tools=tools,
             response=response,
             max_workers=settings.max_tool_workers,
+            ws_max_retries=settings.ws_max_retries,
         )
         return AgentOutcome(
             response_id=response.response_id,
@@ -70,6 +76,7 @@ def run_chat_loop(settings: Settings) -> int:
                 previous_response_id=previous_response_id,
                 stream_output=True,
                 instructions=instructions,
+                ws_max_retries=settings.ws_max_retries,
             )
             response, loop_had_errors = _run_tool_iterations(
                 ws=ws,
@@ -77,6 +84,7 @@ def run_chat_loop(settings: Settings) -> int:
                 tools=tools,
                 response=response,
                 max_workers=settings.max_tool_workers,
+                ws_max_retries=settings.ws_max_retries,
             )
             had_tool_errors = had_tool_errors or loop_had_errors
             previous_response_id = response.response_id
@@ -91,6 +99,7 @@ def _run_tool_iterations(
     tools: list[dict[str, Any]],
     response: CompletedResponse,
     max_workers: int,
+    ws_max_retries: int,
 ) -> tuple[CompletedResponse, bool]:
     instructions = get_system_prompt()
     had_errors = False
@@ -163,6 +172,7 @@ def _run_tool_iterations(
             previous_response_id=response.response_id,
             stream_output=True,
             instructions=instructions,
+            ws_max_retries=ws_max_retries,
         )
     return response, had_errors
 
@@ -209,6 +219,7 @@ def _request_turn(
     previous_response_id: str | None,
     stream_output: bool,
     instructions: str | None,
+    ws_max_retries: int,
 ) -> CompletedResponse:
     payload = build_response_create_payload(
         model=model,
@@ -218,8 +229,28 @@ def _request_turn(
         store=True,
         instructions=instructions,
     )
-    ws.send_json(payload)
-    return _read_one_response(ws, stream_output=stream_output)
+    last_error: Exception | None = None
+    for attempt in range(ws_max_retries + 1):
+        if attempt > 0:
+            print(
+                f"retry> websocket transient failure, retrying request "
+                f"({attempt}/{ws_max_retries}) with same previous_response_id"
+            )
+            ws.reconnect()
+        try:
+            ws.send_json(payload)
+            return _read_one_response(ws, stream_output=stream_output)
+        except WebSocketClientTransientError as exc:
+            # Treat receive/decode failures as transient: reconnect and retry the full
+            # request. This favors resiliency over strict "exactly-once" semantics.
+            last_error = exc
+            continue
+        except WebSocketClientError:
+            raise
+
+    if last_error is not None:
+        raise WebSocketClientError(str(last_error)) from last_error
+    raise WebSocketClientError("WebSocket request failed after retries.")
 
 
 def _read_one_response(

@@ -64,6 +64,7 @@ Configuration precedence is: **CLI args > environment variables > defaults**.
 - `--ws-url` (overrides `PBI_AGENT_WS_URL`, default: `wss://api.openai.com/v1/responses`)
 - `--model` (overrides `PBI_AGENT_MODEL`)
 - `--max-tool-workers` (overrides `PBI_AGENT_MAX_TOOL_WORKERS`, default: `4`)
+- `--ws-max-retries` (overrides `PBI_AGENT_WS_MAX_RETRIES`, default: `2`)
 - `--verbose`
 
 ### Environment variables
@@ -72,6 +73,7 @@ Configuration precedence is: **CLI args > environment variables > defaults**.
 - `PBI_AGENT_MODEL` (optional)
 - `PBI_AGENT_WS_URL` (optional)
 - `PBI_AGENT_MAX_TOOL_WORKERS` (optional)
+- `PBI_AGENT_WS_MAX_RETRIES` (optional)
 
 ## Tooling model (how tools work here)
 
