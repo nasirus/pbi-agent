@@ -14,9 +14,12 @@ import json
 from typing import Any
 
 from rich.console import Console
+from rich.console import Group
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.panel import Panel
 from rich.rule import Rule
+from rich.text import Text
 
 from pbi_agent.models.messages import TokenUsage
 
@@ -54,9 +57,50 @@ class Display:
     # -- lifecycle ----------------------------------------------------------
 
     def welcome(self) -> None:
-        self.console.print(
-            "Interactive mode.  Type [bold]exit[/bold] or [bold]quit[/bold] to stop.\n",
+        logo = Text(justify="center")
+        bar_1 = "#F6E27A"
+        bar_2 = "#F2C811"
+        bar_3 = "#D89216"
+        empty = "  "
+        bar = "████"
+
+        rows = [
+            (False, False, True),
+            (False, False, True),
+            (False, True, True),
+            (False, True, True),
+            (True, True, True),
+            (True, True, True),
+        ]
+
+        for index, (show_1, show_2, show_3) in enumerate(rows):
+            logo.append((bar if show_1 else " " * len(bar)), style=bar_1)
+            logo.append(empty)
+            logo.append((bar if show_2 else " " * len(bar)), style=bar_2)
+            logo.append(empty)
+            logo.append((bar if show_3 else " " * len(bar)), style=bar_3)
+            if index < len(rows) - 1:
+                logo.append("\n")
+
+        title = Text("PBI AGENT", style="bold #F2C811", justify="center")
+        subtitle = Text("Transform data into decisions.", style="bold white", justify="center")
+        tips = Text.from_markup(
+            "[dim]Interactive mode:[/dim] Type [bold]exit[/bold] or [bold]quit[/bold] to stop.",
+            justify="center",
         )
+
+        panel_width = min(72, max(54, self.console.size.width - 4))
+        self.console.print(
+            Panel(
+                Group(logo, Text(""), title, subtitle, tips),
+                width=panel_width,
+                border_style="#F2C811",
+                title="[bold #F2C811]Welcome[/bold #F2C811]",
+                subtitle="[dim]Power BI Report Assistant[/dim]",
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
 
     def user_prompt(self) -> str:
         """Display the prompt and return user input (blocking)."""
