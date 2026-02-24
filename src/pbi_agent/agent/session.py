@@ -150,7 +150,7 @@ def _request_turn(
         input_items=input_items,
         tools=tools,
         previous_response_id=previous_response_id,
-        store=False,
+        store=True,
         instructions=instructions,
     )
     ws.send_json(payload)
