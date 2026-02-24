@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -19,11 +18,16 @@ from pbi_agent.agent.ws_client import (
     WebSocketClientTransientError,
 )
 from pbi_agent.config import Settings
+from pbi_agent.display import Display
 from pbi_agent.models.messages import AgentOutcome, CompletedResponse
 from pbi_agent.tools.registry import get_openai_tool_definitions
 
 
-def run_single_turn(prompt: str, settings: Settings) -> AgentOutcome:
+# ---------------------------------------------------------------------------
+# Public entry-points
+# ---------------------------------------------------------------------------
+
+def run_single_turn(prompt: str, settings: Settings, display: Display) -> AgentOutcome:
     tools = get_openai_tool_definitions()
     instructions = get_system_prompt()
     with ResponsesWebSocketClient(settings.ws_url, settings.api_key) as ws:
@@ -36,6 +40,7 @@ def run_single_turn(prompt: str, settings: Settings) -> AgentOutcome:
             stream_output=True,
             instructions=instructions,
             ws_max_retries=settings.ws_max_retries,
+            display=display,
         )
         response, had_tool_errors = _run_tool_iterations(
             ws=ws,
@@ -44,6 +49,7 @@ def run_single_turn(prompt: str, settings: Settings) -> AgentOutcome:
             response=response,
             max_workers=settings.max_tool_workers,
             ws_max_retries=settings.ws_max_retries,
+            display=display,
         )
         return AgentOutcome(
             response_id=response.response_id,
@@ -52,8 +58,8 @@ def run_single_turn(prompt: str, settings: Settings) -> AgentOutcome:
         )
 
 
-def run_chat_loop(settings: Settings) -> int:
-    print("Interactive mode. Type 'exit' or 'quit' to stop.")
+def run_chat_loop(settings: Settings, display: Display) -> int:
+    display.welcome()
     tools = get_openai_tool_definitions()
     instructions = get_system_prompt()
     previous_response_id: str | None = None
@@ -61,13 +67,13 @@ def run_chat_loop(settings: Settings) -> int:
 
     with ResponsesWebSocketClient(settings.ws_url, settings.api_key) as ws:
         while True:
-            user_input = input("you> ").strip()
+            user_input = display.user_prompt().strip()
             if user_input.lower() in {"exit", "quit"}:
                 break
             if not user_input:
                 continue
 
-            print("assistant> ", end="", flush=True)
+            display.assistant_start()
             response = _request_turn(
                 ws=ws,
                 model=settings.model,
@@ -77,6 +83,7 @@ def run_chat_loop(settings: Settings) -> int:
                 stream_output=True,
                 instructions=instructions,
                 ws_max_retries=settings.ws_max_retries,
+                display=display,
             )
             response, loop_had_errors = _run_tool_iterations(
                 ws=ws,
@@ -85,12 +92,17 @@ def run_chat_loop(settings: Settings) -> int:
                 response=response,
                 max_workers=settings.max_tool_workers,
                 ws_max_retries=settings.ws_max_retries,
+                display=display,
             )
             had_tool_errors = had_tool_errors or loop_had_errors
             previous_response_id = response.response_id
 
     return 4 if had_tool_errors else 0
 
+
+# ---------------------------------------------------------------------------
+# Tool iteration loop
+# ---------------------------------------------------------------------------
 
 def _run_tool_iterations(
     *,
@@ -100,65 +112,79 @@ def _run_tool_iterations(
     response: CompletedResponse,
     max_workers: int,
     ws_max_retries: int,
+    display: Display,
 ) -> tuple[CompletedResponse, bool]:
     instructions = get_system_prompt()
     had_errors = False
+
     while response.has_tool_calls:
-        print("tool> model requested tool execution")
+        display.debug("model requested tool execution")
         output_items: list[dict[str, Any]] = []
 
+        # --- function calls ------------------------------------------------
         if response.function_calls:
-            for call in response.function_calls:
-                args_preview = _to_compact_json(call.arguments)
-                print(f"tool> function {call.name} ({call.call_id}) args={args_preview}")
+            display.function_start(len(response.function_calls))
             function_batch = execute_tool_calls(
                 response.function_calls,
                 max_workers=max_workers,
             )
             had_errors = had_errors or function_batch.had_errors
             for result in function_batch.results:
-                state = "failed" if result.is_error else "completed"
-                print(f"tool< function ({result.call_id}) {state}")
+                call = _find_function_call(response.function_calls, result.call_id)
+                display.function_result(
+                    name=call.name if call else "unknown",
+                    success=not result.is_error,
+                    call_id=result.call_id,
+                    arguments=call.arguments if call else None,
+                )
             output_items.extend(to_function_call_output_items(function_batch.results))
 
+        # --- apply_patch calls ---------------------------------------------
         if response.apply_patch_calls:
-            for call in response.apply_patch_calls:
-                operation_type = call.operation.get("type", "unknown")
-                operation_path = call.operation.get("path", "<missing path>")
-                print(
-                    f"tool> apply_patch {operation_type} path={operation_path} ({call.call_id})"
-                )
+            display.patch_start(len(response.apply_patch_calls))
             apply_patch_items, apply_patch_had_errors = execute_apply_patch_calls(
                 response.apply_patch_calls,
                 workspace_root=Path.cwd(),
             )
             had_errors = had_errors or apply_patch_had_errors
-            for item in apply_patch_items:
+            for call, item in zip(response.apply_patch_calls, apply_patch_items):
                 status = item.get("status", "unknown")
                 output = str(item.get("output", ""))
-                print(
-                    f"tool< apply_patch ({item.get('call_id', '')}) {status}: {_shorten(output)}"
+                display.patch_result(
+                    path=call.operation.get("path", "<missing>"),
+                    operation=call.operation.get("type", "update"),
+                    success=(status != "failed" and status != "error"),
+                    call_id=item.get("call_id", ""),
+                    detail=output,
                 )
             output_items.extend(apply_patch_items)
 
+        # --- shell calls ---------------------------------------------------
         if response.shell_calls:
-            for call in response.shell_calls:
-                commands = call.action.get("commands")
-                timeout_ms = call.action.get("timeout_ms", "default")
-                working_directory = call.action.get("working_directory", ".")
-                if isinstance(commands, list):
-                    for idx, command in enumerate(commands, start=1):
-                        print(
-                            f"tool> shell ({call.call_id}) cmd#{idx} wd={working_directory} timeout_ms={timeout_ms}: {command}"
-                        )
+            all_commands = _collect_shell_commands(response.shell_calls)
+            display.shell_start(all_commands)
+
             shell_items, shell_had_errors = execute_shell_calls(
                 response.shell_calls,
                 workspace_root=Path.cwd(),
             )
             had_errors = had_errors or shell_had_errors
-            for item in shell_items:
-                statuses = _summarize_shell_outcomes(item.get("output"))
-                print(f"tool< shell ({item.get('call_id', '')}) {statuses}")
+
+            for call, item in zip(response.shell_calls, shell_items):
+                commands = call.action.get("commands", [])
+                timeout_ms = call.action.get("timeout_ms", "default")
+                working_directory = call.action.get("working_directory", ".")
+                outcomes = _extract_shell_outcomes(item.get("output"))
+                for idx, command in enumerate(commands):
+                    exit_code, timed_out = outcomes[idx] if idx < len(outcomes) else (None, False)
+                    display.shell_command(
+                        command=command,
+                        exit_code=exit_code,
+                        timed_out=timed_out,
+                        call_id=call.call_id,
+                        working_directory=working_directory,
+                        timeout_ms=timeout_ms,
+                    )
             output_items.extend(shell_items)
 
         if not output_items:
@@ -173,42 +199,14 @@ def _run_tool_iterations(
             stream_output=True,
             instructions=instructions,
             ws_max_retries=ws_max_retries,
+            display=display,
         )
     return response, had_errors
 
 
-def _to_compact_json(value: Any) -> str:
-    try:
-        return _shorten(json.dumps(value, separators=(",", ":"), ensure_ascii=False))
-    except TypeError:
-        return _shorten(str(value))
-
-
-def _shorten(text: str, limit: int = 160) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3] + "..."
-
-
-def _summarize_shell_outcomes(output: Any) -> str:
-    if not isinstance(output, list):
-        return "failed: invalid output format"
-    parts: list[str] = []
-    for chunk in output:
-        if not isinstance(chunk, dict):
-            continue
-        outcome = chunk.get("outcome")
-        if not isinstance(outcome, dict):
-            continue
-        outcome_type = outcome.get("type")
-        if outcome_type == "timeout":
-            parts.append("timeout")
-        elif outcome_type == "exit":
-            parts.append(f"exit={outcome.get('exit_code')}")
-    if not parts:
-        return "completed"
-    return ", ".join(parts)
-
+# ---------------------------------------------------------------------------
+# Request / response helpers
+# ---------------------------------------------------------------------------
 
 def _request_turn(
     *,
@@ -220,6 +218,7 @@ def _request_turn(
     stream_output: bool,
     instructions: str | None,
     ws_max_retries: int,
+    display: Display,
 ) -> CompletedResponse:
     payload = build_response_create_payload(
         model=model,
@@ -232,14 +231,11 @@ def _request_turn(
     last_error: Exception | None = None
     for attempt in range(ws_max_retries + 1):
         if attempt > 0:
-            print(
-                f"retry> websocket transient failure, retrying request "
-                f"({attempt}/{ws_max_retries}) with same previous_response_id"
-            )
+            display.retry_notice(attempt, ws_max_retries)
             ws.reconnect()
         try:
             ws.send_json(payload)
-            return _read_one_response(ws, stream_output=stream_output)
+            return _read_one_response(ws, stream_output=stream_output, display=display)
         except WebSocketClientTransientError as exc:
             # Treat receive/decode failures as transient: reconnect and retry the full
             # request. This favors resiliency over strict "exactly-once" semantics.
@@ -257,6 +253,7 @@ def _read_one_response(
     ws: ResponsesWebSocketClient,
     *,
     stream_output: bool,
+    display: Display,
 ) -> CompletedResponse:
     streamed_text_parts: list[str] = []
 
@@ -269,10 +266,10 @@ def _read_one_response(
             if delta:
                 streamed_text_parts.append(delta)
                 if stream_output:
-                    print(delta, end="", flush=True)
+                    display.stream_delta(delta)
         elif event_type == "response.completed":
             if stream_output:
-                print()
+                display.stream_end()
             return parse_completed_response(event.get("response", {}), streamed_text_parts)
         elif event_type == "error":
             error = event.get("error", {})
@@ -281,9 +278,54 @@ def _read_one_response(
             raise ProtocolError(f"{code}: {message}")
 
 
+# ---------------------------------------------------------------------------
+# Internal utilities
+# ---------------------------------------------------------------------------
+
 def _build_user_input_item(prompt: str) -> dict[str, Any]:
     return {
         "type": "message",
         "role": "user",
         "content": [{"type": "input_text", "text": prompt}],
     }
+
+
+def _find_function_call(calls: list, call_id: str):  # type: ignore[type-arg]
+    """Look up the original ToolCall by call_id."""
+    for c in calls:
+        if c.call_id == call_id:
+            return c
+    return None
+
+
+def _collect_shell_commands(shell_calls: list) -> list[str]:  # type: ignore[type-arg]
+    """Flatten all commands across shell calls for counting."""
+    commands: list[str] = []
+    for call in shell_calls:
+        cmds = call.action.get("commands", [])
+        if isinstance(cmds, list):
+            commands.extend(cmds)
+    return commands
+
+
+def _extract_shell_outcomes(output: Any) -> list[tuple[int | None, bool]]:
+    """Parse shell output into a list of (exit_code, timed_out) tuples."""
+    if not isinstance(output, list):
+        return []
+    results: list[tuple[int | None, bool]] = []
+    for chunk in output:
+        if not isinstance(chunk, dict):
+            results.append((None, False))
+            continue
+        outcome = chunk.get("outcome")
+        if not isinstance(outcome, dict):
+            results.append((None, False))
+            continue
+        outcome_type = outcome.get("type")
+        if outcome_type == "timeout":
+            results.append((None, True))
+        elif outcome_type == "exit":
+            results.append((outcome.get("exit_code"), False))
+        else:
+            results.append((None, False))
+    return results

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "python-dotenv>=1.2.1",
+    "rich>=13.0",
     "websocket-client>=1.9.0",
 ]
 

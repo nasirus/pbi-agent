@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
 
 from pbi_agent.agent.protocol import ProtocolError
 from pbi_agent.agent.session import run_chat_loop, run_single_turn
 from pbi_agent.agent.ws_client import WebSocketClientError
 from pbi_agent.config import ConfigError, resolve_settings
+from pbi_agent.display import Display
 from pbi_agent.log_config import configure_logging
 from pbi_agent.tools.registry import get_tool_spec, get_tool_specs
 
@@ -61,9 +61,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    display = Display(verbose=bool(getattr(args, "verbose", False)))
+
     try:
         settings = resolve_settings(args)
         configure_logging(settings.verbose)
+        display = Display(verbose=settings.verbose)
 
         if args.command == "tools":
             return _handle_tools_command(args)
@@ -72,20 +75,20 @@ def main(argv: list[str] | None = None) -> int:
         LOGGER.debug("Resolved settings: %s", settings.redacted())
 
         if args.command == "run":
-            outcome = run_single_turn(args.prompt, settings)
+            outcome = run_single_turn(args.prompt, settings, display)
             return 4 if outcome.tool_errors else 0
         if args.command == "chat":
-            return run_chat_loop(settings)
+            return run_chat_loop(settings, display)
         parser.error("Unknown command.")
         return 1
     except ConfigError as exc:
-        print(f"Config error: {exc}", file=sys.stderr)
+        display.error(str(exc))
         return 2
     except (WebSocketClientError, ProtocolError) as exc:
-        print(f"WebSocket/protocol error: {exc}", file=sys.stderr)
+        display.error(str(exc))
         return 3
     except Exception as exc:  # pragma: no cover - defensive fallback
-        print(f"Unexpected error: {exc}", file=sys.stderr)
+        display.error(str(exc))
         return 1
 
 
@@ -102,7 +105,7 @@ def _handle_tools_command(args: argparse.Namespace) -> int:
     if args.tools_command == "describe":
         tool = get_tool_spec(args.name)
         if tool is None:
-            print(f"Unknown tool: {args.name}", file=sys.stderr)
+            print(f"Unknown tool: {args.name}")
             return 1
         print(f"name: {tool.name}")
         print(f"description: {tool.description}")
