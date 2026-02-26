@@ -48,7 +48,7 @@ Use `slicer` visual patterns with synced filters (`syncGroup`), clear container 
 
 ```json
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.6.0/schema.json",
+  "$schema": "visual_container_schema_skill",
   "name": "88888888888888888888",
   "position": {
     "x": 350,

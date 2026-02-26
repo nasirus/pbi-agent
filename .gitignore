@@ -11,4 +11,3 @@ wheels/
 .env
 
 report_model/
-report_model_csv/

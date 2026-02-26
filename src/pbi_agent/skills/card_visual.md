@@ -65,7 +65,7 @@ Use PBIR card patterns (`cardVisual` and `card`) with query-correct bindings and
 
 ```json
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.6.0/schema.json",
+  "$schema": "visual_container_schema_skill",
   "name": "55555555555555555555",
   "position": {
     "x": 844,

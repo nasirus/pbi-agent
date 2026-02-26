@@ -56,7 +56,7 @@ Use PBIR bar-chart patterns with `Category` + `Y` roles, selector-scoped colors,
 
 ```json
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.6.0/schema.json",
+  "$schema": "visual_container_schema_skill",
   "name": "cccccccccccccccccccc",
   "position": {
     "x": 20,
