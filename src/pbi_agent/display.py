@@ -274,7 +274,7 @@ class Display:
         inp = f"{usage.input_tokens:,}"
         cached = f"{usage.cached_input_tokens:,}"
         out = f"{usage.output_tokens:,}"
-        cost = f"${usage.estimated_cost_usd:.6f}"
+        cost = f"${usage.estimated_cost_usd:.3f}"
 
         self.console.print()
         self.console.print(

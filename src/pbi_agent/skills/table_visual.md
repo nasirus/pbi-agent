@@ -1,6 +1,6 @@
 # Table Visual
 
-Use PBIR table patterns with `tableEx`, projection ordering, and robust sorting/filter behavior.
+Use PBIR table patterns with `tableEx`, projection ordering, deterministic sort, and high-contrast styling.
 
 ## Required Structure
 
@@ -17,7 +17,36 @@ Use PBIR table patterns with `tableEx`, projection ordering, and robust sorting/
 - Style via:
   - `objects.columnHeaders` (`backColor`, `fontColor`)
   - `objects.grid` (`outlineColor`)
-  - `visualContainerObjects` (`background`, `border`, `dropShadow`).
+  - `visualContainerObjects` (`background`, `border`, `dropShadow`)
+
+## Default Styling Pattern if no instructions given
+
+- Header contrast:
+  - `objects.columnHeaders.backColor` uses theme dark color (often black).
+  - `objects.columnHeaders.fontColor` uses theme light color (often white).
+- Grid lines:
+  - `objects.grid.outlineColor` uses dark neutral (`'#252423'`) or black (`'#000000'`) for clear row separation.
+- Container framing:
+  - `visualContainerObjects.background.show = true`
+  - `visualContainerObjects.background.transparency = 0D`
+  - `visualContainerObjects.border.show = true`
+  - `visualContainerObjects.border.radius = 5D`
+  - `visualContainerObjects.border.width = 2D`
+  - Border color can follow brand accent (`'#B6975A'`)
+- Shadow:
+  - Tables in the example use `visualContainerObjects.dropShadow.show = true`
+  - Use `dropShadow.preset = 'Center'` for subtle depth
+
+## UX/UI Guidance
+
+- Keep a predictable scan path:
+  - Key identifiers first
+  - Status columns next
+  - Numeric measures grouped together
+- Keep the same column order across related pages to reduce user relearning.
+- Avoid excessive column count on operational pages; split into focused tables when needed.
+- Use strong header contrast and moderate grid contrast so dense tables stay readable.
+- Keep table border radius aligned with card/slicer radius for a coherent page style.
 
 ## Minimal PBIR Skeleton
 

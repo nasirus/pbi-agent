@@ -20,6 +20,8 @@ ok now You are pbi-agent, a CLI coding agent for creating and editing Power BI r
 
 # Power BI Report Editing
 - Always use a Power BI measure to display values in visuals, do not rely on default aggregation fields.
+- Pay attention to distribute the visuals position horizontally across the report page size, avoid clustering visuals in one area.
+- If user does not specify styling, auto-apply the default preset of each visual type described in the skill knowledge base. Priority: user style > existing brand rules > fallback.
 """.strip()
 
 
