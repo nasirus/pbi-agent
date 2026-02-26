@@ -60,47 +60,195 @@ Use PBIR card patterns (`cardVisual` and `card`) with query-correct bindings and
 - Keep card states consistent:
   - Same rounding, same border logic, same meaning per color.
 - If a card is purely a status indicator, hide value/label intentionally and rely on fill + tooltip.
-
+- Enable either title or categoryLabels, but not both, to avoid redundant text (prefer categoryLabels by default).
 ## Minimal PBIR Skeleton
 
 ```json
 {
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.6.0/schema.json",
+  "name": "55555555555555555555",
+  "position": {
+    "x": 844,
+    "y": 20,
+    "z": 5,
+    "height": 85,
+    "width": 196
+  },
   "visual": {
-    "visualType": "cardVisual",
+    "visualType": "card",
     "query": {
       "queryState": {
-        "Data": {
+        "Values": {
           "projections": [
             {
               "field": {
                 "Measure": {
-                  "Expression": { "SourceRef": { "Entity": "<measure_table>" } },
-                  "Property": "<metric_name>"
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "MeasuresTable"
+                    }
+                  },
+                  "Property": "MeasureName"
                 }
               },
-              "queryRef": "<measure_table>.<metric_name>"
+              "queryRef": "MeasuresTable.MeasureName",
+              "nativeQueryRef": "MeasureName"
             }
           ]
         }
       }
     },
     "objects": {
-      "label": [
+      "categoryLabels": [
         {
           "properties": {
-            "text": { "expr": { "Literal": { "Value": "'<label_text>'" } } }
-          },
-          "selector": { "metadata": "<measure_table>.<metric_name>" }
-        }
-      ],
-      "value": [
-        {
-          "properties": {
-            "fontSize": { "expr": { "Literal": { "Value": "20D" } } }
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
           }
         }
       ]
-    }
+    },
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Measure Name'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "6D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#C9D4E5'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "dropShadow": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "preset": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "80L"
+                }
+              }
+            },
+            "shadowBlur": {
+              "expr": {
+                "Literal": {
+                  "Value": "10L"
+                }
+              }
+            },
+            "shadowSpread": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "shadowDistance": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "angle": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
   }
 }
 ```

@@ -56,6 +56,15 @@ Use PBIR bar-chart patterns with `Category` + `Y` roles, selector-scoped colors,
 
 ```json
 {
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.6.0/schema.json",
+  "name": "cccccccccccccccccccc",
+  "position": {
+    "x": 20,
+    "y": 240,
+    "z": 20,
+    "height": 460,
+    "width": 1240
+  },
   "visual": {
     "visualType": "clusteredBarChart",
     "query": {
@@ -65,11 +74,17 @@ Use PBIR bar-chart patterns with `Category` + `Y` roles, selector-scoped colors,
             {
               "field": {
                 "Column": {
-                  "Expression": { "SourceRef": { "Entity": "<dimension_table>" } },
-                  "Property": "<category_column>"
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "TableName"
+                    }
+                  },
+                  "Property": "CategoryColumn"
                 }
               },
-              "queryRef": "<dimension_table>.<category_column>"
+              "queryRef": "TableName.CategoryColumn",
+              "nativeQueryRef": "CategoryColumn",
+              "active": true
             }
           ]
         },
@@ -78,23 +93,36 @@ Use PBIR bar-chart patterns with `Category` + `Y` roles, selector-scoped colors,
             {
               "field": {
                 "Measure": {
-                  "Expression": { "SourceRef": { "Entity": "<measure_table>" } },
-                  "Property": "<measure_1>"
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "MeasuresTable"
+                    }
+                  },
+                  "Property": "MeasureName"
                 }
               },
-              "queryRef": "<measure_table>.<measure_1>"
-            },
-            {
-              "field": {
-                "Measure": {
-                  "Expression": { "SourceRef": { "Entity": "<measure_table>" } },
-                  "Property": "<measure_2>"
-                }
-              },
-              "queryRef": "<measure_table>.<measure_2>"
+              "queryRef": "MeasuresTable.MeasureName",
+              "nativeQueryRef": "MeasureName"
             }
           ]
         }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Measure": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "MeasuresTable"
+                  }
+                },
+                "Property": "MeasureName"
+              }
+            },
+            "direction": "Descending"
+          }
+        ]
       }
     },
     "objects": {
@@ -105,16 +133,203 @@ Use PBIR bar-chart patterns with `Category` + `Y` roles, selector-scoped colors,
               "solid": {
                 "color": {
                   "expr": {
-                    "Literal": { "Value": "'#00AA55'" }
+                    "Literal": {
+                      "Value": "'#0E7490'"
+                    }
                   }
                 }
               }
             }
           },
-          "selector": { "metadata": "<measure_table>.<measure_1>" }
+          "selector": {
+            "metadata": "MeasuresTable.MeasureName"
+          }
+        }
+      ],
+      "labels": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "detailLabelPrecision": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "valueAxis": [
+        {
+          "properties": {
+            "showAxisTitle": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
         }
       ]
-    }
+    },
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Measure by Category'"
+                }
+              }
+            },
+            "fontSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "12D"
+                }
+              }
+            },
+            "alignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'center'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "6D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#C9D4E5'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "dropShadow": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "preset": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Center'"
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "80L"
+                }
+              }
+            },
+            "shadowBlur": {
+              "expr": {
+                "Literal": {
+                  "Value": "10L"
+                }
+              }
+            },
+            "shadowSpread": {
+              "expr": {
+                "Literal": {
+                  "Value": "1L"
+                }
+              }
+            },
+            "shadowDistance": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            },
+            "angle": {
+              "expr": {
+                "Literal": {
+                  "Value": "0L"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
   }
 }
 ```

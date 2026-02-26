@@ -14,7 +14,7 @@ Use this when creating or editing semantic model files (`*.tmdl`) in Power BI PB
 ## Recommended Conventions
 
 - Use tab-indented TMDL blocks.
-- Keep dedicated measure tables (zero columns, measures only) when model size grows.
+- Keep dedicated measure tables (zero columns, measures only) when model size grows. Name them `_Measures` (leading underscore) — the bare name `Measures` is reserved by TOM and will break the project.
 - Use parameterized M source code in partitions for environment portability.
 - Set `formatString`, `summarizeBy`, and `dataType` explicitly on business columns/measures.
 - Use `variation Variation` on date columns when date hierarchy experience is required.
@@ -83,7 +83,7 @@ table dim_example
 ## Date Variation Template
 
 ```tmdl
-column asn_creation_date
+column date_column_name
 	dataType: dateTime
 	formatString: Short Date
 	summarizeBy: none
@@ -95,9 +95,30 @@ column asn_creation_date
 		defaultHierarchy: LocalDateTable_<guid>.'Date Hierarchy'
 ```
 
+## Reserved Table Names (Power BI / TOM)
+
+The Tabular Object Model (TOM) reserves certain strings as table names.
+Using them causes Power BI Desktop to reject the PBIP project on load with:
+`The name of the object 'Table' cannot be the reserved string '<name>'.`
+
+**Never use these names for a table:**
+
+| Reserved name | Safe alternative |
+|---------------|-----------------|
+| `Measures`    | `_Measures`     |
+| `Model`       | `_Model`        |
+| `Database`    | `_Database`     |
+| `Server`      | `_Server`       |
+| `DataSource`  | `_DataSource`   |
+| `Role`        | `_Role`         |
+
+When creating a dedicated measures-only table, always use `_Measures` (with a
+leading underscore), never the bare name `Measures`.
+
 ## Common TMDL Mistakes To Avoid
 
 - Do not convert tabs to spaces in nested blocks.
+- Do not use reserved TOM names for tables (see section above).
 - Do not change object names casually (`queryRef`, filters, page bindings depend on them).
 - Do not remove `lineageTag` for existing objects unless you intentionally recreate metadata.
 - Do not change field case or rename measures used in visual JSON without updating all report references.

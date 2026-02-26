@@ -31,9 +31,9 @@ Use `slicer` visual patterns with synced filters (`syncGroup`), clear container 
   - `visualContainerObjects.border.width = 1D` (sometimes `2D` on framed pages)
   - Keep `border.show = false` by default; enable for dedicated filter panels.
   - Keep `dropShadow.show = false` by default; enable only when slicer must read as a floating filter card.
-- Sync groups found in the model:
+- Sync groups examples:
   - Date groups: `date_id`, `date_id1`, `date_id2`
-  - Entity groups: `site_name`, `system_label`
+  - Entity groups: `category_name`, `product_type`, etc.
 
 ## UX/UI Guidance
 
@@ -42,11 +42,21 @@ Use `slicer` visual patterns with synced filters (`syncGroup`), clear container 
 - Use one sync group per field and reuse it globally to avoid filter drift.
 - For Between slicers, optional `startDate`/`endDate` can set intentional default windows.
 - For long dropdown lists, keep slicer width sufficient and prefer searchable dropdown behavior.
+- Use this size by default to prevent cropping: "height": 88, "width": 228.
 
 ## Minimal Date Slicer Skeleton
 
 ```json
 {
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.6.0/schema.json",
+  "name": "88888888888888888888",
+  "position": {
+    "x": 350,
+    "y": 115,
+    "z": 7000,
+    "height": 70,
+    "width": 220
+  },
   "visual": {
     "visualType": "slicer",
     "query": {
@@ -56,24 +66,149 @@ Use `slicer` visual patterns with synced filters (`syncGroup`), clear container 
             {
               "field": {
                 "Column": {
-                  "Expression": { "SourceRef": { "Entity": "<date_table>" } },
-                  "Property": "<date_column>"
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "TableName"
+                    }
+                  },
+                  "Property": "ColumnName"
                 }
               },
-              "queryRef": "<date_table>.<date_column>"
+              "queryRef": "TableName.ColumnName",
+              "nativeQueryRef": "ColumnName",
+              "active": true
             }
           ]
         }
       }
     },
     "objects": {
-      "data": [{ "properties": { "mode": { "expr": { "Literal": { "Value": "'Between'" } } } } }]
+      "data": [
+        {
+          "properties": {
+            "mode": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Dropdown'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "general": [
+        {
+          "properties": {
+            "selfFilterEnabled": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "header": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Friendly Column Name'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "0D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "radius": {
+              "expr": {
+                "Literal": {
+                  "Value": "6D"
+                }
+              }
+            },
+            "width": {
+              "expr": {
+                "Literal": {
+                  "Value": "1D"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#C9D4E5'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "syncGroup": {
-      "groupName": "date_main",
+      "groupName": "sg_column_name",
       "fieldChanges": true,
       "filterChanges": true
-    }
+    },
+    "drillFilterOtherVisuals": true
   }
 }
 ```

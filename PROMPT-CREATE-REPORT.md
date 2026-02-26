@@ -1,11 +1,9 @@
-Analyze the local CSV file at C:\data\sales.csv — inspect its schema, column types, 
-row count, value distributions, and detect any data quality issues (nulls, duplicates, 
-outliers). Then build a complete multi-page Power BI report:
+Analyze the local CSV file and then build a complete multi-page Power BI report:
 
 1. **Data Model**  
    Import the CSV into the semantic model with parameterized file path.  
    Declare explicit column types and create measures for every KPI 
-   (never use default aggregation). Add a dedicated measures table.
+   (never use default aggregation). Add a dedicated measures table named `_Measures` (the bare name "Measures" is reserved and will cause an error).
 
 2. **Landing Page — Executive Summary**  
    - KPI cards across the top row: one card per key numeric metric 
