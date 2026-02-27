@@ -1,27 +1,20 @@
 # oai-ws / pbi-agent
 
-WebSocket-based CLI scaffold for a Power BI editing “coding agent”, built on the **OpenAI Responses WebSocket API**.
+`pbi-agent` is a local CLI foundation for a Power BI editing agent built on the **OpenAI Responses WebSocket API**.
 
-This repository is intentionally a foundation: it wires up configuration, a CLI, a websocket client, and a tool-execution loop (including **parallel tool calls**), but it does **not** ship real Power BI mutation tools yet.
+The project includes:
+- a websocket session loop for Responses API,
+- local tool execution (including parallel tool calls),
+- a bundled PBIP template scaffold,
+- and a skill knowledge base for Power BI editing guidance.
 
-## Features
-
-- **Python package**: `src/pbi_agent`
-- **CLI entrypoint**: `pbi-agent` (also: `python -m pbi_agent`)
-- Agent flows:
-  - **Single-turn**: `pbi-agent run --prompt "..."`
-  - **Interactive**: `pbi-agent chat`
-  - **Audit mode**: `pbi-agent audit [--report-dir <relative-path>]`
-- **Tool execution loop**
-  - Supports OpenAI built-in tool types: `shell`, `apply_patch`
-  - Extensible **function tool registry**: `src/pbi_agent/tools/registry.py`
-  - Parallel-capable execution via `--max-tool-workers`
+It is still a foundation project: it provides the runtime and extensibility points, not a full end-user Power BI product.
 
 ## Requirements
 
 - Python **3.12+**
-- An OpenAI API key in `OPENAI_API_KEY`
-- Recommended: [`uv`](https://github.com/astral-sh/uv) (repo includes `uv.lock`)
+- `OPENAI_API_KEY` set in your environment (or passed by CLI)
+- Recommended: [`uv`](https://github.com/astral-sh/uv)
 
 ## Install
 
@@ -29,90 +22,116 @@ This repository is intentionally a foundation: it wires up configuration, a CLI,
 uv sync
 ```
 
-## Quick start
+## CLI quick start
 
-Show help:
+Show top-level help:
 
 ```bash
 uv run pbi-agent --help
 ```
 
-Single turn:
+Run one prompt turn:
 
 ```bash
-uv run pbi-agent run --prompt "Summarize the tool capabilities of this agent."
+uv run pbi-agent run --prompt "Summarize available tools."
 ```
 
-Interactive:
+Start interactive mode:
 
 ```bash
 uv run pbi-agent chat
 ```
 
-Audit the current report folder and generate a local audit file:
+Run report audit mode (writes `AUDIT-REPORT.md`):
 
 ```bash
 uv run pbi-agent audit
 ```
 
-Audit a report in a relative subfolder:
+Scaffold a PBIP report template in the current directory:
 
 ```bash
-uv run pbi-agent audit --report-dir ./my-report
+uv run pbi-agent init --dest . --force
 ```
 
-`audit` runs with a built-in prompt (no `--prompt` needed) and writes
-`AUDIT-REPORT.md` in the audited report directory.
+Inspect tool registry:
 
-Compatibility runner (thin wrapper kept for convenience):
+```bash
+uv run pbi-agent tools list
+uv run pbi-agent tools describe --name skill_knowledge
+```
+
+Compatibility runner:
 
 ```bash
 uv run python main.py --help
 ```
 
+## Commands
+
+- `run --prompt "..."`: single-turn request.
+- `chat`: interactive REPL loop.
+- `audit [--report-dir <path>]`: runs built-in audit prompt and writes `AUDIT-REPORT.md` to the target report directory.
+- `tools list`: list built-in and function tools.
+- `tools describe --name <tool_name>`: print a tool definition.
+- `init [--dest <path>] [--force]`: copy bundled Power BI template assets.
+
 ## Configuration
 
-Configuration precedence is: **CLI args > environment variables > defaults**.
+Precedence: **CLI args > environment variables > defaults**.
 
 ### CLI options
 
-- `--api-key` (overrides `OPENAI_API_KEY`)
-- `--ws-url` (overrides `PBI_AGENT_WS_URL`, default: `wss://api.openai.com/v1/responses`)
-- `--model` (overrides `PBI_AGENT_MODEL`)
-- `--max-tool-workers` (overrides `PBI_AGENT_MAX_TOOL_WORKERS`, default: `4`)
-- `--ws-max-retries` (overrides `PBI_AGENT_WS_MAX_RETRIES`, default: `2`; applies to transient websocket failures and rate-limit responses)
+- `--api-key`
+- `--model`
+- `--ws-url`
+- `--reasoning-effort` (`low|medium|high|xhigh`)
+- `--max-tool-workers`
+- `--ws-max-retries`
+- `--compact-threshold`
 - `--verbose`
 
 ### Environment variables
 
-- `OPENAI_API_KEY` (required for `run` / `chat` / `audit`)
-- `PBI_AGENT_MODEL` (optional)
-- `PBI_AGENT_WS_URL` (optional)
-- `PBI_AGENT_MAX_TOOL_WORKERS` (optional)
-- `PBI_AGENT_WS_MAX_RETRIES` (optional)
+- `OPENAI_API_KEY` (required for `run`, `chat`, `audit`)
+- `PBI_AGENT_MODEL`
+- `PBI_AGENT_WS_URL`
+- `PBI_AGENT_REASONING_EFFORT`
+- `PBI_AGENT_MAX_TOOL_WORKERS`
+- `PBI_AGENT_WS_MAX_RETRIES`
+- `PBI_AGENT_COMPACT_THRESHOLD`
 
-## Tooling model (how tools work here)
+## Tool model
 
-At runtime the agent advertises tools to the Responses API:
+At runtime, the agent advertises:
 
-- **Built-in tool types**: `shell`, `apply_patch`
-- **Function tools** registered in the local registry
+- built-in tool types: `shell`, `apply_patch`
+- function tools from `src/pbi_agent/tools/registry.py`
 
-When the model returns tool calls, the CLI executes them and feeds results back to the websocket session until the response completes.
+Current bundled function tools include:
 
-### Security model: workspace confinement
+- `skill_knowledge`: loads local Power BI skill docs from `src/pbi_agent/skills/`
+- `init_report`: scaffolds the bundled report template
 
-The built-in `shell` runtime resolves a *workspace root* and rejects `working_directory` values that would escape it (path traversal protection). Treat `shell` as powerful and avoid running the agent on sensitive directories.
+Tool calls returned by the model are executed locally and fed back into the websocket session until completion.
 
-## Adding a new function tool
+## Security notes
 
-1. Create a handler under `src/pbi_agent/tools/` (e.g. `my_tool.py`).
-2. Define a `ToolSpec` and register `(ToolSpec, handler)` in `src/pbi_agent/tools/registry.py`.
-3. Validate locally:
+- The `shell` runtime is workspace-confined and blocks path traversal via `working_directory`.
+- Even with confinement, treat shell execution as powerful and use trusted workspaces.
+
+## Development
+
+Lint and format:
 
 ```bash
-uv run pbi-agent tools list
-uv run pbi-agent tools describe --name <tool_name>
+uvx ruff check . --fix && uvx ruff format .
+```
+
+Project-specific bootstrap command:
+
+```bash
+uv run pbi-agent init --dest . --force
 ```
 
 ## Project layout
@@ -121,18 +140,19 @@ uv run pbi-agent tools describe --name <tool_name>
 .
 ├─ README.md
 ├─ pyproject.toml
-├─ main.py                 # compatibility runner
+├─ main.py
 └─ src/
    └─ pbi_agent/
-      ├─ cli.py            # argparse CLI
-      ├─ config.py         # env/CLI settings resolution
-      ├─ agent/            # websocket session + tool loop
-      ├─ models/           # request/response message models
-      └─ tools/            # tool specs + implementations
+      ├─ cli.py
+      ├─ config.py
+      ├─ agent/        # websocket protocol/session + runtimes
+      ├─ tools/        # function tool specs + handlers
+      ├─ skills/       # Power BI skill markdown knowledge base
+      └─ report/       # bundled PBIP template assets
 ```
 
-## Limits / non-goals (for now)
+## Current limits
 
-- No concrete Power BI edit operations are implemented yet (this is scaffolding).
-- In-memory sessions only.
-- Minimal hardening; no automated test suite in this phase.
+- No automated test suite is configured yet.
+- Foundation-level implementation focused on CLI/runtime scaffolding.
+- Sessions are in-memory.
