@@ -1,32 +1,38 @@
-"""Centralised CLI display layer.
+"""Textual TUI chat interface for PBI Agent.
 
 All user-facing output goes through :class:`Display` so that ``session.py``
-never calls ``print()`` directly.  Two rendering modes are supported:
-
-* **normal** (default) – concise, colour-coded, spinner-enabled output.
-* **verbose** (``--verbose``) – full technical details (call IDs, timeout,
-  working directory, raw JSON args) for debugging.
+never touches widgets directly.  The :class:`ChatApp` is a Textual App that
+owns a Display instance and runs the agent session in a background worker
+thread.  Display methods use ``call_from_thread`` to bridge synchronous
+session code to the async Textual UI.
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import os
+import threading
+from pathlib import Path
 from typing import Any
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.key_binding import KeyBindings
-from rich.console import Console
-from rich.console import Group
-from rich.live import Live
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.rule import Rule
-from rich.spinner import Spinner
-from rich.text import Text
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
+from textual.widget import Widget
+from textual.widgets import (
+    Footer,
+    Header,
+    Input,
+    Markdown as MarkdownWidget,
+    Static,
+)
+from textual import on, work
 
 from pbi_agent import __version__
 from pbi_agent.models.messages import TokenUsage
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +43,7 @@ from pbi_agent.models.messages import TokenUsage
 def _shorten(text: str, limit: int = 80) -> str:
     if len(text) <= limit:
         return text
-    return text[: limit - 1] + "…"
+    return text[: limit - 1] + "\u2026"
 
 
 def _compact_json(value: Any) -> str:
@@ -47,41 +53,183 @@ def _compact_json(value: Any) -> str:
         return str(value)
 
 
+def _escape_markup_text(text: str) -> str:
+    """Escape literal '[' so dynamic values can't break Rich markup parsing."""
+    return text.replace("[", r"\[")
+
+
 # ---------------------------------------------------------------------------
-# Display
+# Custom widgets
+# ---------------------------------------------------------------------------
+
+
+class WelcomeBanner(Static):
+    """Welcome banner with PBI Agent branding."""
+
+    def __init__(
+        self,
+        *,
+        interactive: bool = True,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
+        single_turn_hint: str | None = None,
+    ) -> None:
+        logo_rows = [
+            "              \u2588\u2588\u2588\u2588",
+            "              \u2588\u2588\u2588\u2588",
+            "        \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588",
+            "        \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588",
+            "  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588",
+            "  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588",
+        ]
+        lines: list[str] = []
+        lines.append(f"[bold #F2C811]{''.join(logo_rows[0])}[/bold #F2C811]")
+        for row in logo_rows[1:]:
+            lines.append(f"[bold #F2C811]{row}[/bold #F2C811]")
+        lines.append("")
+        lines.append("[bold #F2C811]PBI AGENT[/bold #F2C811]")
+        lines.append("[bold]Transform data into decisions.[/bold]")
+        lines.append("")
+
+        if interactive:
+            lines.append(
+                "[dim]Interactive mode:[/dim] Type [bold]exit[/bold] or "
+                "[bold]quit[/bold] to stop."
+            )
+            lines.append("[dim]Enter[/dim] to submit")
+        elif single_turn_hint:
+            cleaned = single_turn_hint
+            for tag in (
+                "[dim]",
+                "[/dim]",
+                "[bold]",
+                "[/bold]",
+            ):
+                cleaned = cleaned.replace(tag, "")
+            lines.append(cleaned)
+        else:
+            lines.append("Single prompt mode: Running one request.")
+
+        if model or reasoning_effort:
+            parts: list[str] = []
+            if model:
+                parts.append(f"Model: [bold]{model}[/bold]")
+            if reasoning_effort:
+                parts.append(f"Reasoning: [bold]{reasoning_effort}[/bold]")
+            lines.append("[dim]\u00b7[/dim]  ".join(parts))
+
+        lines.append(f"[dim]v{__version__}[/dim]")
+        super().__init__("\n".join(lines))
+
+
+class UserMessage(Static):
+    """User message bubble."""
+
+    def __init__(self, text: str, **kwargs: Any) -> None:
+        super().__init__(f"[bold green]You[/bold green]  {text}", **kwargs)
+
+
+class AssistantMarkdown(MarkdownWidget):
+    """Markdown widget for assistant responses."""
+
+
+class ThinkingIndicator(Static):
+    """Animated thinking indicator."""
+
+    def __init__(self, message: str = "Thinking", **kwargs: Any) -> None:
+        super().__init__("", **kwargs)
+        self._message = message
+        self._frame = 0
+        self._frames = ["   ", ".  ", ".. ", "..."]
+
+    def on_mount(self) -> None:
+        self.set_interval(0.4, self._tick)
+
+    def _tick(self) -> None:
+        self._frame = (self._frame + 1) % len(self._frames)
+        self.update(
+            f"[bold cyan]{self._message}{self._frames[self._frame]}[/bold cyan]"
+        )
+
+
+class ToolGroup(Vertical):
+    """Container for tool execution items."""
+
+
+class ToolHeader(Static):
+    """Header for a tool group."""
+
+
+class ToolItem(Static):
+    """Individual tool execution result."""
+
+
+class UsageSummary(Static):
+    """Token usage summary bar."""
+
+
+class ErrorMessage(Static):
+    """Error message display."""
+
+
+class NoticeMessage(Static):
+    """Notice/warning message."""
+
+
+# ---------------------------------------------------------------------------
+# Display bridge  (synchronous API consumed by session.py)
 # ---------------------------------------------------------------------------
 
 
 class Display:
-    """Single entry-point for every piece of CLI output."""
+    """Sync bridge between session code and the Textual App.
 
-    def __init__(self, *, verbose: bool = False) -> None:
-        self.console = Console(highlight=False)
+    Every public method in this class is safe to call from a non-UI thread.
+    Internally each call uses ``app.call_from_thread`` to schedule the
+    corresponding widget update on the main Textual thread.
+    """
+
+    def __init__(self, app: ChatApp, *, verbose: bool = False) -> None:
+        self.app = app
         self.verbose = verbose
         self._stream_parts: list[str] = []
-        self._live: Live | None = None
-        self._wait_live: Live | None = None
-        self._prompt_session: PromptSession[str] | None = None
-        self._prompt_session_unavailable = False
+        self._thinking_id: str | None = None
+        self._current_msg_id: str | None = None
+        self._msg_counter = 0
+        self._pending_group_label: str = ""
+        self._pending_group_items: list[str] = []
+        self._input_event = threading.Event()
+        self._input_value = ""
+        self._shutdown = threading.Event()
 
-    def _ensure_prompt_session(self) -> None:
-        if self._prompt_session is not None or self._prompt_session_unavailable:
-            return
+    # -- internal helpers ---------------------------------------------------
 
-        # Multi-line prompt: Enter submits, Alt+Enter inserts a newline.
-        kb = KeyBindings()
-        kb.add("enter")(lambda event: event.current_buffer.validate_and_handle())
-        kb.add("escape", "enter")(lambda event: event.current_buffer.insert_text("\n"))
+    def _next_id(self, prefix: str = "w") -> str:
+        self._msg_counter += 1
+        return f"{prefix}-{self._msg_counter}"
 
+    def _safe_call(self, callback: Any, *args: Any, **kwargs: Any) -> Any:
+        """Call a method on the app from a worker thread, swallowing errors
+        that occur when the app has already shut down."""
         try:
-            self._prompt_session = PromptSession(
-                key_bindings=kb,
-                multiline=True,
-            )
+            return self.app.call_from_thread(callback, *args, **kwargs)
         except Exception:
-            # Some environments (non-console Windows hosts) can't initialize
-            # prompt_toolkit output. Fall back to standard single-line input.
-            self._prompt_session_unavailable = True
+            _log.debug(
+                "_safe_call failed for %s: %s",
+                getattr(callback, "__name__", callback),
+                __import__("traceback").format_exc(),
+            )
+            return None
+
+    def request_shutdown(self) -> None:
+        """Signal the Display to unblock any waiting prompt and stop."""
+        self._shutdown.set()
+        self._input_event.set()
+
+    def submit_input(self, value: str) -> None:
+        """Called from the UI thread when user submits input."""
+        self._input_value = value
+        self._input_event.set()
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -93,213 +241,129 @@ class Display:
         reasoning_effort: str | None = None,
         single_turn_hint: str | None = None,
     ) -> None:
-        logo = Text(justify="center")
-        bar_1 = "#F6E27A"
-        bar_2 = "#F2C811"
-        bar_3 = "#D89216"
-        empty = "  "
-        bar = "████"
-
-        rows = [
-            (False, False, True),
-            (False, False, True),
-            (False, True, True),
-            (False, True, True),
-            (True, True, True),
-            (True, True, True),
-        ]
-
-        for index, (show_1, show_2, show_3) in enumerate(rows):
-            logo.append((bar if show_1 else " " * len(bar)), style=bar_1)
-            logo.append(empty)
-            logo.append((bar if show_2 else " " * len(bar)), style=bar_2)
-            logo.append(empty)
-            logo.append((bar if show_3 else " " * len(bar)), style=bar_3)
-            if index < len(rows) - 1:
-                logo.append("\n")
-
-        title = Text("PBI AGENT", style="bold #F2C811", justify="center")
-        subtitle = Text(
-            "Transform data into decisions.", style="bold white", justify="center"
-        )
-        if interactive:
-            tips = Text.from_markup(
-                "[dim]Interactive mode:[/dim] Type [bold]exit[/bold] or [bold]quit[/bold] to stop.\n"
-                "[dim]Alt+Enter[/dim] for new line · [dim]Enter[/dim] to submit.",
-                justify="center",
-            )
-        else:
-            single_turn_markup = (
-                single_turn_hint
-                if single_turn_hint is not None
-                else "[dim]Single prompt mode:[/dim] Running one request from [bold]--prompt[/bold]."
-            )
-            tips = Text.from_markup(
-                single_turn_markup,
-                justify="center",
-            )
-        model_bits: list[str] = []
-        if model:
-            model_bits.append(f"[dim]Model:[/dim] [bold]{model}[/bold]")
-        if reasoning_effort:
-            model_bits.append(f"[dim]Reasoning:[/dim] [bold]{reasoning_effort}[/bold]")
-        model_line = (
-            Text.from_markup("  [dim]·[/dim]  ".join(model_bits), justify="center")
-            if model_bits
-            else None
-        )
-
-        panel_width = min(72, max(54, self.console.size.width - 4))
-        self.console.print(
-            Panel(
-                Group(logo, Text(""), title, subtitle, tips, model_line)
-                if model_line
-                else Group(logo, Text(""), title, subtitle, tips),
-                width=panel_width,
-                border_style="#F2C811",
-                title=f"[bold #F2C811]Welcome[/bold #F2C811] [dim]v{__version__}[/dim]",
-                subtitle="[dim]Power BI Report Assistant[/dim]",
-                padding=(1, 2),
+        self._safe_call(
+            self.app.mount_widget,
+            WelcomeBanner(
+                interactive=interactive,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                single_turn_hint=single_turn_hint,
             ),
-            justify="center",
         )
-        self.console.print()
 
     def user_prompt(self) -> str:
-        """Display the prompt and return user input (blocking).
+        """Block the worker thread until the user submits input.
 
-        Supports multi-line editing: press **Alt+Enter** to insert a new
-        line, and **Enter** to submit the prompt.
+        Returns ``"exit"`` if the app is shutting down.
         """
-        self._ensure_prompt_session()
-        if self._prompt_session is not None:
-            return self._prompt_session.prompt(
-                HTML("<ansigreen><b>&gt;</b></ansigreen> "),
-            )
-        return self.console.input("[bold green]>[/bold green] ")
+        self._input_event.clear()
+        self._safe_call(self.app.enable_input)
+        # Wait with periodic checks so Ctrl+Q / app shutdown is honoured.
+        while True:
+            if self._input_event.wait(timeout=0.5):
+                break
+            if self._shutdown.is_set():
+                return "exit"
+        if self._shutdown.is_set():
+            return "exit"
+        return self._input_value
 
     # -- assistant streaming ------------------------------------------------
 
     def assistant_start(self) -> None:
-        """Visual separator before the assistant response."""
-        self.console.print()
+        """Visual separator before the assistant response (no-op in TUI)."""
 
     def wait_start(self, message: str = "model is processing your request...") -> None:
-        """Show a transient waiting spinner until output starts arriving."""
-        if self._wait_live is not None or self._live is not None:
+        """Show a transient thinking indicator."""
+        if self._thinking_id is not None:
             return
-
-        spinner = Spinner(
-            "dots12",
-            text=Text.from_markup(
-                f"[bold cyan]Thinking[/bold cyan] [dim]{message}[/dim]"
-            ),
-            style="cyan",
+        tid = self._next_id("think")
+        self._thinking_id = tid
+        self._safe_call(
+            self.app.mount_widget,
+            ThinkingIndicator(message=message.rstrip("."), id=tid),
         )
-        self._wait_live = Live(
-            Panel(
-                spinner,
-                border_style="cyan",
-                padding=(0, 1),
-                title="[cyan]PBI Agent[/cyan]",
-            ),
-            console=self.console,
-            refresh_per_second=12,
-            transient=True,
-        )
-        self._wait_live.start()
 
     def wait_stop(self) -> None:
-        if self._wait_live is not None:
-            self._wait_live.stop()
-            self._wait_live = None
+        if self._thinking_id is not None:
+            self._safe_call(self.app.remove_widget, self._thinking_id)
+            self._thinking_id = None
 
     def stream_delta(self, delta: str) -> None:
-        """Append a streaming token and update the live Markdown preview.
-
-        Uses ``transient=True`` so the live preview is removed from the
-        terminal when streaming ends.  The default ``vertical_overflow``
-        (``"ellipsis"``) keeps the preview clipped to the terminal height,
-        which avoids the duplication bug caused by ``"visible"`` overflow
-        when content exceeded the viewport.
-        """
+        """Append a streamed token and update the live Markdown widget."""
         self.wait_stop()
         self._stream_parts.append(delta)
-        if self._live is None:
-            self._live = Live(
-                Markdown(""),
-                console=self.console,
-                refresh_per_second=8,
-                transient=True,
-            )
-            self._live.start()
         text = "".join(self._stream_parts)
-        self._live.update(Markdown(text))
+
+        if self._current_msg_id is None:
+            mid = self._next_id("assistant")
+            self._current_msg_id = mid
+            self._safe_call(
+                self.app.mount_widget,
+                AssistantMarkdown("", id=mid),
+            )
+
+        self._safe_call(self.app.update_markdown, self._current_msg_id, text)
 
     def stream_end(self) -> None:
-        """Stop the transient live preview and print the final Markdown.
-
-        The ``transient=True`` live display is cleared automatically when
-        stopped, then the full accumulated text is rendered once as
-        formatted Markdown via ``console.print``.
-        """
+        """Finalise the streamed Markdown widget."""
         self.wait_stop()
         text = "".join(self._stream_parts)
-        if self._live is not None:
-            self._live.stop()
-            self._live = None
-        if text.strip():
-            self.console.print(Markdown(text))
+        if self._current_msg_id and text.strip():
+            self._safe_call(
+                self.app.update_markdown,
+                self._current_msg_id,
+                text,
+            )
         self._stream_parts = []
+        self._current_msg_id = None
 
     def stream_abort(self) -> None:
-        """Stop active waiting/stream rendering without printing final text."""
+        """Stop active waiting/streaming without printing final text."""
         self.wait_stop()
-        if self._live is not None:
-            self._live.stop()
-            self._live = None
+        if self._current_msg_id:
+            self._safe_call(self.app.remove_widget, self._current_msg_id)
         self._stream_parts = []
+        self._current_msg_id = None
 
     def render_markdown(self, text: str) -> None:
         """Render a completed response as Markdown (single-turn mode)."""
-        self.console.print()
-        self.console.print(Markdown(text))
+        mid = self._next_id("md")
+        self._safe_call(
+            self.app.mount_widget,
+            AssistantMarkdown(text, id=mid),
+        )
 
     def session_usage(self, usage: TokenUsage, elapsed_seconds: float) -> None:
-        """Show cumulative session usage and estimated cost in a single row."""
-        # Format elapsed time
+        """Show cumulative session usage and estimated cost."""
         total_secs = int(elapsed_seconds)
         hours, remainder = divmod(total_secs, 3600)
         minutes, seconds = divmod(remainder, 60)
-        if hours > 0:
-            time_str = f"{hours}:{minutes:02d}:{seconds:02d}"
-        else:
-            time_str = f"{minutes}:{seconds:02d}"
-
+        time_str = (
+            f"{hours}:{minutes:02d}:{seconds:02d}"
+            if hours > 0
+            else f"{minutes}:{seconds:02d}"
+        )
         total = f"{usage.total_tokens:,}"
         inp = f"{usage.input_tokens:,}"
         cached = f"{usage.cached_input_tokens:,}"
         out = f"{usage.output_tokens:,}"
         cost = f"${usage.estimated_cost_usd:.3f}"
-
-        self.console.print()
-        self.console.print(
-            Rule(
-                f" {total} tokens [dim]([/dim]{inp} in [dim]·[/dim] {cached} cached [dim]·[/dim] {out} out[dim])[/dim]"
-                f"  [dim]|[/dim]  {cost}"
-                f"  [dim]|[/dim]  {time_str} ",
-                style="dim",
-            )
+        text = (
+            f"[dim]{total} tokens[/dim]  "
+            f"({inp} in [dim]\u00b7[/dim] {cached} cached [dim]\u00b7[/dim] {out} out)"
+            f"  [dim]|[/dim]  {cost}"
+            f"  [dim]|[/dim]  {time_str}"
         )
-        self.console.print()
+        uid = self._next_id("usage")
+        self._safe_call(self.app.mount_widget, UsageSummary(text, id=uid))
 
     # -- tool: shell --------------------------------------------------------
 
     def shell_start(self, commands: list[str]) -> None:
         n = len(commands)
-        label = f"Running {n} shell command{'s' if n != 1 else ''}"
-        self.console.print()
-        self.console.print(Rule(label, style="cyan"))
+        self._pending_group_label = f"Running {n} shell command{'s' if n != 1 else ''}"
+        self._pending_group_items = []
 
     def shell_command(
         self,
@@ -311,13 +375,7 @@ class Display:
         working_directory: str = ".",
         timeout_ms: int | str = "default",
     ) -> None:
-        cmd_short = _shorten(command, 72)
-
-        if self.verbose:
-            meta = f"  [dim]({call_id}) wd={working_directory} timeout_ms={timeout_ms}[/dim]"
-        else:
-            meta = ""
-
+        cmd_short = _escape_markup_text(_shorten(command, 72))
         if timed_out:
             status = "[yellow]timeout[/yellow]"
         elif exit_code == 0:
@@ -325,14 +383,21 @@ class Display:
         else:
             status = f"[red]exit {exit_code}[/red]"
 
-        self.console.print(f"  [dim]$[/dim] {cmd_short}  {status}{meta}")
+        meta = ""
+        if self.verbose:
+            meta = (
+                f"  [dim]({_escape_markup_text(call_id)}) "
+                f"wd={_escape_markup_text(str(working_directory))} "
+                f"timeout_ms={_escape_markup_text(str(timeout_ms))}[/dim]"
+            )
+        text = f"[dim]$[/dim] {cmd_short}  {status}{meta}"
+        self._pending_group_items.append(text)
 
     # -- tool: apply_patch --------------------------------------------------
 
     def patch_start(self, count: int) -> None:
-        label = f"Editing {count} file{'s' if count != 1 else ''}"
-        self.console.print()
-        self.console.print(Rule(label, style="cyan"))
+        self._pending_group_label = f"Editing {count} file{'s' if count != 1 else ''}"
+        self._pending_group_items = []
 
     def patch_result(
         self,
@@ -343,25 +408,26 @@ class Display:
         call_id: str = "",
         detail: str = "",
     ) -> None:
-        icon = "[green]done[/green]" if success else "[red]failed[/red]"
-
+        operation_safe = _escape_markup_text(operation)
+        path_safe = _escape_markup_text(path)
+        icon = "[green]done[/green]" if success else "[red]FAILED[/red]"
+        extra = ""
         if self.verbose:
-            extra = f"  [dim]({call_id})[/dim]"
+            extra = f"  [dim]({_escape_markup_text(call_id)})[/dim]"
             if detail:
-                extra += f"  [dim]{_shorten(detail, 100)}[/dim]"
-        else:
-            extra = ""
-            if not success and detail:
-                extra = f"  [dim]{_shorten(detail, 60)}[/dim]"
-
-        self.console.print(f"  {operation} [bold]{path}[/bold]  {icon}{extra}")
+                extra += f"  [dim]{_escape_markup_text(_shorten(detail, 100))}[/dim]"
+        elif not success and detail:
+            extra = f"  [dim]{_escape_markup_text(_shorten(detail, 60))}[/dim]"
+        text = f"{operation_safe} [bold]{path_safe}[/bold]  {icon}{extra}"
+        self._pending_group_items.append(text)
 
     # -- tool: function -----------------------------------------------------
 
     def function_start(self, count: int) -> None:
-        label = f"Calling {count} function{'s' if count != 1 else ''}"
-        self.console.print()
-        self.console.print(Rule(label, style="cyan"))
+        self._pending_group_label = (
+            f"Calling {count} function{'s' if count != 1 else ''}"
+        )
+        self._pending_group_items = []
 
     def function_result(
         self,
@@ -371,29 +437,41 @@ class Display:
         call_id: str = "",
         arguments: Any = None,
     ) -> None:
-        icon = "[green]done[/green]" if success else "[red]failed[/red]"
-
+        name_safe = _escape_markup_text(name)
+        icon = "[green]done[/green]" if success else "[red]FAILED[/red]"
         if self.verbose:
-            args_str = _shorten(_compact_json(arguments), 120)
-            self.console.print(
-                f"  {name}()  {icon}  [dim]({call_id}) args={args_str}[/dim]"
+            args_str = _escape_markup_text(_shorten(_compact_json(arguments), 120))
+            text = (
+                f"{name_safe}()  {icon}  [dim]({_escape_markup_text(call_id)}) "
+                f"args={args_str}[/dim]"
             )
         else:
-            self.console.print(f"  {name}()  {icon}")
+            text = f"{name_safe}()  {icon}"
+        self._pending_group_items.append(text)
 
     # -- tool group end (shared) -------------------------------------------
 
     def tool_group_end(self) -> None:
-        """Print a closing rule and a blank line after a tool group."""
-        self.console.print(Rule(style="dim"))
-        self.console.print()
+        """Flush buffered tool items as a complete tool group widget."""
+        if self._pending_group_items:
+            gid = self._next_id("tg")
+            self._safe_call(
+                self.app.mount_tool_group,
+                gid,
+                self._pending_group_label,
+                list(self._pending_group_items),
+            )
+        self._pending_group_label = ""
+        self._pending_group_items = []
 
     # -- retries / errors ---------------------------------------------------
 
     def retry_notice(self, attempt: int, max_retries: int) -> None:
         self.wait_stop()
-        self.console.print(
-            f"[yellow]  Reconnecting… ({attempt}/{max_retries})[/yellow]"
+        nid = self._next_id("notice")
+        self._safe_call(
+            self.app.mount_widget,
+            NoticeMessage(f"Reconnecting\u2026 ({attempt}/{max_retries})", id=nid),
         )
 
     def rate_limit_notice(
@@ -405,20 +483,298 @@ class Display:
     ) -> None:
         self.wait_stop()
         wait_display = f"{wait_seconds:.2f}".rstrip("0").rstrip(".")
-        self.console.print(
-            "[yellow]"
-            f"  Rate limit reached. Retrying in {wait_display}s "
-            f"({attempt}/{max_retries})"
-            "[/yellow]"
+        nid = self._next_id("notice")
+        self._safe_call(
+            self.app.mount_widget,
+            NoticeMessage(
+                f"Rate limit reached. Retrying in {wait_display}s "
+                f"({attempt}/{max_retries})",
+                id=nid,
+            ),
         )
 
     def error(self, message: str) -> None:
         self.stream_abort()
-        self.console.print(f"[bold red]Error:[/bold red] {message}")
-
-    # -- verbose-only technical dump ----------------------------------------
+        eid = self._next_id("err")
+        self._safe_call(
+            self.app.mount_widget,
+            ErrorMessage(f"Error: {message}", id=eid),
+        )
 
     def debug(self, message: str) -> None:
         """Print only when ``--verbose`` is active."""
         if self.verbose:
-            self.console.print(f"[dim]{message}[/dim]")
+            did = self._next_id("dbg")
+            self._safe_call(
+                self.app.mount_widget,
+                Static(f"[dim]{message}[/dim]", id=did, classes="debug-msg"),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Textual App
+# ---------------------------------------------------------------------------
+
+
+class ChatApp(App):
+    """Textual TUI for PBI Agent."""
+
+    TITLE = "PBI Agent"
+    SUB_TITLE = f"v{__version__}  \u00b7  Power BI Report Assistant"
+
+    CSS = """
+    Screen {
+        background: $surface;
+    }
+
+    /* ---- chat log ---- */
+    #chat-log {
+        height: 1fr;
+        padding: 0 1;
+    }
+
+    /* ---- welcome ---- */
+    WelcomeBanner {
+        text-align: center;
+        padding: 1 2;
+        margin: 1 6;
+        border: tall #F2C811;
+        background: $boost;
+    }
+
+    /* ---- user message ---- */
+    UserMessage {
+        margin: 1 1 0 12;
+        padding: 1 2;
+        background: $primary 15%;
+        border-left: thick $success;
+    }
+
+    /* ---- assistant response ---- */
+    AssistantMarkdown {
+        margin: 1 12 0 1;
+        padding: 0 2;
+    }
+
+    /* ---- thinking ---- */
+    ThinkingIndicator {
+        margin: 0 12 0 1;
+        padding: 0 2;
+        color: $text-muted;
+    }
+
+    /* ---- tool groups ---- */
+    ToolGroup {
+        margin: 1 4;
+        padding: 1 2;
+        height: auto;
+        border: round $accent;
+        background: $boost;
+        border-title-color: $accent;
+        border-title-style: bold;
+    }
+    ToolItem {
+        padding-left: 2;
+    }
+
+    /* ---- usage summary ---- */
+    UsageSummary {
+        text-align: center;
+        color: $text-muted;
+        padding: 1 0;
+        margin: 0 4;
+    }
+
+    /* ---- error / notice ---- */
+    ErrorMessage {
+        color: $error;
+        text-style: bold;
+        margin: 1 4;
+        padding: 1 2;
+        border: round $error;
+    }
+    NoticeMessage {
+        color: $warning;
+        margin: 0 4;
+        padding: 0 2;
+    }
+    .debug-msg {
+        color: $text-muted;
+        margin: 0 4;
+    }
+
+    /* ---- input ---- */
+    #user-input {
+        dock: bottom;
+        margin: 0 2 1 2;
+    }
+    #user-input:disabled {
+        opacity: 0.5;
+    }
+    """
+
+    BINDINGS = [
+        Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("ctrl+c", "quit", "Quit", show=False),
+    ]
+
+    def __init__(
+        self,
+        *,
+        settings: Any,
+        verbose: bool = False,
+        mode: str = "chat",
+        prompt: str | None = None,
+        audit_report_dir: Path | None = None,
+        single_turn_hint: str | None = None,
+    ) -> None:
+        super().__init__()
+        self._settings = settings
+        self._verbose = verbose
+        self._mode = mode
+        self._prompt = prompt
+        self._audit_report_dir = audit_report_dir
+        self._single_turn_hint = single_turn_hint
+        self._bridge: Display | None = None
+        self.exit_code: int = 0
+
+    # -- compose / mount ----------------------------------------------------
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield VerticalScroll(id="chat-log")
+        yield Input(
+            placeholder="Type your message\u2026  (Enter to send, Ctrl+Q to quit)",
+            id="user-input",
+            disabled=True,
+        )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._bridge = Display(app=self, verbose=self._verbose)
+        self._run_session()
+
+    # -- session worker -----------------------------------------------------
+
+    @work(thread=True, exclusive=True)
+    def _run_session(self) -> None:
+        # Lazy imports avoid circular dependencies.
+        from pbi_agent.agent.session import run_chat_loop, run_single_turn
+
+        display = self._bridge
+        assert display is not None
+
+        try:
+            if self._mode == "chat":
+                rc = run_chat_loop(self._settings, display)
+            elif self._mode == "run":
+                assert self._prompt is not None
+                outcome = run_single_turn(
+                    self._prompt,
+                    self._settings,
+                    display,
+                    single_turn_hint=self._single_turn_hint,
+                )
+                rc = 4 if outcome.tool_errors else 0
+            elif self._mode == "audit":
+                from pbi_agent.agent.audit_prompt import copy_audit_todo
+
+                assert self._prompt is not None
+                if self._audit_report_dir:
+                    os.chdir(self._audit_report_dir)
+                    copy_audit_todo(self._audit_report_dir)
+                outcome = run_single_turn(
+                    self._prompt,
+                    self._settings,
+                    display,
+                    single_turn_hint=self._single_turn_hint,
+                )
+                rc = 4 if outcome.tool_errors else 0
+            else:
+                rc = 0
+
+            self.exit_code = rc
+        except SystemExit:
+            pass
+        except Exception as exc:
+            if display:
+                display.error(str(exc))
+            self.exit_code = 1
+        finally:
+            try:
+                self.call_from_thread(self.exit)
+            except Exception:
+                pass
+
+    # -- UI update helpers (called via call_from_thread) --------------------
+
+    async def mount_widget(self, widget: Widget) -> None:
+        """Mount a widget into the chat log and scroll to it."""
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+        await chat_log.mount(widget)
+        chat_log.scroll_end(animate=False)
+
+    def remove_widget(self, widget_id: str) -> None:
+        """Remove a widget by its ID (silently ignores missing widgets)."""
+        try:
+            widget = self.query_one(f"#{widget_id}")
+            widget.remove()
+        except Exception:
+            pass
+
+    async def update_markdown(self, widget_id: str, text: str) -> None:
+        """Update the content of a Markdown widget."""
+        try:
+            widget = self.query_one(f"#{widget_id}", AssistantMarkdown)
+            await widget.update(text)
+            self.query_one("#chat-log", VerticalScroll).scroll_end(animate=False)
+        except Exception:
+            pass
+
+    def enable_input(self) -> None:
+        """Enable the input field and give it focus."""
+        inp = self.query_one("#user-input", Input)
+        inp.disabled = False
+        inp.focus()
+
+    def disable_input(self) -> None:
+        """Disable the input field."""
+        inp = self.query_one("#user-input", Input)
+        inp.disabled = True
+
+    async def mount_tool_group(
+        self, group_id: str, label: str, items: list[str]
+    ) -> None:
+        """Mount a complete tool group with all items in one DOM operation."""
+        children = [ToolItem(text) for text in items]
+        group = ToolGroup(*children, id=group_id)
+        group.border_title = label
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+        await chat_log.mount(group)
+        chat_log.scroll_end(animate=False)
+
+    def add_user_message(self, text: str) -> None:
+        """Synchronously add a user message bubble to the chat log."""
+        chat_log = self.query_one("#chat-log", VerticalScroll)
+        chat_log.mount(UserMessage(text))
+        chat_log.scroll_end(animate=False)
+
+    # -- event handlers -----------------------------------------------------
+
+    @on(Input.Submitted, "#user-input")
+    def handle_input_submitted(self, event: Input.Submitted) -> None:
+        """Forward user input to the session worker thread."""
+        value = event.value.strip()
+        if not value:
+            return
+        event.input.value = ""
+        event.input.disabled = True
+        self.add_user_message(value)
+        if self._bridge is not None:
+            self._bridge.submit_input(value)
+
+    def action_quit(self) -> None:
+        """Handle Ctrl+Q / Ctrl+C gracefully."""
+        if self._bridge is not None:
+            self._bridge.request_shutdown()
+        self.exit()

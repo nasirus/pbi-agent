@@ -3,21 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 
-from contextlib import chdir
 from pathlib import Path
 
-from pbi_agent.agent.audit_prompt import (
-    AUDIT_REPORT_FILENAME,
-    AUDIT_TODO_FILENAME,
-    build_audit_prompt,
-    copy_audit_todo,
-)
-from pbi_agent.agent.protocol import ProtocolError
-from pbi_agent.agent.session import run_chat_loop, run_single_turn
-from pbi_agent.agent.ws_client import WebSocketClientError
 from pbi_agent.config import ConfigError, Settings, resolve_settings
-from pbi_agent.display import Display
 from pbi_agent.init_command import init_report
 from pbi_agent.log_config import configure_logging
 from pbi_agent.tools.registry import get_tool_spec, get_tool_specs
@@ -111,40 +101,113 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    display = Display(verbose=bool(getattr(args, "verbose", False)))
+    # ---- commands that don't need settings or the TUI ----
+
+    if args.command == "tools":
+        return _handle_tools_command(args)
+
+    if args.command == "init":
+        return _handle_init_command(args)
+
+    # ---- resolve settings for interactive/session commands ----
 
     try:
         settings = resolve_settings(args)
         configure_logging(settings.verbose)
-        display = Display(verbose=settings.verbose)
-
-        if args.command == "tools":
-            return _handle_tools_command(args)
-
-        if args.command == "init":
-            return _handle_init_command(args, display)
-
         settings.validate()
-        LOGGER.debug("Resolved settings: %s", settings.redacted())
-
-        if args.command == "run":
-            outcome = run_single_turn(args.prompt, settings, display)
-            return 4 if outcome.tool_errors else 0
-        if args.command == "chat":
-            return run_chat_loop(settings, display)
-        if args.command == "audit":
-            return _handle_audit_command(args, settings, display)
-        parser.error("Unknown command.")
-        return 1
     except ConfigError as exc:
-        display.error(str(exc))
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
-    except (WebSocketClientError, ProtocolError) as exc:
-        display.error(str(exc))
-        return 3
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        display.error(str(exc))
+
+    LOGGER.debug("Resolved settings: %s", settings.redacted())
+
+    if args.command == "run":
+        return _handle_run_command(args, settings)
+
+    if args.command == "chat":
+        return _handle_chat_command(settings)
+
+    if args.command == "audit":
+        return _handle_audit_command(args, settings)
+
+    parser.error("Unknown command.")
+    return 1
+
+
+# ---------------------------------------------------------------------------
+# Command handlers
+# ---------------------------------------------------------------------------
+
+
+def _handle_chat_command(settings: Settings) -> int:
+    from pbi_agent.display import ChatApp
+
+    app = ChatApp(settings=settings, verbose=settings.verbose)
+    app.run()
+    return app.exit_code
+
+
+def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
+    from pbi_agent.display import ChatApp
+
+    app = ChatApp(
+        settings=settings,
+        verbose=settings.verbose,
+        mode="run",
+        prompt=args.prompt,
+    )
+    app.run()
+    return app.exit_code
+
+
+def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
+    from pbi_agent.agent.audit_prompt import (
+        AUDIT_REPORT_FILENAME,
+        AUDIT_TODO_FILENAME,
+        build_audit_prompt,
+    )
+    from pbi_agent.display import ChatApp
+
+    report_dir_input = args.report_dir or Path(".")
+    report_dir = (Path.cwd() / report_dir_input).resolve()
+
+    if not report_dir.exists():
+        print(f"Error: Report directory does not exist: {report_dir}", file=sys.stderr)
         return 1
+    if not report_dir.is_dir():
+        print(f"Error: Report path is not a directory: {report_dir}", file=sys.stderr)
+        return 1
+
+    app = ChatApp(
+        settings=settings,
+        verbose=settings.verbose,
+        mode="audit",
+        prompt=build_audit_prompt(),
+        audit_report_dir=report_dir,
+        single_turn_hint=(
+            f"Audit mode: Evaluating report and writing "
+            f"{AUDIT_TODO_FILENAME} progress tracker and "
+            f"AUDIT-REPORT.md."
+        ),
+    )
+    app.run()
+
+    report_path = report_dir / AUDIT_REPORT_FILENAME
+    if not report_path.exists():
+        print(
+            f"Error: Audit mode completed but did not produce "
+            f"{AUDIT_REPORT_FILENAME} in {report_dir}",
+            file=sys.stderr,
+        )
+        return app.exit_code or 1
+
+    print(f"Audit report written to {report_path}")
+    return app.exit_code
+
+
+# ---------------------------------------------------------------------------
+# Non-TUI command handlers
+# ---------------------------------------------------------------------------
 
 
 _BUILTIN_TOOLS: dict[str, str] = {
@@ -197,52 +260,12 @@ def _handle_tools_command(args: argparse.Namespace) -> int:
     return 1
 
 
-def _handle_init_command(args: argparse.Namespace, display: Display) -> int:
+def _handle_init_command(args: argparse.Namespace) -> int:
     dest = args.dest or Path.cwd()
     try:
         init_report(dest, force=args.force)
         print(f"Report template created in {dest}")
         return 0
     except FileExistsError as exc:
-        display.error(str(exc))
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
-
-
-def _handle_audit_command(
-    args: argparse.Namespace,
-    settings: Settings,
-    display: Display,
-) -> int:
-    report_dir_input = args.report_dir or Path(".")
-    report_dir = (Path.cwd() / report_dir_input).resolve()
-
-    if not report_dir.exists():
-        display.error(f"Report directory does not exist: {report_dir}")
-        return 1
-    if not report_dir.is_dir():
-        display.error(f"Report path is not a directory: {report_dir}")
-        return 1
-
-    with chdir(report_dir):
-        copy_audit_todo(report_dir)
-        outcome = run_single_turn(
-            build_audit_prompt(),
-            settings,
-            display,
-            single_turn_hint=(
-                "[dim]Audit mode:[/dim] Evaluating report and writing "
-                f"[bold]{AUDIT_TODO_FILENAME}[/bold] progress tracker and "
-                "[bold]AUDIT-REPORT.md[/bold]."
-            ),
-        )
-
-    report_path = report_dir / AUDIT_REPORT_FILENAME
-    if not report_path.exists():
-        display.error(
-            "Audit mode completed but did not produce "
-            f"{AUDIT_REPORT_FILENAME} in {report_dir}"
-        )
-        return 4 if outcome.tool_errors else 1
-
-    print(f"Audit report written to {report_path}")
-    return 4 if outcome.tool_errors else 0
