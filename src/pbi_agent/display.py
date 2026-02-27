@@ -175,7 +175,11 @@ class NoticeMessage(Static):
 
 
 class ChatInput(TextArea):
-    """Multiline input where Enter inserts newline and Ctrl+S submits."""
+    """Multiline input that auto-grows and submits on Ctrl+S."""
+
+    BASE_HEIGHT = 4
+    MAX_HEIGHT = 20
+    _CHROME_HEIGHT = 2  # TextArea uses a tall border.
 
     @dataclass
     class Submitted(Message):
@@ -187,6 +191,29 @@ class ChatInput(TextArea):
         @property
         def control(self) -> "ChatInput":
             return self.input
+
+    def on_mount(self) -> None:
+        # Keep widget CSS constraints in sync with class-level constants so
+        # changing BASE_HEIGHT / MAX_HEIGHT is enough.
+        self.styles.min_height = self.BASE_HEIGHT
+        self.styles.max_height = self.MAX_HEIGHT
+        self.reset_height()
+
+    def reset_height(self) -> None:
+        """Reset to the initial compact size."""
+        self.styles.height = self.BASE_HEIGHT
+
+    def _resize_to_content(self) -> None:
+        """Grow/shrink with content, clamped to a usable max."""
+        content_height = max(self.wrapped_document.height, 1)
+        target_height = max(
+            self.BASE_HEIGHT,
+            min(self.MAX_HEIGHT, content_height + self._CHROME_HEIGHT),
+        )
+        self.styles.height = target_height
+
+    def on_text_area_changed(self, _: TextArea.Changed) -> None:
+        self._resize_to_content()
 
     async def _on_key(self, event: events.Key) -> None:
         self._restart_blink()
@@ -644,8 +671,6 @@ class ChatApp(App):
         width: 1fr;
         min-width: 0;
         height: 4;
-        min-height: 4;
-        max-height: 8;
     }
     #user-input:disabled {
         opacity: 0.5;
@@ -824,6 +849,7 @@ class ChatApp(App):
             return
         inp = self.query_one("#user-input", ChatInput)
         inp.clear()
+        inp.reset_height()
         self.disable_input()
         self.add_user_message(value)
         if self._bridge is not None:
