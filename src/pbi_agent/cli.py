@@ -20,9 +20,29 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pbi-agent",
         description="Power BI editing coding agent (foundation v1).",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["openai", "anthropic"],
+        default=None,
+        help="LLM provider backend (default: openai).",
+    )
     parser.add_argument("--model", help="Override model name.")
     parser.add_argument("--ws-url", help="Override Responses API websocket URL.")
     parser.add_argument("--api-key", help="Override OPENAI_API_KEY.")
+    parser.add_argument(
+        "--anthropic-api-key",
+        help="Override ANTHROPIC_API_KEY.",
+    )
+    parser.add_argument(
+        "--anthropic-model",
+        help="Override Anthropic model name (default: claude-opus-4-6).",
+    )
+    parser.add_argument(
+        "--anthropic-max-tokens",
+        type=int,
+        default=None,
+        help="Max output tokens for Anthropic (default: 16384).",
+    )
     parser.add_argument(
         "--reasoning-effort",
         choices=["low", "medium", "high", "xhigh"],
@@ -114,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         settings = resolve_settings(args)
         configure_logging(settings.verbose)
+        LOGGER.info("Debug log file: %s", Path.cwd() / "pbi-agent-debug.log")
         settings.validate()
     except ConfigError as exc:
         print(f"Error: {exc}", file=sys.stderr)

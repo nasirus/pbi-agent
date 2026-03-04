@@ -779,6 +779,7 @@ class ChatApp(App):
         except SystemExit:
             pass
         except Exception as exc:
+            _log.exception("Session worker crashed")
             if display:
                 display.error(str(exc))
             self.exit_code = 1

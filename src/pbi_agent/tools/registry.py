@@ -44,3 +44,27 @@ def get_openai_tool_definitions() -> list[dict[str, Any]]:
             }
         )
     return tools
+
+
+def get_anthropic_tool_definitions() -> list[dict[str, Any]]:
+    """Return tool definitions in Anthropic Messages API format.
+
+    Native tools (bash, text_editor) use Anthropic's schema-less format.
+    Custom function tools are converted from the registry.
+    """
+    tools: list[dict[str, Any]] = [
+        {"type": "bash_20250124", "name": "bash"},
+        {
+            "type": "text_editor_20250728",
+            "name": "str_replace_based_edit_tool",
+        },
+    ]
+    for spec in get_tool_specs():
+        tools.append(
+            {
+                "name": spec.name,
+                "description": spec.description,
+                "input_schema": spec.parameters_schema,
+            }
+        )
+    return tools

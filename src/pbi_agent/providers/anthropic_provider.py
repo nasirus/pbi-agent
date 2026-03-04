@@ -1,0 +1,472 @@
+"""Anthropic Messages API provider.
+
+Uses direct HTTP calls (``urllib.request``) to the Anthropic Messages API.
+Conversation history is managed client-side by maintaining a full
+``messages`` list that is sent with every request.
+
+Native tools:
+- ``bash_20250124``  (bash tool)
+- ``text_editor_20250728``  (str_replace_based_edit_tool)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+import urllib.error
+import urllib.request
+from typing import Any
+
+from pbi_agent.agent.system_prompt import get_system_prompt
+from pbi_agent.agent.tool_runtime import execute_tool_calls
+from pbi_agent.config import Settings
+from pbi_agent.display import Display
+from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.providers.anthropic_tools import (
+    BashExecutionResult,
+    close_bash_session,
+    execute_bash,
+    execute_text_editor,
+)
+from pbi_agent.providers.base import Provider
+from pbi_agent.tools.registry import get_anthropic_tool_definitions
+
+_log = logging.getLogger(__name__)
+
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
+
+# Native tool names used by Anthropic
+_BASH_TOOL_NAME = "bash"
+_TEXT_EDITOR_TOOL_NAME = "str_replace_based_edit_tool"
+
+
+class AnthropicProvider(Provider):
+    """Provider backed by the Anthropic Messages HTTP API."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._tools = get_anthropic_tool_definitions()
+        self._system_prompt = get_system_prompt()
+        # Client-side conversation history — full messages list.
+        self._messages: list[dict[str, Any]] = []
+
+    # -- lifecycle -----------------------------------------------------------
+
+    def connect(self) -> None:
+        # HTTP is stateless; nothing to connect.  We validate the API key
+        # eagerly so errors surface early.
+        if not self._settings.anthropic_api_key:
+            raise ValueError(
+                "Missing Anthropic API key.  Set ANTHROPIC_API_KEY in environment "
+                "or pass --anthropic-api-key."
+            )
+
+    def close(self) -> None:
+        close_bash_session()
+
+    # -- request_turn --------------------------------------------------------
+
+    def request_turn(
+        self,
+        *,
+        user_message: str | None = None,
+        tool_result_items: list[dict[str, Any]] | None = None,
+        instructions: str | None = None,
+        display: Display,
+        session_usage: TokenUsage,
+    ) -> CompletedResponse:
+        # Build the new message to append to history.
+        if user_message is not None:
+            self._messages.append(
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": user_message}],
+                }
+            )
+        elif tool_result_items is not None:
+            # Tool results are sent as a user message containing tool_result
+            # content blocks.
+            self._messages.append(
+                {
+                    "role": "user",
+                    "content": tool_result_items,
+                }
+            )
+        else:
+            raise ValueError("Either user_message or tool_result_items is required")
+
+        system_prompt = instructions or self._system_prompt
+
+        response = self._http_request(
+            system_prompt=system_prompt,
+            display=display,
+        )
+        session_usage.add(response.usage)
+        return response
+
+    # -- execute_tool_calls --------------------------------------------------
+
+    def execute_tool_calls(
+        self,
+        response: CompletedResponse,
+        *,
+        max_workers: int,
+        display: Display,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Execute all tool calls in the response.
+
+        Anthropic tool calls are unified as ``tool_use`` content blocks.
+        We dispatch based on tool name:
+        - ``bash`` → bash executor
+        - ``str_replace_based_edit_tool`` → text editor executor
+        - anything else → registered function tool handler
+        """
+        # The raw content blocks are stored in provider_data.
+        content_blocks: list[dict[str, Any]] = response.provider_data or []
+        tool_use_blocks = [b for b in content_blocks if b.get("type") == "tool_use"]
+
+        if not tool_use_blocks:
+            return [], False
+
+        had_errors = False
+        tool_result_items: list[dict[str, Any]] = []
+
+        # Separate native tool calls from function tool calls
+        bash_calls: list[dict[str, Any]] = []
+        editor_calls: list[dict[str, Any]] = []
+        function_tool_uses: list[dict[str, Any]] = []
+
+        for block in tool_use_blocks:
+            name = block.get("name", "")
+            if name == _BASH_TOOL_NAME:
+                bash_calls.append(block)
+            elif name == _TEXT_EDITOR_TOOL_NAME:
+                editor_calls.append(block)
+            else:
+                function_tool_uses.append(block)
+
+        # --- bash calls ----------------------------------------------------
+        if bash_calls:
+            commands: list[str] = []
+            for block in bash_calls:
+                input_data = block.get("input", {})
+                if input_data.get("restart"):
+                    commands.append("[restart bash session]")
+                else:
+                    commands.append(input_data.get("command", "<no command>"))
+            display.shell_start(commands)
+            for block in bash_calls:
+                tool_id = block.get("id", "")
+                input_data = block.get("input", {})
+                command = (
+                    "[restart bash session]"
+                    if input_data.get("restart")
+                    else input_data.get("command", "<no command>")
+                )
+
+                try:
+                    result = execute_bash(input_data)
+                except Exception as exc:
+                    _log.exception("Anthropic bash tool execution crashed")
+                    result = BashExecutionResult(
+                        output=f"Error: Bash tool execution failed: {exc}",
+                        exit_code=1,
+                        timed_out=False,
+                        is_error=True,
+                    )
+
+                display.shell_command(
+                    command=command,
+                    exit_code=result.exit_code,
+                    timed_out=result.timed_out,
+                    call_id=tool_id,
+                )
+
+                had_errors = had_errors or result.is_error
+                tool_result_items.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": result.output,
+                        **({"is_error": True} if result.is_error else {}),
+                    }
+                )
+            display.tool_group_end()
+
+        # --- text editor calls ---------------------------------------------
+        if editor_calls:
+            display.patch_start(len(editor_calls))
+            for block in editor_calls:
+                tool_id = block.get("id", "")
+                input_data = block.get("input", {})
+                cmd = input_data.get("command", "unknown")
+                path = input_data.get("path", "<missing>")
+
+                try:
+                    result_text = execute_text_editor(input_data)
+                except Exception as exc:
+                    _log.exception("Anthropic text editor tool execution crashed")
+                    result_text = f"Error: Text editor tool execution failed: {exc}"
+                is_error = result_text.startswith("Error:")
+
+                display.patch_result(
+                    path=path,
+                    operation=cmd,
+                    success=not is_error,
+                    call_id=tool_id,
+                    detail=result_text if is_error else "",
+                )
+
+                had_errors = had_errors or is_error
+                tool_result_items.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": result_text,
+                        **({"is_error": True} if is_error else {}),
+                    }
+                )
+            display.tool_group_end()
+
+        # --- custom function calls -----------------------------------------
+        if function_tool_uses:
+            # Convert Anthropic tool_use blocks to ToolCall objects so we can
+            # reuse the existing tool_runtime.
+            fn_calls = [
+                ToolCall(
+                    call_id=b.get("id", ""),
+                    name=b.get("name", ""),
+                    arguments=b.get("input"),
+                )
+                for b in function_tool_uses
+            ]
+            display.function_start(len(fn_calls))
+            batch = execute_tool_calls(fn_calls, max_workers=max_workers)
+            had_errors = had_errors or batch.had_errors
+
+            for result in batch.results:
+                call = _find_by_id(fn_calls, result.call_id)
+                display.function_result(
+                    name=call.name if call else "unknown",
+                    success=not result.is_error,
+                    call_id=result.call_id,
+                    arguments=call.arguments if call else None,
+                )
+                tool_result_items.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": result.call_id,
+                        "content": result.output_json,
+                        **({"is_error": True} if result.is_error else {}),
+                    }
+                )
+            display.tool_group_end()
+
+        return tool_result_items, had_errors
+
+    # -- HTTP transport ------------------------------------------------------
+
+    def _http_request(
+        self,
+        *,
+        system_prompt: str | None,
+        display: Display,
+    ) -> CompletedResponse:
+        """Send the current messages to the Anthropic Messages API and return
+        a parsed ``CompletedResponse``."""
+        display.wait_start("waiting for Anthropic response...")
+
+        body: dict[str, Any] = {
+            "model": self._settings.anthropic_model,
+            "max_tokens": self._settings.anthropic_max_tokens,
+            "cache_control": {"type": "ephemeral"},
+            "tools": self._tools,
+            "messages": self._messages,
+        }
+        if system_prompt:
+            body["system"] = system_prompt
+
+        request_data = json.dumps(body).encode("utf-8")
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self._settings.anthropic_api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+        }
+
+        max_retries = self._settings.ws_max_retries  # reuse the retry setting
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                display.retry_notice(attempt, max_retries)
+
+            try:
+                req = urllib.request.Request(
+                    ANTHROPIC_API_URL,
+                    data=request_data,
+                    headers=headers,
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    response_bytes = resp.read()
+                    response_json = json.loads(response_bytes.decode("utf-8"))
+
+                result = self._parse_response(response_json)
+                display.wait_stop()
+
+                # Render the text in one shot (no streaming).
+                if result.text:
+                    display.render_markdown(result.text)
+
+                # Append the assistant's response to conversation history so
+                # subsequent turns include it.
+                self._messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response_json.get("content", []),
+                    }
+                )
+
+                return result
+
+            except urllib.error.HTTPError as exc:
+                error_body = ""
+                try:
+                    error_body = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+
+                # Rate limiting
+                if exc.code == 429:
+                    if attempt >= max_retries:
+                        display.wait_stop()
+                        raise RuntimeError(
+                            f"Anthropic rate limit exceeded after {max_retries + 1} "
+                            f"attempts: {error_body}"
+                        ) from exc
+
+                    wait = _extract_retry_after(exc, attempt)
+                    display.rate_limit_notice(
+                        wait_seconds=wait,
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                    )
+                    time.sleep(wait)
+                    continue
+
+                # Overloaded (529)
+                if exc.code == 529:
+                    if attempt >= max_retries:
+                        display.wait_stop()
+                        raise RuntimeError(
+                            f"Anthropic API overloaded after {max_retries + 1} "
+                            f"attempts: {error_body}"
+                        ) from exc
+                    wait = min(2.0 * (2**attempt), 30.0)
+                    display.rate_limit_notice(
+                        wait_seconds=wait,
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                    )
+                    time.sleep(wait)
+                    continue
+
+                # Server errors (5xx) — retry
+                if exc.code >= 500:
+                    last_error = exc
+                    continue
+
+                # Client errors (4xx) — don't retry
+                display.wait_stop()
+                raise RuntimeError(
+                    f"Anthropic API error {exc.code}: {error_body}"
+                ) from exc
+
+            except urllib.error.URLError as exc:
+                last_error = exc
+                continue
+
+        display.wait_stop()
+        if last_error is not None:
+            raise RuntimeError(
+                f"Anthropic request failed after {max_retries + 1} attempts: "
+                f"{last_error}"
+            ) from last_error
+        raise RuntimeError("Anthropic request failed after retries.")
+
+    # -- response parsing ----------------------------------------------------
+
+    def _parse_response(self, response_json: dict[str, Any]) -> CompletedResponse:
+        """Parse an Anthropic Messages API response into a CompletedResponse."""
+        content_blocks: list[dict[str, Any]] = response_json.get("content", [])
+
+        text_parts: list[str] = []
+        function_calls: list[ToolCall] = []
+
+        for block in content_blocks:
+            block_type = block.get("type")
+
+            if block_type == "text":
+                text = block.get("text", "")
+                if text:
+                    text_parts.append(text)
+
+            elif block_type == "tool_use":
+                name = block.get("name", "")
+                # For the has_tool_calls check, we put ALL tool uses
+                # (including native ones) into function_calls as a
+                # lightweight signal.  The actual dispatch in
+                # execute_tool_calls uses provider_data.
+                function_calls.append(
+                    ToolCall(
+                        call_id=block.get("id", ""),
+                        name=name,
+                        arguments=block.get("input"),
+                    )
+                )
+
+        # Parse usage
+        usage_obj = response_json.get("usage", {})
+        input_tokens = int(usage_obj.get("input_tokens", 0) or 0)
+        output_tokens = int(usage_obj.get("output_tokens", 0) or 0)
+        cache_read_tokens = int(usage_obj.get("cache_read_input_tokens", 0) or 0)
+
+        return CompletedResponse(
+            response_id=response_json.get("id"),
+            text="\n\n".join(text_parts).strip(),
+            usage=TokenUsage(
+                input_tokens=input_tokens,
+                cached_input_tokens=cache_read_tokens,
+                output_tokens=output_tokens,
+            ),
+            function_calls=function_calls,
+            # Store raw content blocks so execute_tool_calls can access the
+            # full tool_use data (including input parameters).
+            provider_data=content_blocks,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
+    for c in calls:
+        if c.call_id == call_id:
+            return c
+    return None
+
+
+def _extract_retry_after(exc: urllib.error.HTTPError, attempt: int) -> float:
+    """Extract retry wait from Retry-After header or use exponential backoff."""
+    try:
+        retry_header = exc.headers.get("Retry-After") if exc.headers else None
+        if retry_header:
+            return max(0.1, min(float(retry_header), 60.0))
+    except (ValueError, TypeError):
+        pass
+    return min(2.0 * (2**attempt), 30.0)
