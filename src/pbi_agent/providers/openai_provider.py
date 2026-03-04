@@ -247,6 +247,7 @@ class OpenAIProvider(Provider):
         assert self._ws is not None
 
         streamed_text_parts: list[str] = []
+        streamed_summary_parts: list[str] = []
         if stream_output:
             display.wait_start(waiting_message)
 
@@ -255,7 +256,17 @@ class OpenAIProvider(Provider):
                 event = self._ws.recv_json()
                 event_type = event.get("type")
 
-                if event_type == "response.output_text.delta":
+                if event_type == "response.reasoning_summary_text.delta":
+                    delta = event.get("delta", "")
+                    if delta:
+                        streamed_summary_parts.append(delta)
+                elif event_type == "response.reasoning_summary_text.done":
+                    # Summary streaming finished – render the complete
+                    # reasoning summary as a collapsible thinking block.
+                    summary_text = "".join(streamed_summary_parts).strip()
+                    if summary_text and stream_output:
+                        display.render_thinking(summary_text)
+                elif event_type == "response.output_text.delta":
                     delta = event.get("delta", "")
                     if delta:
                         streamed_text_parts.append(delta)
@@ -264,9 +275,19 @@ class OpenAIProvider(Provider):
                 elif event_type == "response.completed":
                     if stream_output:
                         display.stream_end()
-                    return parse_completed_response(
+                    response = parse_completed_response(
                         event.get("response", {}), streamed_text_parts
                     )
+                    # If we captured reasoning summary via streaming, and
+                    # the completed-response parser also extracted it from
+                    # the full payload, the parser's version is canonical.
+                    # But if it's empty (e.g. the payload omitted it),
+                    # fall back to what we streamed.
+                    if not response.reasoning_summary and streamed_summary_parts:
+                        response.reasoning_summary = (
+                            "".join(streamed_summary_parts).strip()
+                        )
+                    return response
                 elif event_type == "error":
                     raise parse_error_event(event)
         except Exception:

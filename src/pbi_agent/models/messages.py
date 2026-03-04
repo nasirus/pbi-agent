@@ -112,6 +112,8 @@ class CompletedResponse:
     function_calls: list[ToolCall] = field(default_factory=list)
     apply_patch_calls: list[ApplyPatchCall] = field(default_factory=list)
     shell_calls: list[ShellCall] = field(default_factory=list)
+    # Reasoning summary text extracted from OpenAI ``reasoning`` output items.
+    reasoning_summary: str = ""
     # Provider-specific opaque data (e.g. raw Anthropic content blocks for
     # history replay).  The session layer never inspects this; only the
     # provider that created the response uses it.

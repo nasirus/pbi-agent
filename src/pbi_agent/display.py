@@ -185,7 +185,7 @@ class NoticeMessage(Static):
 class ChatInput(TextArea):
     """Multiline input that auto-grows and submits on Ctrl+S."""
 
-    BASE_HEIGHT = 4
+    BASE_HEIGHT = 3
     MAX_HEIGHT = 20
     _CHROME_HEIGHT = 2  # TextArea uses a tall border.
 
@@ -619,7 +619,7 @@ class ChatApp(App):
     /* ---- chat log ---- */
     #chat-log {
         height: 1fr;
-        padding: 0 1;
+        padding: 0 1 1 1;
     }
 
     /* ---- welcome ---- */
@@ -633,7 +633,7 @@ class ChatApp(App):
 
     /* ---- user message ---- */
     UserMessage {
-        margin: 1 1 0 12;
+        margin: 1 1 1 12;
         padding: 1 2;
         background: $primary 15%;
         border-left: thick $success;
@@ -660,16 +660,19 @@ class ChatApp(App):
 
     /* ---- tool groups ---- */
     ToolGroup {
-        margin: 1 4;
-        padding: 0 2;
+        margin: 0 4;
+        padding: 0 0;
         height: auto;
         background: $boost;
+        border: none;
+        border-left: thick $success;
     }
     ToolGroup > CollapsibleTitle {
         padding: 1 2;
+        color: $text-muted;
     }
     ToolGroup > Contents {
-        padding: 1 2;
+        padding: 0 2;
     }
     ToolItem {
         padding-left: 2;
@@ -677,10 +680,11 @@ class ChatApp(App):
 
     /* ---- thinking block ---- */
     ThinkingBlock {
-        margin: 1 4;
-        padding: 0 1;
+        margin: 0 4;
+        padding: 0 0;
         height: auto;
         background: $boost;
+        border: none;
         border-left: thick $accent;
     }
     ThinkingBlock > CollapsibleTitle {
@@ -699,22 +703,30 @@ class ChatApp(App):
     UsageSummary {
         text-align: center;
         color: $text-muted;
-        padding: 1 0;
         margin: 0 4;
+        padding: 1 2;
+        background: $boost;
+        border: none;
+        border-left: thick $primary;
     }
 
     /* ---- error / notice ---- */
     ErrorMessage {
         color: $error;
         text-style: bold;
-        margin: 1 4;
+        margin: 0 4;
         padding: 1 2;
-        border: round $error;
+        background: $boost;
+        border: none;
+        border-left: thick $error;
     }
     NoticeMessage {
         color: $warning;
         margin: 0 4;
-        padding: 0 2;
+        padding: 1 2;
+        background: $boost;
+        border: none;
+        border-left: thick $warning;
     }
     .debug-msg {
         color: $text-muted;
@@ -724,14 +736,14 @@ class ChatApp(App):
     /* ---- input ---- */
     #input-row {
         dock: bottom;
-        margin: 0 2 1 2;
+        margin: 1 2 1 2;
         height: auto;
         align-vertical: middle;
     }
     #user-input {
         width: 1fr;
         min-width: 0;
-        height: 4;
+        height: 3;
     }
     #user-input:disabled {
         opacity: 0.5;
@@ -739,7 +751,8 @@ class ChatApp(App):
     #send-button {
         width: auto;
         min-width: 10;
-        margin: 1 5 0 0;
+        height: 3;
+        margin: 0 5 0 0;
     }
     #send-button:disabled {
         opacity: 0.5;
