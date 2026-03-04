@@ -29,7 +29,6 @@ class Settings:
     # Provider selection
     provider: str = "openai"
     # Anthropic-specific
-    anthropic_api_key: str = ""
     anthropic_model: str = DEFAULT_ANTHROPIC_MODEL
     anthropic_max_tokens: int = DEFAULT_ANTHROPIC_MAX_TOKENS
 
@@ -38,12 +37,13 @@ class Settings:
             raise ConfigError("--provider must be one of: openai, anthropic.")
         if self.provider == "openai" and not self.api_key:
             raise ConfigError(
-                "Missing API key. Set OPENAI_API_KEY in environment or pass --api-key."
+                "Missing OpenAI API key. Set OPENAI_API_KEY in environment or pass "
+                "--openai-api-key."
             )
-        if self.provider == "anthropic" and not self.anthropic_api_key:
+        if self.provider == "anthropic" and not self.api_key:
             raise ConfigError(
-                "Missing Anthropic API key. Set ANTHROPIC_API_KEY in environment "
-                "or pass --anthropic-api-key."
+                "Missing Anthropic API key. Set ANTHROPIC_API_KEY in environment or "
+                "pass --anthropic-api-key."
             )
         if self.max_tool_workers < 1:
             raise ConfigError("--max-tool-workers must be >= 1.")
@@ -56,7 +56,7 @@ class Settings:
         if self.compact_threshold < 1:
             raise ConfigError("--compact-threshold must be >= 1.")
         if self.anthropic_max_tokens < 1:
-            raise ConfigError("--anthropic-max-tokens must be >= 1.")
+            raise ConfigError("--max-tokens must be >= 1.")
 
     def redacted(self) -> dict[str, str | int | bool]:
         return {
@@ -69,7 +69,6 @@ class Settings:
             "ws_max_retries": self.ws_max_retries,
             "reasoning_effort": self.reasoning_effort,
             "compact_threshold": self.compact_threshold,
-            "anthropic_api_key": redact_secret(self.anthropic_api_key),
             "anthropic_model": self.anthropic_model,
             "anthropic_max_tokens": self.anthropic_max_tokens,
         }
@@ -91,9 +90,16 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         getattr(args, "provider", None) or os.getenv("PBI_AGENT_PROVIDER") or "openai"
     )
 
-    api_key = args.api_key or os.getenv("OPENAI_API_KEY", "")
+    openai_api_key = getattr(args, "openai_api_key", None) or os.getenv(
+        "OPENAI_API_KEY", ""
+    )
+    anthropic_api_key = getattr(args, "anthropic_api_key", None) or os.getenv(
+        "ANTHROPIC_API_KEY", ""
+    )
+    api_key = openai_api_key if provider == "openai" else anthropic_api_key
     ws_url = args.ws_url or os.getenv("PBI_AGENT_WS_URL") or DEFAULT_WS_URL
-    model = args.model or os.getenv("PBI_AGENT_MODEL") or DEFAULT_MODEL
+    model_override = args.model or os.getenv("PBI_AGENT_MODEL")
+    model = model_override or DEFAULT_MODEL
     max_tool_workers = args.max_tool_workers
     if max_tool_workers is None:
         max_tool_workers = int(os.getenv("PBI_AGENT_MAX_TOOL_WORKERS", "4"))
@@ -111,23 +117,15 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         compact_threshold = int(os.getenv("PBI_AGENT_COMPACT_THRESHOLD", "150000"))
 
     # Anthropic settings
-    anthropic_api_key = getattr(args, "anthropic_api_key", None) or os.getenv(
-        "ANTHROPIC_API_KEY", ""
-    )
-    anthropic_model = (
-        getattr(args, "anthropic_model", None)
-        or os.getenv("PBI_AGENT_ANTHROPIC_MODEL")
-        or DEFAULT_ANTHROPIC_MODEL
-    )
-    anthropic_max_tokens_raw = getattr(args, "anthropic_max_tokens", None)
-    if anthropic_max_tokens_raw is None:
+    anthropic_model = model_override or DEFAULT_ANTHROPIC_MODEL
+    max_tokens_raw = getattr(args, "max_tokens", None)
+
+    if max_tokens_raw is None:
         anthropic_max_tokens = int(
-            os.getenv(
-                "PBI_AGENT_ANTHROPIC_MAX_TOKENS", str(DEFAULT_ANTHROPIC_MAX_TOKENS)
-            )
+            os.getenv("PBI_AGENT_MAX_TOKENS", str(DEFAULT_ANTHROPIC_MAX_TOKENS))
         )
     else:
-        anthropic_max_tokens = int(anthropic_max_tokens_raw)
+        anthropic_max_tokens = int(max_tokens_raw)
 
     return Settings(
         api_key=api_key,
@@ -139,7 +137,6 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         reasoning_effort=reasoning_effort,
         compact_threshold=compact_threshold,
         provider=provider,
-        anthropic_api_key=anthropic_api_key,
         anthropic_model=anthropic_model,
         anthropic_max_tokens=anthropic_max_tokens,
     )

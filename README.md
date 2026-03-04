@@ -13,7 +13,8 @@ It is still a foundation project: it provides the runtime and extensibility poin
 ## Requirements
 
 - Python **3.12+**
-- `OPENAI_API_KEY` set in your environment (or passed by CLI)
+- `OPENAI_API_KEY` set in your environment (default provider)
+- `ANTHROPIC_API_KEY` required when using `--provider anthropic`
 - Recommended: [`uv`](https://github.com/astral-sh/uv)
 
 ## Install
@@ -90,8 +91,10 @@ Precedence: **CLI args > environment variables > defaults**.
 
 ### CLI options
 
-- `--api-key`
+- `--openai-api-key`
+- `--anthropic-api-key`
 - `--model`
+- `--max-tokens`
 - `--ws-url`
 - `--reasoning-effort` (`low|medium|high|xhigh`)
 - `--max-tool-workers`
@@ -101,8 +104,10 @@ Precedence: **CLI args > environment variables > defaults**.
 
 ### Environment variables
 
-- `OPENAI_API_KEY` (required for `run`, `chat`, `web`, `audit`)
+- `OPENAI_API_KEY` (required by default provider)
+- `ANTHROPIC_API_KEY` (required when `--provider anthropic`)
 - `PBI_AGENT_MODEL`
+- `PBI_AGENT_MAX_TOKENS`
 - `PBI_AGENT_WS_URL`
 - `PBI_AGENT_REASONING_EFFORT`
 - `PBI_AGENT_MAX_TOOL_WORKERS`

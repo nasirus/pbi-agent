@@ -18,47 +18,67 @@ from pbi_agent.tools.registry import get_tool_spec, get_tool_specs
 LOGGER = logging.getLogger(__name__)
 
 
+class CleanHelpFormatter(argparse.HelpFormatter):
+    """Tune help layout for clearer row-based CLI output."""
+
+    def __init__(self, prog: str) -> None:
+        super().__init__(prog, max_help_position=36, width=100)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pbi-agent",
         description="Power BI editing coding agent (foundation v1).",
+        usage="%(prog)s [GLOBAL OPTIONS] <command> [COMMAND OPTIONS]",
+        epilog="Run `pbi-agent <command> --help` for command-specific options.",
+        formatter_class=CleanHelpFormatter,
+        allow_abbrev=False,
     )
-    parser.add_argument(
+    provider_group = parser.add_argument_group("Provider and API")
+    provider_group.add_argument(
         "--provider",
         choices=["openai", "anthropic"],
         default=None,
         help="LLM provider backend (default: openai).",
     )
-    parser.add_argument("--model", help="Override model name.")
-    parser.add_argument("--ws-url", help="Override Responses API websocket URL.")
-    parser.add_argument("--api-key", help="Override OPENAI_API_KEY.")
-    parser.add_argument(
+    provider_group.add_argument(
+        "--ws-url", help="Override Responses API websocket URL."
+    )
+    provider_group.add_argument(
+        "--openai-api-key",
+        help="Override OPENAI_API_KEY.",
+    )
+    provider_group.add_argument(
         "--anthropic-api-key",
         help="Override ANTHROPIC_API_KEY.",
     )
-    parser.add_argument(
-        "--anthropic-model",
-        help="Override Anthropic model name (default: claude-opus-4-6).",
+
+    model_group = parser.add_argument_group("Model behavior")
+    model_group.add_argument(
+        "--model",
+        help="Override model name for the selected provider.",
     )
-    parser.add_argument(
-        "--anthropic-max-tokens",
+    model_group.add_argument(
+        "--max-tokens",
         type=int,
         default=None,
-        help="Max output tokens for Anthropic (default: 16384).",
+        help="Max output tokens for providers that support token limits (default: 16384).",
     )
-    parser.add_argument(
+    model_group.add_argument(
         "--reasoning-effort",
         choices=["low", "medium", "high", "xhigh"],
         default=None,
         help="Set model reasoning effort (default: medium).",
     )
-    parser.add_argument(
+
+    runtime_group = parser.add_argument_group("Runtime and resilience")
+    runtime_group.add_argument(
         "--max-tool-workers",
         type=int,
         default=None,
         help="Maximum parallel workers for tool execution.",
     )
-    parser.add_argument(
+    runtime_group.add_argument(
         "--ws-max-retries",
         type=int,
         default=None,
@@ -66,27 +86,43 @@ def build_parser() -> argparse.ArgumentParser:
             "Maximum retries for transient websocket failures and rate-limit responses."
         ),
     )
-    parser.add_argument(
+    runtime_group.add_argument(
         "--compact-threshold",
         type=int,
         default=150000,
         help="Context compaction token threshold (default: 150000).",
     )
-    parser.add_argument(
+
+    diagnostics_group = parser.add_argument_group("Diagnostics")
+    diagnostics_group.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logs.",
     )
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        title="Commands",
+        metavar="<command>",
+    )
 
-    run_parser = subparsers.add_parser("run", help="Run a single prompt turn.")
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run a single prompt turn.",
+        formatter_class=CleanHelpFormatter,
+    )
     run_parser.add_argument("--prompt", required=True, help="User prompt.")
 
-    subparsers.add_parser("chat", help="Run an interactive chat loop.")
+    subparsers.add_parser(
+        "chat",
+        help="Run an interactive chat loop.",
+        formatter_class=CleanHelpFormatter,
+    )
     web_parser = subparsers.add_parser(
         "web",
         help="Serve the chat UI in a browser via textual serve.",
+        formatter_class=CleanHelpFormatter,
     )
     web_parser.add_argument(
         "--host",
@@ -118,6 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser = subparsers.add_parser(
         "audit",
         help="Run report audit mode and write AUDIT-REPORT.md.",
+        formatter_class=CleanHelpFormatter,
     )
     audit_parser.add_argument(
         "--report-dir",
@@ -126,15 +163,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Relative report directory to audit (default: current directory).",
     )
 
-    tools_parser = subparsers.add_parser("tools", help="Inspect tool registry.")
+    tools_parser = subparsers.add_parser(
+        "tools",
+        help="Inspect tool registry.",
+        formatter_class=CleanHelpFormatter,
+    )
     tools_subparsers = tools_parser.add_subparsers(dest="tools_command", required=True)
-    tools_subparsers.add_parser("list", help="List registered tools.")
-    describe_parser = tools_subparsers.add_parser("describe", help="Describe one tool.")
+    tools_subparsers.add_parser(
+        "list",
+        help="List registered tools.",
+        formatter_class=CleanHelpFormatter,
+    )
+    describe_parser = tools_subparsers.add_parser(
+        "describe",
+        help="Describe one tool.",
+        formatter_class=CleanHelpFormatter,
+    )
     describe_parser.add_argument("--name", required=True, help="Tool name.")
 
     init_parser = subparsers.add_parser(
         "init",
         help="Scaffold a new Power BI report project from the bundled template.",
+        formatter_class=CleanHelpFormatter,
     )
     init_parser.add_argument(
         "--dest",
@@ -153,7 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = sys.argv[1:] if argv is None else argv
+    if not raw_argv:
+        parser.print_help()
+        return 0
+
+    args = parser.parse_args(raw_argv)
 
     # ---- commands that don't need settings or the TUI ----
 
@@ -263,21 +318,24 @@ def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _settings_env(settings: Settings) -> dict[str, str]:
+    selected_model = (
+        settings.model if settings.provider == "openai" else settings.anthropic_model
+    )
     env: dict[str, str] = {
         "PBI_AGENT_PROVIDER": settings.provider,
         "PBI_AGENT_WS_URL": settings.ws_url,
-        "PBI_AGENT_MODEL": settings.model,
+        "PBI_AGENT_MODEL": selected_model,
         "PBI_AGENT_REASONING_EFFORT": settings.reasoning_effort,
         "PBI_AGENT_MAX_TOOL_WORKERS": str(settings.max_tool_workers),
         "PBI_AGENT_WS_MAX_RETRIES": str(settings.ws_max_retries),
         "PBI_AGENT_COMPACT_THRESHOLD": str(settings.compact_threshold),
-        "PBI_AGENT_ANTHROPIC_MODEL": settings.anthropic_model,
-        "PBI_AGENT_ANTHROPIC_MAX_TOKENS": str(settings.anthropic_max_tokens),
+        "PBI_AGENT_MAX_TOKENS": str(settings.anthropic_max_tokens),
     }
     if settings.api_key:
-        env["OPENAI_API_KEY"] = settings.api_key
-    if settings.anthropic_api_key:
-        env["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
+        if settings.provider == "openai":
+            env["OPENAI_API_KEY"] = settings.api_key
+        else:
+            env["ANTHROPIC_API_KEY"] = settings.api_key
     return env
 
 

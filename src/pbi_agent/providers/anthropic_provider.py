@@ -65,10 +65,10 @@ class AnthropicProvider(Provider):
     def connect(self) -> None:
         # HTTP is stateless; nothing to connect.  We validate the API key
         # eagerly so errors surface early.
-        if not self._settings.anthropic_api_key:
+        if not self._settings.api_key:
             raise ValueError(
-                "Missing Anthropic API key.  Set ANTHROPIC_API_KEY in environment "
-                "or pass --anthropic-api-key."
+                "Missing Anthropic API key. Set ANTHROPIC_API_KEY in environment or "
+                "pass --anthropic-api-key."
             )
 
     def close(self) -> None:
@@ -309,7 +309,7 @@ class AnthropicProvider(Provider):
 
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": self._settings.anthropic_api_key,
+            "x-api-key": self._settings.api_key,
             "anthropic-version": ANTHROPIC_VERSION,
         }
 
