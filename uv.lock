@@ -54,7 +54,7 @@ wheels = [
 
 [[package]]
 name = "oai-ws"
-version = "0.2.9"
+version = "0.2.92"
 source = { editable = "." }
 dependencies = [
     { name = "python-dotenv" },

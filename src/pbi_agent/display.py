@@ -649,6 +649,11 @@ class ChatApp(App):
         padding: 0 1 1 1;
     }
 
+    #status-row {
+        height: auto;
+        min-height: 0;
+    }
+
     /* ---- welcome ---- */
     WelcomeBanner {
         text-align: center;
@@ -816,6 +821,7 @@ class ChatApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield VerticalScroll(id="chat-log")
+        yield Vertical(id="status-row")
         yield Horizontal(
             ChatInput(
                 placeholder=(
@@ -890,7 +896,11 @@ class ChatApp(App):
     # -- UI update helpers (called via call_from_thread) --------------------
 
     async def mount_widget(self, widget: Widget) -> None:
-        """Mount a widget into the chat log and scroll to it."""
+        """Mount a widget into the chat log or bottom status row."""
+        if isinstance(widget, WaitingIndicator):
+            status_row = self.query_one("#status-row", Vertical)
+            await status_row.mount(widget)
+            return
         chat_log = self.query_one("#chat-log", VerticalScroll)
         await chat_log.mount(widget)
         chat_log.scroll_end(animate=False)
