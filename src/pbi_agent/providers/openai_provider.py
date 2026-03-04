@@ -284,9 +284,9 @@ class OpenAIProvider(Provider):
                     # But if it's empty (e.g. the payload omitted it),
                     # fall back to what we streamed.
                     if not response.reasoning_summary and streamed_summary_parts:
-                        response.reasoning_summary = (
-                            "".join(streamed_summary_parts).strip()
-                        )
+                        response.reasoning_summary = "".join(
+                            streamed_summary_parts
+                        ).strip()
                     return response
                 elif event_type == "error":
                     raise parse_error_event(event)

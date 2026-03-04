@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -123,7 +124,6 @@ class WelcomeBanner(Static):
                 parts.append(f"Reasoning: [bold]{reasoning_effort}[/bold]")
             lines.append("[dim]\u00b7[/dim]  ".join(parts))
 
-        lines.append(f"[dim]v{__version__}[/dim]")
         super().__init__("\n".join(lines))
 
 
@@ -248,10 +248,17 @@ class Display:
     corresponding widget update on the main Textual thread.
     """
 
+    # Minimum interval (seconds) between Markdown widget updates during
+    # streaming.  Each update re-parses the full accumulated text, so
+    # throttling prevents O(n^2) Markdown rendering as messages grow.
+    _STREAM_THROTTLE_SECS: float = 0.05  # 50 ms
+
     def __init__(self, app: ChatApp, *, verbose: bool = False) -> None:
         self.app = app
         self.verbose = verbose
         self._stream_parts: list[str] = []
+        self._stream_dirty: bool = False
+        self._last_stream_flush: float = 0.0
         self._thinking_id: str | None = None
         self._current_msg_id: str | None = None
         self._msg_counter = 0
@@ -349,11 +356,18 @@ class Display:
             self._thinking_id = None
 
     def stream_delta(self, delta: str) -> None:
-        """Append a streamed token and update the live Markdown widget."""
+        """Append a streamed token and update the live Markdown widget.
+
+        To avoid O(n^2) Markdown re-parsing as the message grows, UI updates
+        are throttled to at most once every ``_STREAM_THROTTLE_SECS``.  The
+        first token always renders immediately so the user sees output start
+        without delay.  Any buffered content is flushed by ``stream_end()``.
+        """
         self.wait_stop()
         self._stream_parts.append(delta)
-        text = "".join(self._stream_parts)
+        self._stream_dirty = True
 
+        # First token: mount the widget and render immediately.
         if self._current_msg_id is None:
             mid = self._next_id("assistant")
             self._current_msg_id = mid
@@ -361,20 +375,31 @@ class Display:
                 self.app.mount_widget,
                 AssistantMarkdown("", id=mid),
             )
+            self._flush_stream()
+            return
 
+        # Subsequent tokens: only flush if enough time has elapsed.
+        now = time.monotonic()
+        if now - self._last_stream_flush >= self._STREAM_THROTTLE_SECS:
+            self._flush_stream()
+
+    def _flush_stream(self) -> None:
+        """Push accumulated stream content to the Markdown widget."""
+        if not self._stream_dirty or self._current_msg_id is None:
+            return
+        text = "".join(self._stream_parts)
         self._safe_call(self.app.update_markdown, self._current_msg_id, text)
+        self._stream_dirty = False
+        self._last_stream_flush = time.monotonic()
 
     def stream_end(self) -> None:
         """Finalise the streamed Markdown widget."""
         self.wait_stop()
-        text = "".join(self._stream_parts)
-        if self._current_msg_id and text.strip():
-            self._safe_call(
-                self.app.update_markdown,
-                self._current_msg_id,
-                text,
-            )
+        # Always flush remaining buffered content.
+        self._flush_stream()
         self._stream_parts = []
+        self._stream_dirty = False
+        self._last_stream_flush = 0.0
         self._current_msg_id = None
 
     def stream_abort(self) -> None:
@@ -383,6 +408,8 @@ class Display:
         if self._current_msg_id:
             self._safe_call(self.app.remove_widget, self._current_msg_id)
         self._stream_parts = []
+        self._stream_dirty = False
+        self._last_stream_flush = 0.0
         self._current_msg_id = None
 
     def render_markdown(self, text: str) -> None:
