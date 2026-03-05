@@ -93,25 +93,11 @@ class ToolCall:
 
 
 @dataclass(slots=True)
-class ApplyPatchCall:
-    call_id: str
-    operation: dict
-
-
-@dataclass(slots=True)
-class ShellCall:
-    call_id: str
-    action: dict
-
-
-@dataclass(slots=True)
 class CompletedResponse:
     response_id: str | None
     text: str
     usage: TokenUsage = field(default_factory=TokenUsage)
     function_calls: list[ToolCall] = field(default_factory=list)
-    apply_patch_calls: list[ApplyPatchCall] = field(default_factory=list)
-    shell_calls: list[ShellCall] = field(default_factory=list)
     # Reasoning summary text extracted from OpenAI ``reasoning`` output items.
     reasoning_summary: str = ""
     # Provider-specific opaque data (e.g. raw Anthropic content blocks for
@@ -121,7 +107,7 @@ class CompletedResponse:
 
     @property
     def has_tool_calls(self) -> bool:
-        return bool(self.function_calls or self.apply_patch_calls or self.shell_calls)
+        return bool(self.function_calls)
 
 
 @dataclass(slots=True)

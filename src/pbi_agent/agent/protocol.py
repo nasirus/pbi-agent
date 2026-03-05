@@ -5,9 +5,7 @@ import re
 from typing import Any
 
 from pbi_agent.models.messages import (
-    ApplyPatchCall,
     CompletedResponse,
-    ShellCall,
     TokenUsage,
     ToolCall,
 )
@@ -124,8 +122,6 @@ def parse_completed_response(
     text_parts: list[str] = []
     reasoning_summary_parts: list[str] = []
     function_calls: list[ToolCall] = []
-    apply_patch_calls: list[ApplyPatchCall] = []
-    shell_calls: list[ShellCall] = []
 
     for item in response_obj.get("output", []):
         item_type = item.get("type")
@@ -161,24 +157,6 @@ def parse_completed_response(
                     arguments=parsed_args,
                 )
             )
-        elif item_type == "apply_patch_call":
-            operation = item.get("operation")
-            if isinstance(operation, dict):
-                apply_patch_calls.append(
-                    ApplyPatchCall(
-                        call_id=item.get("call_id", ""),
-                        operation=operation,
-                    )
-                )
-        elif item_type == "shell_call":
-            action = item.get("action")
-            if isinstance(action, dict):
-                shell_calls.append(
-                    ShellCall(
-                        call_id=item.get("call_id", ""),
-                        action=action,
-                    )
-                )
 
     usage_obj = response_obj.get("usage", {})
     input_tokens = (
@@ -217,6 +195,4 @@ def parse_completed_response(
             reasoning_tokens=reasoning_tokens,
         ),
         function_calls=function_calls,
-        apply_patch_calls=apply_patch_calls,
-        shell_calls=shell_calls,
     )

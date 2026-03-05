@@ -122,10 +122,8 @@ def _run_tool_iterations(
     while response.has_tool_calls:
         display.debug("model requested tool execution")
         _log.debug(
-            "Executing tool iteration: fn=%d patch=%d shell=%d",
+            "Executing tool iteration: %d function call(s)",
             len(response.function_calls),
-            len(response.apply_patch_calls),
-            len(response.shell_calls),
         )
 
         try:

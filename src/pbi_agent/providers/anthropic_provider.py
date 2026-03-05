@@ -4,9 +4,8 @@ Uses direct HTTP calls (``urllib.request``) to the Anthropic Messages API.
 Conversation history is managed client-side by maintaining a full
 ``messages`` list that is sent with every request.
 
-Native tools:
-- ``bash_20250124``  (bash tool)
-- ``text_editor_20250728``  (str_replace_based_edit_tool)
+All tools (including shell and apply_patch) are registered function tools
+— no provider-specific native tool types.
 """
 
 from __future__ import annotations
@@ -19,16 +18,10 @@ import urllib.request
 from typing import Any
 
 from pbi_agent.agent.system_prompt import get_system_prompt
-from pbi_agent.agent.tool_runtime import execute_tool_calls
+from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
 from pbi_agent.display import Display
 from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
-from pbi_agent.providers.anthropic_tools import (
-    BashExecutionResult,
-    close_bash_session,
-    execute_bash,
-    execute_text_editor,
-)
 from pbi_agent.providers.base import Provider
 from pbi_agent.tools.registry import get_anthropic_tool_definitions
 
@@ -36,10 +29,6 @@ _log = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
-
-# Native tool names used by Anthropic
-_BASH_TOOL_NAME = "bash"
-_TEXT_EDITOR_TOOL_NAME = "str_replace_based_edit_tool"
 
 # Map the CLI reasoning-effort values to Anthropic adaptive thinking effort.
 _EFFORT_MAP: dict[str, str] = {
@@ -72,7 +61,7 @@ class AnthropicProvider(Provider):
             )
 
     def close(self) -> None:
-        close_bash_session()
+        pass
 
     # -- request_turn --------------------------------------------------------
 
@@ -125,11 +114,8 @@ class AnthropicProvider(Provider):
     ) -> tuple[list[dict[str, Any]], bool]:
         """Execute all tool calls in the response.
 
-        Anthropic tool calls are unified as ``tool_use`` content blocks.
-        We dispatch based on tool name:
-        - ``bash`` → bash executor
-        - ``str_replace_based_edit_tool`` → text editor executor
-        - anything else → registered function tool handler
+        All ``tool_use`` content blocks are routed through the registered
+        function tool handlers via ``tool_runtime.execute_tool_calls``.
         """
         # The raw content blocks are stored in provider_data.
         pdata = response.provider_data or {}
@@ -141,139 +127,39 @@ class AnthropicProvider(Provider):
         if not tool_use_blocks:
             return [], False
 
-        had_errors = False
+        # Convert Anthropic tool_use blocks to ToolCall objects so we can
+        # reuse the existing tool_runtime.
+        fn_calls = [
+            ToolCall(
+                call_id=b.get("id", ""),
+                name=b.get("name", ""),
+                arguments=b.get("input"),
+            )
+            for b in tool_use_blocks
+        ]
+
+        display.function_start(len(fn_calls))
+        batch = _execute_tool_calls(fn_calls, max_workers=max_workers)
+        had_errors = batch.had_errors
+
         tool_result_items: list[dict[str, Any]] = []
-
-        # Separate native tool calls from function tool calls
-        bash_calls: list[dict[str, Any]] = []
-        editor_calls: list[dict[str, Any]] = []
-        function_tool_uses: list[dict[str, Any]] = []
-
-        for block in tool_use_blocks:
-            name = block.get("name", "")
-            if name == _BASH_TOOL_NAME:
-                bash_calls.append(block)
-            elif name == _TEXT_EDITOR_TOOL_NAME:
-                editor_calls.append(block)
-            else:
-                function_tool_uses.append(block)
-
-        # --- bash calls ----------------------------------------------------
-        if bash_calls:
-            commands: list[str] = []
-            for block in bash_calls:
-                input_data = block.get("input", {})
-                if input_data.get("restart"):
-                    commands.append("[restart bash session]")
-                else:
-                    commands.append(input_data.get("command", "<no command>"))
-            display.shell_start(commands)
-            for block in bash_calls:
-                tool_id = block.get("id", "")
-                input_data = block.get("input", {})
-                command = (
-                    "[restart bash session]"
-                    if input_data.get("restart")
-                    else input_data.get("command", "<no command>")
-                )
-
-                try:
-                    result = execute_bash(input_data)
-                except Exception as exc:
-                    _log.exception("Anthropic bash tool execution crashed")
-                    result = BashExecutionResult(
-                        output=f"Error: Bash tool execution failed: {exc}",
-                        exit_code=1,
-                        timed_out=False,
-                        is_error=True,
-                    )
-
-                display.shell_command(
-                    command=command,
-                    exit_code=result.exit_code,
-                    timed_out=result.timed_out,
-                    call_id=tool_id,
-                )
-
-                had_errors = had_errors or result.is_error
-                tool_result_items.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_id,
-                        "content": result.output,
-                        **({"is_error": True} if result.is_error else {}),
-                    }
-                )
-            display.tool_group_end()
-
-        # --- text editor calls ---------------------------------------------
-        if editor_calls:
-            display.patch_start(len(editor_calls))
-            for block in editor_calls:
-                tool_id = block.get("id", "")
-                input_data = block.get("input", {})
-                cmd = input_data.get("command", "unknown")
-                path = input_data.get("path", "<missing>")
-
-                try:
-                    result_text = execute_text_editor(input_data)
-                except Exception as exc:
-                    _log.exception("Anthropic text editor tool execution crashed")
-                    result_text = f"Error: Text editor tool execution failed: {exc}"
-                is_error = result_text.startswith("Error:")
-
-                display.patch_result(
-                    path=path,
-                    operation=cmd,
-                    success=not is_error,
-                    call_id=tool_id,
-                    detail=result_text if is_error else "",
-                )
-
-                had_errors = had_errors or is_error
-                tool_result_items.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_id,
-                        "content": result_text,
-                        **({"is_error": True} if is_error else {}),
-                    }
-                )
-            display.tool_group_end()
-
-        # --- custom function calls -----------------------------------------
-        if function_tool_uses:
-            # Convert Anthropic tool_use blocks to ToolCall objects so we can
-            # reuse the existing tool_runtime.
-            fn_calls = [
-                ToolCall(
-                    call_id=b.get("id", ""),
-                    name=b.get("name", ""),
-                    arguments=b.get("input"),
-                )
-                for b in function_tool_uses
-            ]
-            display.function_start(len(fn_calls))
-            batch = execute_tool_calls(fn_calls, max_workers=max_workers)
-            had_errors = had_errors or batch.had_errors
-
-            for result in batch.results:
-                call = _find_by_id(fn_calls, result.call_id)
-                display.function_result(
-                    name=call.name if call else "unknown",
-                    success=not result.is_error,
-                    call_id=result.call_id,
-                    arguments=call.arguments if call else None,
-                )
-                tool_result_items.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": result.call_id,
-                        "content": result.output_json,
-                        **({"is_error": True} if result.is_error else {}),
-                    }
-                )
-            display.tool_group_end()
+        for result in batch.results:
+            call = _find_by_id(fn_calls, result.call_id)
+            display.function_result(
+                name=call.name if call else "unknown",
+                success=not result.is_error,
+                call_id=result.call_id,
+                arguments=call.arguments if call else None,
+            )
+            tool_result_items.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": result.call_id,
+                    "content": result.output_json,
+                    **({"is_error": True} if result.is_error else {}),
+                }
+            )
+        display.tool_group_end()
 
         return tool_result_items, had_errors
 
@@ -451,10 +337,6 @@ class AnthropicProvider(Provider):
 
             elif block_type == "tool_use":
                 name = block.get("name", "")
-                # For the has_tool_calls check, we put ALL tool uses
-                # (including native ones) into function_calls as a
-                # lightweight signal.  The actual dispatch in
-                # execute_tool_calls uses provider_data.
                 function_calls.append(
                     ToolCall(
                         call_id=block.get("id", ""),

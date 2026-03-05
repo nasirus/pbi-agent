@@ -9,9 +9,13 @@ _REGISTRY: dict[str, tuple[ToolSpec, ToolHandler]] = {}
 # --- built-in function tools -----------------------------------------------
 from pbi_agent.tools.skill_knowledge import SPEC as _sk_spec, handle as _sk_handle  # noqa: E402
 from pbi_agent.tools.init_report import SPEC as _ir_spec, handle as _ir_handle  # noqa: E402
+from pbi_agent.tools.shell import SPEC as _sh_spec, handle as _sh_handle  # noqa: E402
+from pbi_agent.tools.apply_patch import SPEC as _ap_spec, handle as _ap_handle  # noqa: E402
 
 _REGISTRY[_sk_spec.name] = (_sk_spec, _sk_handle)
 _REGISTRY[_ir_spec.name] = (_ir_spec, _ir_handle)
+_REGISTRY[_sh_spec.name] = (_sh_spec, _sh_handle)
+_REGISTRY[_ap_spec.name] = (_ap_spec, _ap_handle)
 
 
 def get_tool_specs() -> list[ToolSpec]:
@@ -33,7 +37,12 @@ def get_tool_spec(name: str) -> ToolSpec | None:
 
 
 def get_openai_tool_definitions() -> list[dict[str, Any]]:
-    tools: list[dict[str, Any]] = [{"type": "apply_patch"}, {"type": "shell"}]
+    """Return tool definitions in OpenAI Responses API format.
+
+    All tools are now registered function tools — no provider-specific
+    native types.
+    """
+    tools: list[dict[str, Any]] = []
     for spec in get_tool_specs():
         tools.append(
             {
@@ -49,16 +58,10 @@ def get_openai_tool_definitions() -> list[dict[str, Any]]:
 def get_anthropic_tool_definitions() -> list[dict[str, Any]]:
     """Return tool definitions in Anthropic Messages API format.
 
-    Native tools (bash, text_editor) use Anthropic's schema-less format.
-    Custom function tools are converted from the registry.
+    All tools are now registered function tools — no provider-specific
+    native types.
     """
-    tools: list[dict[str, Any]] = [
-        {"type": "bash_20250124", "name": "bash"},
-        {
-            "type": "text_editor_20250728",
-            "name": "str_replace_based_edit_tool",
-        },
-    ]
+    tools: list[dict[str, Any]] = []
     for spec in get_tool_specs():
         tools.append(
             {

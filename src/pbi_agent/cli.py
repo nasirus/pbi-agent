@@ -327,7 +327,9 @@ def _handle_web_command(args: argparse.Namespace, settings: Settings) -> int:
         python_dir / "textual.cmd",
         python_dir / "textual",
     ]
-    textual_cli = next((str(path) for path in textual_candidates if path.exists()), None)
+    textual_cli = next(
+        (str(path) for path in textual_candidates if path.exists()), None
+    )
     if textual_cli is None:
         textual_cli = shutil.which("textual")
     if textual_cli is None:
