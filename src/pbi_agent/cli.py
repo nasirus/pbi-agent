@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _handle_chat_command(settings: Settings) -> int:
-    from pbi_agent.display import ChatApp
+    from pbi_agent.ui import ChatApp
 
     app = ChatApp(settings=settings, verbose=settings.verbose)
     app.run()
@@ -241,7 +241,7 @@ def _handle_chat_command(settings: Settings) -> int:
 
 
 def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
-    from pbi_agent.display import ChatApp
+    from pbi_agent.ui import ChatApp
 
     app = ChatApp(
         settings=settings,
@@ -259,7 +259,7 @@ def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
         AUDIT_TODO_FILENAME,
         build_audit_prompt,
     )
-    from pbi_agent.display import ChatApp
+    from pbi_agent.ui import ChatApp
 
     report_dir_input = args.report_dir or Path(".")
     report_dir = (Path.cwd() / report_dir_input).resolve()

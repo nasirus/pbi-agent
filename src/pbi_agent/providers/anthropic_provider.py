@@ -20,7 +20,7 @@ from typing import Any
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
-from pbi_agent.display import Display
+from pbi_agent.ui import Display
 from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
 from pbi_agent.providers.base import Provider
 from pbi_agent.tools.registry import get_anthropic_tool_definitions

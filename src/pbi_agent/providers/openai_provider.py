@@ -33,7 +33,7 @@ from pbi_agent.agent.ws_client import (
     WebSocketClientTransientError,
 )
 from pbi_agent.config import Settings
-from pbi_agent.display import Display
+from pbi_agent.ui import Display
 from pbi_agent.models.messages import CompletedResponse, TokenUsage
 from pbi_agent.providers.base import Provider
 from pbi_agent.tools.registry import get_openai_tool_definitions
