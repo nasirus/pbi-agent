@@ -99,6 +99,7 @@ pbi-agent web --port 8000
 - An API key for one of the supported LLM providers:
   - **OpenAI** (default) -- requires `OPENAI_API_KEY`
   - **Anthropic** -- requires `ANTHROPIC_API_KEY`, pass `--provider anthropic` to the CLI
+  - **Generic OpenAI-compatible** (e.g. OpenRouter) -- requires `GENERIC_API_KEY`, pass `--provider generic`
 
 ### Installing uv
 
@@ -202,7 +203,8 @@ pbi-agent chat
 | --- | --- | --- |
 | `OPENAI_API_KEY` | OpenAI API key (required for the default provider) | -- |
 | `ANTHROPIC_API_KEY` | Anthropic API key (required with `--provider anthropic`) | -- |
-| `PBI_AGENT_PROVIDER` | LLM provider (`openai` or `anthropic`) | `openai` |
+| `GENERIC_API_KEY` | API key for generic OpenAI-compatible provider (required with `--provider generic`) | -- |
+| `PBI_AGENT_PROVIDER` | LLM provider (`openai`, `anthropic`, or `generic`) | `openai` |
 | `PBI_AGENT_MODEL` | Model override | `gpt-5.4-2026-03-05` |
 | `PBI_AGENT_MAX_TOKENS` | Max output tokens | `16384` |
 | `PBI_AGENT_REASONING_EFFORT` | Reasoning effort (`low`, `medium`, `high`, `xhigh`) | `xhigh` |
@@ -211,6 +213,7 @@ pbi-agent chat
 | `PBI_AGENT_COMPACT_THRESHOLD` | Context compaction token threshold | `150000` |
 | `PBI_AGENT_WS_URL` | Custom WebSocket endpoint | `wss://api.openai.com/v1/responses` |
 | `PBI_AGENT_RESPONSES_URL` | Custom HTTP Responses endpoint | derived from WS URL |
+| `PBI_AGENT_GENERIC_API_URL` | Generic OpenAI-compatible Chat Completions endpoint | `https://openrouter.ai/api/v1/chat/completions` |
 
 You can also place these in a `.env` file in your project root.
 
@@ -224,7 +227,7 @@ pbi-agent --provider anthropic --model claude-opus-4-6 chat
 
 ## How It Works
 
-`pbi-agent` connects to the OpenAI Responses WebSocket API (or Anthropic Messages API) and runs an agentic loop:
+`pbi-agent` connects to the OpenAI Responses WebSocket API, Anthropic Messages API, or a generic OpenAI-compatible Chat Completions API and runs an agentic loop:
 
 1. Your prompt is sent alongside the agent's system instructions and tool definitions.
 2. The model responds with text, reasoning, or tool calls.
@@ -280,7 +283,8 @@ uv run pbi-agent --help
     │   └── audit_prompt.py     # 90+ rule audit prompt builder
     ├── providers/
     │   ├── openai_provider.py  # OpenAI Responses WebSocket provider
-    │   └── anthropic_provider.py # Anthropic Messages HTTP provider
+    │   ├── anthropic_provider.py # Anthropic Messages HTTP provider
+    │   └── generic_provider.py # Generic OpenAI-compatible Chat Completions HTTP provider
     ├── tools/
     │   ├── registry.py         # Tool registration and format conversion
     │   ├── shell.py            # Shell command execution

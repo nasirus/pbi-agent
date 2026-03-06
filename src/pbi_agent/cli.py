@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     provider_group = parser.add_argument_group("Provider and API")
     provider_group.add_argument(
         "--provider",
-        choices=["openai", "anthropic"],
+        choices=["openai", "anthropic", "generic"],
         default=None,
         help="LLM provider backend (default: openai).",
     )
@@ -53,6 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     provider_group.add_argument(
         "--anthropic-api-key",
         help="Override ANTHROPIC_API_KEY.",
+    )
+    provider_group.add_argument(
+        "--generic-api-key",
+        help="Override GENERIC_API_KEY.",
+    )
+    provider_group.add_argument(
+        "--generic-api-url",
+        help="Override generic OpenAI-compatible Chat Completions URL.",
     )
 
     model_group = parser.add_argument_group("Model behavior")
@@ -299,13 +307,14 @@ def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _settings_env(settings: Settings) -> dict[str, str]:
-    selected_model = (
-        settings.model if settings.provider == "openai" else settings.anthropic_model
-    )
+    selected_model = settings.model
+    if settings.provider == "anthropic":
+        selected_model = settings.anthropic_model
     env: dict[str, str] = {
         "PBI_AGENT_PROVIDER": settings.provider,
         "PBI_AGENT_WS_URL": settings.ws_url,
         "PBI_AGENT_RESPONSES_URL": settings.responses_url,
+        "PBI_AGENT_GENERIC_API_URL": settings.generic_api_url,
         "PBI_AGENT_MODEL": selected_model,
         "PBI_AGENT_REASONING_EFFORT": settings.reasoning_effort,
         "PBI_AGENT_MAX_TOOL_WORKERS": str(settings.max_tool_workers),
@@ -316,8 +325,10 @@ def _settings_env(settings: Settings) -> dict[str, str]:
     if settings.api_key:
         if settings.provider == "openai":
             env["OPENAI_API_KEY"] = settings.api_key
-        else:
+        elif settings.provider == "anthropic":
             env["ANTHROPIC_API_KEY"] = settings.api_key
+        else:
+            env["GENERIC_API_KEY"] = settings.api_key
     return env
 
 
