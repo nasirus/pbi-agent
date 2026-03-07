@@ -22,7 +22,7 @@ Power BI development involves a large amount of repetitive, manual work: creatin
 - **Consistent quality** -- The built-in audit engine checks 90+ rules across modeling, performance, security, and DAX quality, catching issues that manual reviews miss.
 - **Lower barrier to entry** -- Junior developers and analysts can produce well-structured reports without deep Power BI expertise; the agent encodes best practices into every action it takes.
 - **Repeatable workflows** -- Single-turn prompts (`pbi-agent run`) integrate into scripts and CI pipelines, making report generation and auditing automatable.
-- **Bring your own model** -- Works with **OpenAI** (GPT-5.4, default) and **Anthropic** (Claude Opus, Sonnet). Switch providers with a single flag (`--provider anthropic`).
+- **Bring your own model** -- Works with **OpenAI** (GPT-5.4, default), **xAI** (`grok-4-1-fast-reasoning`), and **Anthropic** (Claude Opus, Sonnet). Switch providers with a single flag (`--provider xai` or `--provider anthropic`).
 
 ## Use Cases
 
@@ -97,6 +97,7 @@ pbi-agent run --prompt "List all measures in the semantic model that lack descri
 - [`uv`](https://docs.astral.sh/uv/) (recommended) or `pip`
 - An API key for one of the supported LLM providers:
   - Set `PBI_AGENT_API_KEY`
+  - Use `--provider xai` for xAI
   - Use `--provider anthropic` for Anthropic
   - Use `--provider generic` for OpenAI-compatible gateways such as OpenRouter
 
@@ -197,8 +198,8 @@ A browser-based chat UI opens at `http://localhost:8000`. Start describing what 
 | Variable | Description | Default |
 | --- | --- | --- |
 | `PBI_AGENT_API_KEY` | API key for the selected provider | -- |
-| `PBI_AGENT_PROVIDER` | LLM provider (`openai`, `anthropic`, or `generic`) | `openai` |
-| `PBI_AGENT_MODEL` | Model override | `gpt-5.4-2026-03-05` for OpenAI, `claude-opus-4-6` for Anthropic, provider default for generic |
+| `PBI_AGENT_PROVIDER` | LLM provider (`openai`, `xai`, `anthropic`, or `generic`) | `openai` |
+| `PBI_AGENT_MODEL` | Model override | `gpt-5.4-2026-03-05` for OpenAI, `grok-4-1-fast-reasoning` for xAI, `claude-opus-4-6` for Anthropic, provider default for generic |
 | `PBI_AGENT_MAX_TOKENS` | Max output tokens | `16384` |
 | `PBI_AGENT_REASONING_EFFORT` | Reasoning effort (`low`, `medium`, `high`, `xhigh`) | `xhigh` |
 | `PBI_AGENT_MAX_TOOL_WORKERS` | Parallel tool execution threads | `4` |
@@ -209,6 +210,17 @@ A browser-based chat UI opens at `http://localhost:8000`. Start describing what 
 | `PBI_AGENT_GENERIC_API_URL` | Generic OpenAI-compatible Chat Completions endpoint | `https://openrouter.ai/api/v1/chat/completions` |
 
 You can also place these in a `.env` file in your project root.
+
+If you already have a provider-specific API key in your environment, `pbi-agent` picks it up automatically -- no need to set `PBI_AGENT_API_KEY`:
+
+| Provider | Environment variable |
+| --- | --- |
+| OpenAI | `OPENAI_API_KEY` |
+| xAI | `XAI_API_KEY` |
+| Anthropic | `ANTHROPIC_API_KEY` |
+| Generic | `GENERIC_API_KEY` |
+
+`PBI_AGENT_API_KEY` takes precedence when set. Otherwise the provider-specific variable for the active `--provider` is used.
 
 ### CLI flags
 
@@ -226,6 +238,12 @@ To use **Anthropic**:
 pbi-agent --provider anthropic --model claude-opus-4-6
 ```
 
+To use **xAI**:
+
+```bash
+pbi-agent --provider xai --model grok-4-1-fast-reasoning
+```
+
 To use **OpenRouter** (or any OpenAI-compatible gateway) with a specific model:
 
 ```bash
@@ -234,7 +252,7 @@ pbi-agent --provider generic --model z-ai/glm-5
 
 ## How It Works
 
-`pbi-agent` connects to the OpenAI Responses WebSocket API, Anthropic Messages API, or a generic OpenAI-compatible Chat Completions API and runs an agentic loop:
+`pbi-agent` connects to the OpenAI Responses WebSocket API, xAI Responses HTTP API, Anthropic Messages API, or a generic OpenAI-compatible Chat Completions API and runs an agentic loop:
 
 1. Your prompt is sent alongside the agent's system instructions and tool definitions.
 2. The model responds with text, reasoning, or tool calls.

@@ -16,6 +16,7 @@ def create_provider(settings: Settings) -> Provider:
     The ``settings.provider`` field selects the backend:
 
     - ``"openai"`` (default) → OpenAI Responses WebSocket provider
+    - ``"xai"``              → xAI Responses HTTP provider
     - ``"anthropic"``        → Anthropic Messages HTTP provider
     - ``"generic"``          → OpenAI-compatible Chat Completions HTTP provider
     """
@@ -25,6 +26,11 @@ def create_provider(settings: Settings) -> Provider:
         from pbi_agent.providers.openai_provider import OpenAIProvider
 
         return OpenAIProvider(settings)
+
+    if name == "xai":
+        from pbi_agent.providers.xai_provider import XAIProvider
+
+        return XAIProvider(settings)
 
     if name == "anthropic":
         from pbi_agent.providers.anthropic_provider import AnthropicProvider
@@ -37,7 +43,7 @@ def create_provider(settings: Settings) -> Provider:
         return GenericProvider(settings)
 
     raise ValueError(
-        f"Unknown provider {name!r}. Supported: openai, anthropic, generic."
+        f"Unknown provider {name!r}. Supported: openai, xai, anthropic, generic."
     )
 
 

@@ -9,12 +9,16 @@ from dotenv import load_dotenv
 
 DEFAULT_WS_URL = "wss://api.openai.com/v1/responses"
 DEFAULT_RESPONSES_URL = "https://api.openai.com/v1/responses"
+DEFAULT_XAI_WS_URL = "wss://api.x.ai/v1/responses"
+DEFAULT_XAI_RESPONSES_URL = "https://api.x.ai/v1/responses"
 DEFAULT_GENERIC_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "gpt-5.4-2026-03-05"
+DEFAULT_XAI_MODEL = "grok-4-1-fast-reasoning"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-6"
 DEFAULT_ANTHROPIC_MAX_TOKENS = 16384
-LEGACY_PROVIDER_API_KEY_ENVS = {
+PROVIDER_API_KEY_ENVS = {
     "openai": "OPENAI_API_KEY",
+    "xai": "XAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "generic": "GENERIC_API_KEY",
 }
@@ -43,11 +47,18 @@ class Settings:
     anthropic_max_tokens: int = DEFAULT_ANTHROPIC_MAX_TOKENS
 
     def validate(self) -> None:
-        if self.provider not in {"openai", "anthropic", "generic"}:
-            raise ConfigError("--provider must be one of: openai, anthropic, generic.")
+        if self.provider not in {"openai", "xai", "anthropic", "generic"}:
+            raise ConfigError(
+                "--provider must be one of: openai, xai, anthropic, generic."
+            )
         if self.provider == "openai" and not self.api_key:
             raise ConfigError(
                 "Missing API key for provider 'openai'. Set PBI_AGENT_API_KEY in "
+                "environment or pass --api-key."
+            )
+        if self.provider == "xai" and not self.api_key:
+            raise ConfigError(
+                "Missing API key for provider 'xai'. Set PBI_AGENT_API_KEY in "
                 "environment or pass --api-key."
             )
         if self.provider == "anthropic" and not self.api_key:
@@ -110,6 +121,20 @@ def _default_responses_url(ws_url: str) -> str:
     )
 
 
+def _default_ws_url(provider: str) -> str:
+    if provider == "xai":
+        return DEFAULT_XAI_WS_URL
+    return DEFAULT_WS_URL
+
+
+def _default_model(provider: str) -> str:
+    if provider == "generic":
+        return ""
+    if provider == "xai":
+        return DEFAULT_XAI_MODEL
+    return DEFAULT_MODEL
+
+
 def resolve_settings(args: argparse.Namespace) -> Settings:
     load_dotenv()
 
@@ -121,9 +146,9 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
     api_key = (
         getattr(args, "api_key", None)
         or os.getenv("PBI_AGENT_API_KEY", "")
-        or os.getenv(LEGACY_PROVIDER_API_KEY_ENVS.get(provider, ""), "")
+        or os.getenv(PROVIDER_API_KEY_ENVS.get(provider, ""), "")
     )
-    ws_url = args.ws_url or os.getenv("PBI_AGENT_WS_URL") or DEFAULT_WS_URL
+    ws_url = args.ws_url or os.getenv("PBI_AGENT_WS_URL") or _default_ws_url(provider)
     responses_url_override = getattr(args, "responses_url", None) or os.getenv(
         "PBI_AGENT_RESPONSES_URL"
     )
@@ -132,14 +157,14 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
     )
     responses_url = responses_url_override or _default_responses_url(ws_url)
     model_override = args.model or os.getenv("PBI_AGENT_MODEL")
-    model = model_override or (DEFAULT_MODEL if provider != "generic" else "")
+    model = model_override or _default_model(provider)
     max_tool_workers = args.max_tool_workers
     if max_tool_workers is None:
         max_tool_workers = int(os.getenv("PBI_AGENT_MAX_TOOL_WORKERS", "4"))
     ws_max_retries = args.ws_max_retries
     if ws_max_retries is None:
         ws_max_retries = int(os.getenv("PBI_AGENT_WS_MAX_RETRIES", "2"))
-    default_effort = "high" if provider == "anthropic" else "xhigh"
+    default_effort = "high" if provider in {"anthropic", "xai"} else "xhigh"
     reasoning_effort = (
         args.reasoning_effort
         or os.getenv("PBI_AGENT_REASONING_EFFORT")

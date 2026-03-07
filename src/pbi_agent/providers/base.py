@@ -40,8 +40,8 @@ class Provider(ABC):
 
         Exactly one of *user_message* or *tool_result_items* should be
         provided.  The provider manages history internally (server-side
-        ``previous_response_id`` for OpenAI, client-side ``messages`` list
-        for Anthropic).
+        ``previous_response_id`` for OpenAI/xAI, client-side ``messages``
+        list for Anthropic and generic chat-completions providers).
         """
 
     @abstractmethod
