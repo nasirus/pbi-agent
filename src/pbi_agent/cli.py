@@ -14,6 +14,7 @@ from pbi_agent.init_command import init_report
 from pbi_agent.log_config import configure_logging
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_COMMAND = "web"
 
 
 class CleanHelpFormatter(argparse.HelpFormatter):
@@ -27,8 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pbi-agent",
         description="Power BI editing coding agent (foundation v1).",
-        usage="%(prog)s [GLOBAL OPTIONS] <command> [COMMAND OPTIONS]",
-        epilog="Run `pbi-agent <command> --help` for command-specific options.",
+        usage="%(prog)s [GLOBAL OPTIONS] [<command>] [COMMAND OPTIONS]",
+        epilog=(
+            "Run `pbi-agent <command> --help` for command-specific options. "
+            "Defaults to `web` when no command is provided."
+        ),
         formatter_class=CleanHelpFormatter,
         allow_abbrev=False,
     )
@@ -120,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(
         dest="command",
-        required=True,
+        required=False,
         title="Commands",
         metavar="<command>",
     )
@@ -201,14 +205,69 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _argv_with_default_command(
+    parser: argparse.ArgumentParser, raw_argv: list[str]
+) -> list[str]:
+    argv = list(raw_argv)
+    if not argv:
+        return [DEFAULT_COMMAND]
+
+    insert_at = _default_command_insertion_index(parser, argv)
+    if insert_at is None:
+        return argv
+    return [*argv[:insert_at], DEFAULT_COMMAND, *argv[insert_at:]]
+
+
+def _default_command_insertion_index(
+    parser: argparse.ArgumentParser, argv: list[str]
+) -> int | None:
+    command_names = _subcommand_names(parser)
+    option_actions = parser._option_string_actions
+    index = 0
+
+    while index < len(argv):
+        token = argv[index]
+
+        if token in command_names or token in {"-h", "--help"}:
+            return None
+        if token == "--":
+            return index
+        if not token.startswith("-"):
+            return index
+
+        option_token = token
+        if token.startswith("--") and "=" in token:
+            option_token = token.split("=", 1)[0]
+            action = option_actions.get(option_token)
+            if action is None:
+                return index
+            index += 1
+            continue
+
+        action = option_actions.get(option_token)
+        if action is None:
+            return index
+        if action.nargs == 0:
+            index += 1
+            continue
+        if index + 1 >= len(argv):
+            return None
+        index += 2
+
+    return len(argv)
+
+
+def _subcommand_names(parser: argparse.ArgumentParser) -> set[str]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return set(action.choices)
+    return set()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    raw_argv = sys.argv[1:] if argv is None else argv
-    if not raw_argv:
-        parser.print_help()
-        return 0
-
-    args = parser.parse_args(raw_argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(_argv_with_default_command(parser, raw_argv))
 
     # ---- commands that don't need settings or the TUI ----
 
