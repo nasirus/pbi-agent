@@ -6,6 +6,7 @@
 
 *Transform data into decisions.*
 
+[![Tests](https://github.com/nasirus/pbi-agent/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/nasirus/pbi-agent/actions/workflows/tests.yml)
 [![Publish](https://github.com/nasirus/pbi-agent/actions/workflows/publish.yml/badge.svg)](https://github.com/nasirus/pbi-agent/actions/workflows/publish.yml)
 [![Release](https://github.com/nasirus/pbi-agent/actions/workflows/release.yml/badge.svg)](https://github.com/nasirus/pbi-agent/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
