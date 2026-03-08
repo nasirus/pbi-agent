@@ -407,10 +407,10 @@ def _extract_retry_after(exc: urllib.error.HTTPError, attempt: int) -> float:
     try:
         retry_after = exc.headers.get("Retry-After") if exc.headers else None
         if retry_after:
-            return max(0.1, min(float(retry_after), 60.0))
+            return max(0.1, min(float(retry_after), 60.0)) + 1.0
     except (TypeError, ValueError):
         pass
-    return min(2.0 * (2**attempt), 30.0)
+    return min(2.0 * (2**attempt), 30.0) + 1.0
 
 
 def _waiting_message_for_input_items(input_items: list[dict[str, Any]]) -> str:

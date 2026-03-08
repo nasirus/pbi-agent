@@ -466,10 +466,10 @@ def test_openai_request_turn_retries_after_rate_limit_and_renders_reasoning(
 
     assert response.text == "Recovered."
     assert len(requests) == 2
-    assert waits == [0.25]
+    assert waits == [1.25]
     assert display_spy.wait_messages == ["analyzing your request..."]
     assert display_spy.retry_notices == [(1, 1)]
-    assert display_spy.rate_limit_notices == [(0.25, 1, 1)]
+    assert display_spy.rate_limit_notices == [(1.25, 1, 1)]
     assert display_spy.thinking_calls == [
         {
             "text": "Checked the request before answering.",
