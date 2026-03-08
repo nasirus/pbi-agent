@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="PBI Agent logo" width="120">
+<img src="src/pbi_agent/web/static/favicon.svg" alt="PBI Agent logo" width="120">
 
 # PBI AGENT
 
