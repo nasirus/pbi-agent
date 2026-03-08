@@ -1,13 +1,15 @@
 <div align="center">
 
-<pre style="display: inline-block; text-align: left; margin: 0 auto;">
-              ████
-              ████
-        ████  ████
-        ████  ████
-  ████  ████  ████
-  ████  ████  ████
-</pre>
+<p align="center">
+<code>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;████<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;████<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;████&nbsp;&nbsp;████<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;████&nbsp;&nbsp;████<br>
+&nbsp;&nbsp;████&nbsp;&nbsp;████&nbsp;&nbsp;████<br>
+&nbsp;&nbsp;████&nbsp;&nbsp;████&nbsp;&nbsp;████
+</code>
+</p>
 
 # PBI AGENT
 
