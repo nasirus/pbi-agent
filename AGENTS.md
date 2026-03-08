@@ -1,6 +1,13 @@
 # Project Goal
 
-Provide a local CLI foundation for a Power BI editing agent over the OpenAI Responses WebSocket API, with tool execution (including parallel tool calls) and report-template bootstrapping.
+Provide a local CLI foundation for a Power BI editing agent with tool execution (including parallel tool calls) and report-template bootstrapping. All provider communication uses synchronous HTTP REST APIs via `urllib.request`:
+
+| Provider | API Shape | Default Endpoint |
+|---|---|---|
+| **OpenAI** (default) | Responses API | `https://api.openai.com/v1/responses` |
+| **xAI** | Responses API | `https://api.x.ai/v1/responses` |
+| **Anthropic** | Messages API | `https://api.anthropic.com/v1/messages` |
+| **Generic** (OpenAI-compatible) | Chat Completions API | `https://openrouter.ai/api/v1/chat/completions` |
 
 ## Running Tests
 

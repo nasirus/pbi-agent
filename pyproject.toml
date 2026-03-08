@@ -1,7 +1,7 @@
 [project]
 name = "pbi-agent"
-version = "0.0.2"
-description = "Power BI editing agent CLI foundation"
+version = "0.0.3"
+description = "Multi-provider LLM CLI agent for editing Power BI reports"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
