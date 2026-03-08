@@ -139,6 +139,7 @@ class ChatInput(TextArea):
     BASE_HEIGHT = 3
     MAX_HEIGHT = 20
     _CHROME_HEIGHT = 2
+    _SUBMIT_KEYS = {"ctrl+s", "ctrl+enter"}
 
     @dataclass
     class Submitted(Message):
@@ -174,8 +175,7 @@ class ChatInput(TextArea):
         self._restart_blink()
         if self.read_only:
             return
-        _submit_keys = {"ctrl+s", "ctrl+enter"}
-        if event.key in _submit_keys or _submit_keys & set(event.aliases):
+        if event.key in self._SUBMIT_KEYS or self._SUBMIT_KEYS & set(event.aliases):
             event.stop()
             event.prevent_default()
             self.post_message(self.Submitted(self, self.text))
