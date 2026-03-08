@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 
@@ -416,58 +418,42 @@ def _settings_env(settings: Settings) -> dict[str, str]:
     return env
 
 
+@contextlib.contextmanager
+def _temporary_env_overrides(env_updates: dict[str, str]):
+    previous = {key: os.environ.get(key) for key in env_updates}
+    os.environ.update(env_updates)
+    try:
+        yield
+    finally:
+        for key, old_value in previous.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
 def _handle_web_command(args: argparse.Namespace, settings: Settings) -> int:
     if args.port < 1 or args.port > 65535:
         print("Error: --port must be between 1 and 65535.", file=sys.stderr)
         return 2
 
-    chat_command: list[str] = [sys.executable, "-m", "pbi_agent"]
-    if settings.verbose:
-        chat_command.append("--verbose")
-    chat_command.append("chat")
-
-    serve_cmd: list[str] = [
-        sys.executable,
-        "-m",
-        "pbi_agent.web.serve",
-        subprocess.list2cmdline(chat_command),
-        "--host",
-        args.host,
-        "--port",
-        str(args.port),
-    ]
-    if args.dev:
-        serve_cmd.append("--dev")
-    if args.title:
-        serve_cmd.extend(["--title", args.title])
-    if args.url:
-        serve_cmd.extend(["--url", args.url])
-
-    env = os.environ.copy()
-    env.update(_settings_env(settings))
-
     browser_url = _browser_target_url(args)
     print(f"Serving web UI on {browser_url}")
+    _start_browser_open_thread(args.host, args.port, browser_url)
+
+    server = _create_web_server(
+        args,
+        _web_chat_command(settings, parent_pid=os.getpid()),
+    )
     try:
-        process = subprocess.Popen(serve_cmd, env=env, **_web_server_popen_kwargs())
+        with _temporary_env_overrides(_settings_env(settings)):
+            server.serve(debug=args.dev)
+            return 0
+    except KeyboardInterrupt:
+        return 130
     except OSError as exc:
         print(f"Error: failed to launch web server: {exc}", file=sys.stderr)
         return 1
-
-    try:
-        if _wait_for_web_server(args.host, args.port):
-            if not webbrowser.open(browser_url):
-                LOGGER.warning("Failed to open browser for %s", browser_url)
-        else:
-            LOGGER.warning(
-                "Timed out waiting for the web server to start before opening %s",
-                browser_url,
-            )
-
-        return process.wait()
-    except KeyboardInterrupt:
-        _shutdown_web_server(process)
-        return 130
 
 
 def _browser_target_url(args: argparse.Namespace) -> str:
@@ -505,28 +491,50 @@ def _wait_for_web_server(host: str, port: int, timeout_seconds: float = 10.0) ->
     return False
 
 
-def _web_server_popen_kwargs() -> dict[str, object]:
-    # Keep the web server in the same console/session so terminal Ctrl+C reaches
-    # both the parent CLI and the child web server process.
-    return {}
+def _start_browser_open_thread(host: str, port: int, browser_url: str) -> None:
+    threading.Thread(
+        target=_open_browser_when_ready,
+        args=(host, port, browser_url),
+        name="pbi-agent-web-browser",
+        daemon=True,
+    ).start()
 
 
-def _shutdown_web_server(
-    process: subprocess.Popen[object], timeout_seconds: float = 5.0
-) -> None:
-    if process.poll() is not None:
+def _open_browser_when_ready(host: str, port: int, browser_url: str) -> None:
+    if _wait_for_web_server(host, port):
+        if not webbrowser.open(browser_url):
+            LOGGER.warning("Failed to open browser for %s", browser_url)
         return
 
-    try:
-        process.terminate()
-    except OSError:
-        return
+    LOGGER.warning(
+        "Timed out waiting for the web server to start before opening %s",
+        browser_url,
+    )
 
-    try:
-        process.wait(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=timeout_seconds)
+
+def _web_chat_command(settings: Settings, *, parent_pid: int) -> str:
+    chat_command: list[str] = [
+        sys.executable,
+        "-m",
+        "pbi_agent.web.chat_entry",
+        "--parent-pid",
+        str(parent_pid),
+    ]
+    if settings.verbose:
+        chat_command.append("--verbose")
+    return subprocess.list2cmdline(chat_command)
+
+
+def _create_web_server(args: argparse.Namespace, command: str) -> object:
+    from pbi_agent.web.serve import _FaviconServer
+
+    return _FaviconServer(
+        command=command,
+        host=args.host,
+        port=args.port,
+        title=args.title,
+        public_url=args.url,
+    )
 
 
 def _handle_init_command(args: argparse.Namespace) -> int:
