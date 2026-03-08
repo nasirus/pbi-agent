@@ -1,13 +1,6 @@
 <div align="center">
 
-```
-              ████
-              ████
-        ████  ████
-        ████  ████
-  ████  ████  ████
-  ████  ████  ████
-```
+<img src="assets/logo.svg" alt="PBI Agent logo" width="120">
 
 # PBI AGENT
 
