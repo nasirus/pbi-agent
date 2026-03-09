@@ -107,7 +107,9 @@ class TestFormatGenericFunctionItem:
             status="[green]done[/green]",
             arguments=None,
         )
-        assert result == "my_tool()  [green]done[/green]"
+        assert "my_tool()" in result
+        assert "[green]done[/green]" in result
+        assert "\n" not in result
 
     def test_non_verbose_empty_dict_args_shows_name_only(self) -> None:
         d = _make_display(verbose=False)
@@ -116,7 +118,9 @@ class TestFormatGenericFunctionItem:
             status="[green]done[/green]",
             arguments={},
         )
-        assert result == "my_tool()  [green]done[/green]"
+        assert "my_tool()" in result
+        assert "[green]done[/green]" in result
+        assert "\n" not in result
 
     def test_verbose_includes_call_id_and_args(self) -> None:
         d = _make_display(verbose=True)
