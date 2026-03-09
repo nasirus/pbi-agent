@@ -50,6 +50,12 @@ uvx ruff check . --fix && uvx ruff format .
 uv run pbi-agent init --dest . --force
 ```
 
+## Docs
+
+- Documentation lives in `docs/` and is built with VitePress.
+- Keep the GitHub Pages base path as `/pbi-agent/` in `docs/.vitepress/config.ts`.
+- Validate docs changes with `npx vitepress build docs` or `npm run docs:build`.
+
 ## Key Constraints
 
 - Keep bundled PBIP template assets under `src/pbi_agent/report/`; packaging relies on `tool.hatch.build.targets.wheel.force-include`.
