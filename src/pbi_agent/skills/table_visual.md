@@ -1,54 +1,43 @@
 # Table Visual
 
-Use PBIR table patterns with `tableEx`, projection ordering, deterministic sort, and high-contrast styling.
+Use this when creating or editing PBIR `tableEx` visuals.
 
 ## Required Structure
 
-- `visual.visualType` must be `"tableEx"`.
-- Bind fields in `visual.query.queryState.Values.projections`.
-- Use exact query casing (`Measure`/`Column`/`Expression`/`SourceRef`/`Property`).
-- Optional: `query.sortDefinition` for deterministic ordering.
+1. Set `visual.visualType` to `"tableEx"`.
+2. Bind fields in `visual.query.queryState.Values.projections` using exact PBIR casing: `Measure` / `Column` / `Expression` / `SourceRef` / `Property`.
+3. Keep `queryRef` equal to the exact semantic-model reference, for example `entityA.Name`.
+4. Give every projection a unique `nativeQueryRef` within the same visual.
+5. When multiple projected fields share the same property name across different entities, never reuse the raw property name for all `nativeQueryRef` values.
 
-## Recommended Pattern
+## Query Projection Rules
 
-- Include stable business keys early in projection order.
-- Add measures and descriptive columns after keys.
-- Use explicit sort on key/date/priority metric.
-- Style via:
-  - `objects.columnHeaders` (`backColor`, `fontColor`)
-  - `objects.grid` (`outlineColor`)
-  - `visualContainerObjects` (`background`, `border`, `dropShadow`)
+1. Projection order controls visible column order; place the most important identifiers, dates, or labels first.
+2. Add explicit `query.sortDefinition` for deterministic ordering.
+3. If multiple entities expose the same property name, alias the `nativeQueryRef` values to stable, entity-specific names.
+4. Keep friendly labels in `displayName`; use `nativeQueryRef` only as the internal unique select-clause alias.
+5. Before finalizing a table visual, scan all projections and confirm no `nativeQueryRef` value appears more than once.
 
 ## Default Styling Pattern if no instructions given
 
-- Header contrast:
-  - `objects.columnHeaders.backColor` uses theme dark color (often black).
-  - `objects.columnHeaders.fontColor` uses theme light color (often white).
-- Grid lines:
-  - `objects.grid.outlineColor` uses dark neutral (`'#252423'`) or black (`'#000000'`) for clear row separation.
-- Container framing:
-  - `visualContainerObjects.background.show = true`
-  - `visualContainerObjects.background.transparency = 0D`
-  - `visualContainerObjects.border.show = true`
-  - `visualContainerObjects.border.radius = 5D`
-  - `visualContainerObjects.border.width = 2D`
-  - Border color can follow brand accent (`'#B6975A'`)
-- Shadow:
-  - Tables in the example use `visualContainerObjects.dropShadow.show = true`
-  - Use `dropShadow.preset = 'Center'` for subtle depth
+1. Keep the standard table design guidance from the base skill.
+2. Use high-contrast headers:
+   - `objects.columnHeaders.backColor` uses the theme dark color.
+   - `objects.columnHeaders.fontColor` uses the theme light color.
+3. Use clear grid separation:
+   - `objects.grid.outlineColor` uses a dark neutral or black.
+4. Keep card-like container framing:
+   - `visualContainerObjects.background.show = true`
+   - `visualContainerObjects.background.transparency = 0D`
+   - `visualContainerObjects.border.show = true`
+   - `visualContainerObjects.border.radius = 5D`
+   - `visualContainerObjects.border.width = 1D` or `2D` depending on the page style
+5. Use subtle depth when consistent with the page:
+   - `visualContainerObjects.dropShadow.show = true`
+   - `visualContainerObjects.dropShadow.preset = "Center"`
+6. Keep the table border radius aligned with cards and slicers on the same page.
 
-## UX/UI Guidance
-
-- Keep a predictable scan path:
-  - Key identifiers first
-  - Status columns next
-  - Numeric measures grouped together
-- Keep the same column order across related pages to reduce user relearning.
-- Avoid excessive column count on operational pages; split into focused tables when needed.
-- Use strong header contrast and moderate grid contrast so dense tables stay readable.
-- Keep table border radius aligned with card/slicer radius for a coherent page style.
-
-## Minimal PBIR Skeleton
+## Correct Pattern
 
 ```json
 {
@@ -61,20 +50,24 @@ Use PBIR table patterns with `tableEx`, projection ordering, deterministic sort,
             {
               "field": {
                 "Column": {
-                  "Expression": { "SourceRef": { "Entity": "<dimension_table>" } },
-                  "Property": "<key_column>"
+                  "Expression": { "SourceRef": { "Entity": "entityA" } },
+                  "Property": "Name"
                 }
               },
-              "queryRef": "<dimension_table>.<key_column>"
+              "queryRef": "entityA.Name",
+              "nativeQueryRef": "EntityAName",
+              "displayName": "Entity A Name"
             },
             {
               "field": {
-                "Measure": {
-                  "Expression": { "SourceRef": { "Entity": "<measure_table>" } },
-                  "Property": "<measure_name>"
+                "Column": {
+                  "Expression": { "SourceRef": { "Entity": "entityB" } },
+                  "Property": "Name"
                 }
               },
-              "queryRef": "<measure_table>.<measure_name>"
+              "queryRef": "entityB.Name",
+              "nativeQueryRef": "EntityBName",
+              "displayName": "Entity B Name"
             }
           ]
         }
@@ -84,8 +77,8 @@ Use PBIR table patterns with `tableEx`, projection ordering, deterministic sort,
           {
             "field": {
               "Column": {
-                "Expression": { "SourceRef": { "Entity": "<dimension_table>" } },
-                "Property": "<sort_column>"
+                "Expression": { "SourceRef": { "Entity": "factTable" } },
+                "Property": "Date"
               }
             },
             "direction": "Descending"
@@ -97,9 +90,15 @@ Use PBIR table patterns with `tableEx`, projection ordering, deterministic sort,
 }
 ```
 
+## Common Mistakes
+
+- Do NOT project `entityA.Name` and `entityB.Name` with the same `nativeQueryRef: "Name"` — use unique aliases such as `EntityAName` and `EntityBName`.
+- Do NOT assume `queryRef` uniqueness is enough — Power BI also requires unique select-clause native references.
+- Do NOT change `queryRef` just to make aliases unique — keep `queryRef` bound to the real model field and change only `nativeQueryRef` / `displayName`.
+
 ## Constraints
 
-- Keep projection order stable; this controls visible column order.
-- Do not switch to legacy `table` visual type.
-- Keep sort/filter definitions aligned with projected fields.
-- If used on drillthrough pages, verify required drillthrough keys are included and visible (or intentionally hidden via formatting).
+- `nativeQueryRef` values must be unique per visual query.
+- `queryRef` must remain aligned to the actual entity and property names in the semantic model.
+- Keep sort and filter definitions aligned with projected fields after any alias change.
+- If the table is used on a drillthrough page, preserve the required business fields and drillthrough keys while fixing aliases.
