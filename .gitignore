@@ -6,9 +6,10 @@ dist/
 wheels/
 *.egg-info
 .tmp-*/
-node_modules/
 docs/.vitepress/.temp/
 docs/.vitepress/cache/
+node_modules/
+
 # Virtual environments
 .venv
 .env

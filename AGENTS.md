@@ -58,8 +58,8 @@ uv run pbi-agent init --dest . --force
 
 ## Code Review
 
-Every pull request must be reviewed before merging. Reviewers should verify the
-following:
+Every pull request must be reviewed before merging. The default branch is `master`
+(not `main`). Reviewers should verify the following:
 
 1. **Correctness** – the implementation solves the stated problem and handles edge
    cases. Actively look for logic errors, off-by-one mistakes, and missing error
