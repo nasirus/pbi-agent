@@ -333,10 +333,6 @@ class Display(DisplayProtocol):
             )
         self._refresh_turn_usage_widget(usage)
 
-    def usage_refresh(self, session_usage: TokenUsage, turn_usage: TokenUsage) -> None:
-        self.session_usage(session_usage)
-        self._refresh_turn_usage_widget(turn_usage)
-
     def _refresh_turn_usage_widget(self, usage: TokenUsage) -> None:
         with self._turn_usage_lock:
             target = self._turn_usage_widgets.get(id(usage))

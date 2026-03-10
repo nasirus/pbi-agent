@@ -92,12 +92,30 @@ def test_debug_honors_verbose_flag(verbose: bool, expected: str) -> None:
 
 def test_usage_section_is_rendered_at_end() -> None:
     display, stdout, _ = _display()
-    session_usage = TokenUsage(input_tokens=8, output_tokens=3, model="gpt-5")
     turn_usage = TokenUsage(input_tokens=8, output_tokens=3, model="gpt-5")
 
     display.session_usage(TokenUsage(model="gpt-5"))
     display.turn_usage(turn_usage, 5.0)
-    display.session_usage(session_usage)
+    display.session_usage(TokenUsage(input_tokens=8, output_tokens=3, model="gpt-5"))
+
+    output = stdout.getvalue()
+    assert "Usage" in output
+    assert "Turn" in output
+    # Single-turn: session subtitle is suppressed to avoid duplicate numbers
+    assert "Session" not in output
+
+
+def test_session_subtitle_shown_after_multiple_turns() -> None:
+    display, stdout, _ = _display()
+    turn1 = TokenUsage(input_tokens=4, output_tokens=2, model="gpt-5")
+    turn2 = TokenUsage(input_tokens=4, output_tokens=1, model="gpt-5")
+    session = TokenUsage(input_tokens=8, output_tokens=3, model="gpt-5")
+
+    display.session_usage(TokenUsage(model="gpt-5"))
+    display.turn_usage(turn1, 3.0)
+    display.session_usage(session)
+    display.turn_usage(turn2, 2.0)
+    display.session_usage(session)
 
     output = stdout.getvalue()
     assert "Usage" in output

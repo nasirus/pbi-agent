@@ -97,10 +97,6 @@ class DisplayProtocol(Protocol):
 
     def turn_usage(self, usage: TokenUsage, elapsed_seconds: float) -> None: ...
 
-    def usage_refresh(
-        self, session_usage: TokenUsage, turn_usage: TokenUsage
-    ) -> None: ...
-
     def shell_start(self, commands: list[str]) -> None: ...
 
     def shell_command(

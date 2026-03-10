@@ -6,6 +6,8 @@ from typing import Any, TextIO
 
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.tree import Tree
 
 from pbi_agent.models.messages import TokenUsage
 from pbi_agent.ui.display_protocol import DisplayProtocol, PendingToolGroup
@@ -22,6 +24,15 @@ from pbi_agent.ui.formatting import (
     tool_group_class,
     tool_item_class,
 )
+
+
+_TOOL_ICONS: dict[str, str] = {
+    "shell": "\u25b6",  # ▶
+    "apply-patch": "\u25a0",  # ■
+    "skill-knowledge": "\u25c6",  # ◆
+    "init-report": "\u2605",  # ★
+    "generic": "\u2022",  # •
+}
 
 
 class ConsoleDisplay(DisplayProtocol):
@@ -41,6 +52,14 @@ class ConsoleDisplay(DisplayProtocol):
         self._thinking_counter = 0
         self._latest_session_subtitle: str | None = None
         self._usage_section_open = False
+        self._turn_count = 0
+        self._status: Any = None
+
+    def _stop_spinner(self) -> None:
+        """Stop the wait spinner if one is currently active."""
+        if self._status is not None:
+            self._status.stop()
+            self._status = None
 
     def _append_call_id(self, lines: list[str], call_id: str) -> None:
         if self.verbose and call_id:
@@ -56,7 +75,7 @@ class ConsoleDisplay(DisplayProtocol):
         timeout_ms: int | str = "default",
     ) -> str:
         lines = [
-            f"[dim]$[/dim] {escape_markup_text(shorten(command, 96))}  {status}",
+            f"[green]$[/green] [bold]{escape_markup_text(shorten(command, 96))}[/bold]  {status}",
             f"[dim]wd:[/dim] {escape_markup_text(str(working_directory))}  "
             f"[dim]timeout_ms:[/dim] {escape_markup_text(str(timeout_ms))}",
         ]
@@ -179,12 +198,24 @@ class ConsoleDisplay(DisplayProtocol):
         single_turn_hint: str | None = None,
     ) -> None:
         mode = "interactive" if interactive else "single-turn"
-        parts = [f"[bold]PBI Agent[/bold] ({escape_markup_text(mode)})"]
+        detail_parts: list[str] = []
         if model:
-            parts.append(f"model: {escape_markup_text(model)}")
+            detail_parts.append(f"[dim]model:[/dim] {escape_markup_text(model)}")
         if reasoning_effort:
-            parts.append(f"reasoning: {escape_markup_text(reasoning_effort)}")
-        self._console.print(" | ".join(parts))
+            detail_parts.append(
+                f"[dim]reasoning:[/dim] {escape_markup_text(reasoning_effort)}"
+            )
+        subtitle = "  ".join(detail_parts) if detail_parts else None
+        self._console.print(
+            Panel(
+                f"[dim]{escape_markup_text(mode)}[/dim]",
+                title="[bold cyan]PBI Agent[/bold cyan]",
+                subtitle=subtitle,
+                border_style="cyan",
+                expand=False,
+                padding=(0, 2),
+            )
+        )
         if single_turn_hint:
             self._console.print(f"[dim]{escape_markup_text(single_turn_hint)}[/dim]")
 
@@ -195,12 +226,25 @@ class ConsoleDisplay(DisplayProtocol):
         return None
 
     def wait_start(self, message: str = "model is processing your request...") -> None:
-        self._console.print(f"[dim]... {escape_markup_text(message)}[/dim]")
+        self._stop_spinner()
+        if self._console.is_terminal:
+            from rich.status import Status
+
+            self._status = Status(
+                escape_markup_text(message),
+                console=self._console,
+                spinner="dots",
+                spinner_style="cyan",
+            )
+            self._status.start()
+        else:
+            self._console.print(f"[dim]... {escape_markup_text(message)}[/dim]")
 
     def wait_stop(self) -> None:
-        return None
+        self._stop_spinner()
 
     def render_markdown(self, text: str) -> None:
+        self._stop_spinner()
         self._console.print(Markdown(text))
 
     def render_thinking(
@@ -211,6 +255,7 @@ class ConsoleDisplay(DisplayProtocol):
         replace_existing: bool = False,
         widget_id: str | None = None,
     ) -> str | None:
+        self._stop_spinner()
         del replace_existing
         body = text if text is not None else None
         summary = title or ""
@@ -223,39 +268,53 @@ class ConsoleDisplay(DisplayProtocol):
             self._thinking_counter += 1
             resolved_widget_id = f"thinking-{self._thinking_counter}"
 
+        display_title = format_reasoning_title(summary)
+        content = escape_markup_text(body) if body else ""
         self._console.print(
-            f"[italic dim]{escape_markup_text(format_reasoning_title(summary))}[/italic dim]"
+            Panel(
+                f"[dim]{content}[/dim]" if content else "[dim]...[/dim]",
+                title=f"[italic]{escape_markup_text(display_title)}[/italic]",
+                title_align="left",
+                border_style="dim",
+                padding=(0, 1),
+            )
         )
-        if body:
-            self._console.print(f"[dim]{escape_markup_text(body)}[/dim]")
         return resolved_widget_id
 
     def render_redacted_thinking(self) -> None:
+        self._stop_spinner()
         self._console.print(REDACTED_THINKING_NOTICE)
 
     def session_usage(self, usage: TokenUsage) -> None:
         self._latest_session_subtitle = format_session_subtitle(usage.snapshot())
-        if self._usage_section_open and self._latest_session_subtitle:
-            self._console.print(self._latest_session_subtitle)
+        if (
+            self._usage_section_open
+            and self._latest_session_subtitle
+            and self._turn_count > 1
+        ):
+            self._console.print(f"[dim]{self._latest_session_subtitle}[/dim]")
             self._usage_section_open = False
 
     def turn_usage(self, usage: TokenUsage, elapsed_seconds: float) -> None:
+        self._stop_spinner()
+        self._turn_count += 1
         self._console.print()
-        self._console.print("[bold]Usage[/bold]")
+        summary = format_usage_summary(
+            usage.snapshot(),
+            elapsed_seconds=elapsed_seconds,
+            label="Turn",
+        )
         self._console.print(
-            format_usage_summary(
-                usage.snapshot(),
-                elapsed_seconds=elapsed_seconds,
-                label="Turn",
+            Panel(
+                summary,
+                title="[bold]Usage[/bold]",
+                title_align="left",
+                border_style="dim",
+                expand=True,
+                padding=(0, 1),
             )
         )
         self._usage_section_open = True
-
-    def usage_refresh(self, session_usage: TokenUsage, turn_usage: TokenUsage) -> None:
-        self._latest_session_subtitle = format_session_subtitle(
-            session_usage.snapshot()
-        )
-        del turn_usage
 
     def shell_start(self, commands: list[str]) -> None:
         count = len(commands)
@@ -395,12 +454,22 @@ class ConsoleDisplay(DisplayProtocol):
         )
 
     def tool_group_end(self) -> None:
-        if self._tool_group.items:
-            self._console.print(
-                f"[bold]{escape_markup_text(self._tool_group.label)}[/bold]"
-            )
-            for item in self._tool_group.items:
-                self._print_tool_item(item.text)
+        self._stop_spinner()
+        if not self._tool_group.items:
+            self._tool_group.reset()
+            return
+
+        label = self._tool_group.label
+        style_key = self._tool_group.classes.replace("tool-group-", "")
+        icon = _TOOL_ICONS.get(style_key, _TOOL_ICONS["generic"])
+
+        tree = Tree(f"[bold]{icon} {escape_markup_text(label)}[/bold]")
+        for item in self._tool_group.items:
+            tree.add(item.text)
+
+        self._console.print(
+            Panel(tree, border_style="blue", padding=(0, 1), expand=True)
+        )
         self._tool_group.reset()
 
     def retry_notice(self, attempt: int, max_retries: int) -> None:
