@@ -3,8 +3,10 @@ import { defineConfig, type HeadConfig } from 'vitepress'
 const siteName = 'pbi-agent'
 const siteDescription =
   'Multi-provider LLM CLI agent for Power BI report editing'
+const siteBase = '/pbi-agent/'
 const siteUrl = 'https://nasirus.github.io/pbi-agent/'
 const socialImageUrl = new URL('social-card.jpg', siteUrl).toString()
+const faviconUrl = `${siteBase}favicon.png`
 
 function resolvePageUrl(page: string): string {
   if (page === 'index.md') {
@@ -58,10 +60,12 @@ export default defineConfig({
   title: siteName,
   description: siteDescription,
   lang: 'en-US',
-  base: '/pbi-agent/',
+  base: siteBase,
   cleanUrls: true,
   lastUpdated: true,
   head: [
+    ['link', { rel: 'icon', type: 'image/png', href: faviconUrl }],
+    ['link', { rel: 'apple-touch-icon', href: faviconUrl }],
     ['meta', { name: 'theme-color', content: '#0f172a' }]
   ],
   transformHead(context) {
