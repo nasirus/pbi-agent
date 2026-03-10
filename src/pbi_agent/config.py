@@ -50,7 +50,7 @@ class Settings:
     model: str = DEFAULT_MODEL
     verbose: bool = False
     max_tool_workers: int = 4
-    max_retries: int = 2
+    max_retries: int = 3
     reasoning_effort: str = "xhigh"
     compact_threshold: int = 200000
     # Provider selection
@@ -150,7 +150,7 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         max_tool_workers = int(os.getenv("PBI_AGENT_MAX_TOOL_WORKERS", "4"))
     max_retries = args.max_retries
     if max_retries is None:
-        max_retries = int(os.getenv("PBI_AGENT_MAX_RETRIES", "2"))
+        max_retries = int(os.getenv("PBI_AGENT_MAX_RETRIES", "3"))
     default_effort = "xhigh" if provider == "openai" else "high"
     reasoning_effort = (
         args.reasoning_effort

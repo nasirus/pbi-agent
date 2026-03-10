@@ -278,7 +278,7 @@ class AnthropicProvider(Provider):
                             f"Anthropic API overloaded after {max_retries + 1} "
                             f"attempts: {error_body}"
                         ) from exc
-                    wait = min(2.0 * (2**attempt), 30.0)
+                    wait = min(2.0 * (2**attempt), 30.0) + 1.0
                     display.rate_limit_notice(
                         wait_seconds=wait,
                         attempt=attempt + 1,
@@ -406,7 +406,7 @@ def _extract_retry_after(exc: urllib.error.HTTPError, attempt: int) -> float:
     try:
         retry_header = exc.headers.get("Retry-After") if exc.headers else None
         if retry_header:
-            return max(0.1, min(float(retry_header), 60.0))
+            return max(0.1, min(float(retry_header), 60.0)) + 1.0
     except (ValueError, TypeError):
         pass
-    return min(2.0 * (2**attempt), 30.0)
+    return min(2.0 * (2**attempt), 30.0) + 1.0

@@ -218,7 +218,7 @@ A browser interface opens at `http://localhost:8000`. Start describing what you 
 | `PBI_AGENT_MAX_TOKENS` | Max output tokens | `16384` |
 | `PBI_AGENT_REASONING_EFFORT` | Reasoning effort (`low`, `medium`, `high`, `xhigh`) | `xhigh` |
 | `PBI_AGENT_MAX_TOOL_WORKERS` | Parallel tool execution threads | `4` |
-| `PBI_AGENT_MAX_RETRIES` | Retry count for transient failures | `2` |
+| `PBI_AGENT_MAX_RETRIES` | Retry count for transient failures | `3` |
 | `PBI_AGENT_COMPACT_THRESHOLD` | Context compaction token threshold | `150000` |
 | `PBI_AGENT_RESPONSES_URL` | Custom provider HTTP endpoint | `https://api.openai.com/v1/responses` for OpenAI, `https://api.x.ai/v1/responses` for xAI, `https://generativelanguage.googleapis.com/v1beta/interactions` for Google |
 | `PBI_AGENT_GENERIC_API_URL` | Generic OpenAI-compatible Chat Completions endpoint | `https://openrouter.ai/api/v1/chat/completions` |

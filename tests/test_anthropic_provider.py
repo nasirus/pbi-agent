@@ -319,6 +319,6 @@ def test_anthropic_request_turn_retries_when_api_is_overloaded(
 
     assert response.text == "Recovered."
     assert len(requests) == 2
-    assert waits == [2.0]
-    assert display_spy.rate_limit_notices == [(2.0, 1, 1)]
+    assert waits == [3.0]
+    assert display_spy.rate_limit_notices == [(3.0, 1, 1)]
     assert display_spy.retry_notices == [(1, 1)]
