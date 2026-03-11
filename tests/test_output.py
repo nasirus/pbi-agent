@@ -13,3 +13,10 @@ def test_bound_output_preserves_start_and_end_when_truncated() -> None:
     assert bounded.startswith("start-")
     assert bounded.endswith("-end")
     assert "chars omitted" in bounded
+
+
+def test_bound_output_falls_back_to_simple_ellipsis_for_small_limits() -> None:
+    bounded, truncated = bound_output("abcdef", limit=4)
+
+    assert truncated is True
+    assert bounded == "abc…"
