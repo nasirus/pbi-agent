@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pbi_agent.tools import apply_patch as apply_patch_tool
+from pbi_agent.tools.output import MAX_OUTPUT_CHARS
 from pbi_agent.tools.types import ToolContext
 
 
@@ -90,3 +91,31 @@ def test_apply_patch_handle_validates_required_arguments() -> None:
     assert unsupported_operation == {
         "error": "Unsupported operation_type 'rename_file'."
     }
+
+
+def test_apply_patch_handle_read_file_returns_bounded_content(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "notes" / "example.txt"
+    path.parent.mkdir()
+    path.write_text(
+        f"start-{'x' * (MAX_OUTPUT_CHARS + 200)}-end",
+        encoding="utf-8",
+    )
+
+    result = apply_patch_tool.handle(
+        {
+            "operation_type": "read_file",
+            "path": "notes/example.txt",
+        },
+        ToolContext(),
+    )
+
+    assert result["status"] == "completed"
+    assert result["content_truncated"] is True
+    assert len(result["content"]) <= MAX_OUTPUT_CHARS
+    assert result["content"].startswith("start-")
+    assert result["content"].endswith("-end")
+    assert "chars omitted" in result["content"]
