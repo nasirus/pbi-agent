@@ -23,16 +23,18 @@ class DefaultWebCommandTests(unittest.TestCase):
             responses_url="https://api.openai.com/v1/responses",
             generic_api_url="https://openrouter.ai/api/v1/chat/completions",
             model="gpt-5",
-            anthropic_model="claude-sonnet-4-5",
+            max_tokens=16384,
             reasoning_effort="medium",
             max_tool_workers=4,
             max_retries=3,
             compact_threshold=150000,
-            anthropic_max_tokens=16384,
         )
 
     def test_main_defaults_to_web_for_global_options_only(self) -> None:
-        with patch("pbi_agent.cli._handle_web_command", return_value=17) as mock_web:
+        with (
+            patch("pbi_agent.cli._handle_web_command", return_value=17) as mock_web,
+            patch("pbi_agent.cli.save_internal_config") as mock_save,
+        ):
             rc = cli.main(["--api-key", "test-key"])
 
         self.assertEqual(rc, 17)
@@ -41,6 +43,7 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertEqual(args.host, "127.0.0.1")
         self.assertEqual(args.port, 8000)
         self.assertEqual(settings.api_key, "test-key")
+        mock_save.assert_called_once_with(settings)
 
     def test_main_inserts_web_before_web_specific_flags(self) -> None:
         with patch("pbi_agent.cli._handle_web_command", return_value=23) as mock_web:
@@ -89,6 +92,13 @@ class DefaultWebCommandTests(unittest.TestCase):
         args = parser.parse_args(["web", "--url", "demo.example.com/app"])
 
         self.assertEqual(cli._browser_target_url(args), "http://demo.example.com/app")
+
+    def test_parser_accepts_max_tokens_flag(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["--max-tokens", "2048", "console"])
+
+        self.assertEqual(args.max_tokens, 2048)
 
     def test_web_chat_command_uses_parent_pid_wrapper(self) -> None:
         command = cli._web_chat_command(self._settings(verbose=True), parent_pid=4321)
@@ -219,7 +229,7 @@ class DefaultWebCommandTests(unittest.TestCase):
     def test_handle_audit_command_uses_direct_single_turn_path(self) -> None:
         parser = cli.build_parser()
         with tempfile.TemporaryDirectory() as tmpdir:
-            report_dir = Path(tmpdir)
+            report_dir = Path(tmpdir).resolve()
             args = parser.parse_args(["audit", "--report-dir", str(report_dir)])
             settings = self._settings()
             (report_dir / "AUDIT-REPORT.md").write_text("# Audit\n", encoding="utf-8")
