@@ -125,6 +125,8 @@ def _default_model(provider: str) -> str:
         return DEFAULT_XAI_MODEL
     if provider == "google":
         return DEFAULT_GOOGLE_MODEL
+    if provider == "anthropic":
+        return DEFAULT_ANTHROPIC_MODEL
     return DEFAULT_MODEL
 
 
@@ -155,7 +157,7 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
     )
     generic_api_url = getattr(args, "generic_api_url", None) or os.getenv(
         "PBI_AGENT_GENERIC_API_URL"
-    )
+    ) or _config_string(provider_config, "generic_api_url")
     responses_url = (
         responses_url_override
         or _config_string(provider_config, "responses_url")
@@ -195,7 +197,13 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         )
 
     # Anthropic settings
-    anthropic_model = model_override or DEFAULT_ANTHROPIC_MODEL
+    anthropic_model = (
+        args.model
+        or os.getenv("PBI_AGENT_MODEL")
+        or _config_string(provider_config, "anthropic_model")
+        or model
+        or DEFAULT_ANTHROPIC_MODEL
+    )
     max_tokens_raw = getattr(args, "max_tokens", None)
 
     if max_tokens_raw is None:

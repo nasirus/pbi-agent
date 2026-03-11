@@ -47,6 +47,69 @@ def test_resolve_settings_uses_saved_provider_when_none_specified(monkeypatch, t
     assert settings.compact_threshold == 123456
 
 
+def test_resolve_settings_uses_saved_generic_api_url(monkeypatch, tmp_path: Path) -> None:
+    internal_config = tmp_path / "internal-config.json"
+    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
+    for name in (
+        "PBI_AGENT_PROVIDER",
+        "PBI_AGENT_API_KEY",
+        "GENERIC_API_KEY",
+        "PBI_AGENT_GENERIC_API_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    save_internal_config(
+        Settings(
+            api_key="generic-saved-key",
+            provider="generic",
+            responses_url=DEFAULT_RESPONSES_URL,
+            generic_api_url="https://example.test/v1/chat/completions",
+            model="openrouter/custom-model",
+            reasoning_effort="high",
+        )
+    )
+
+    parser = build_parser()
+    args = parser.parse_args(["console"])
+
+    settings = resolve_settings(args)
+
+    assert settings.provider == "generic"
+    assert settings.generic_api_url == "https://example.test/v1/chat/completions"
+
+
+def test_resolve_settings_uses_saved_anthropic_model(monkeypatch, tmp_path: Path) -> None:
+    internal_config = tmp_path / "internal-config.json"
+    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
+    for name in (
+        "PBI_AGENT_PROVIDER",
+        "PBI_AGENT_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "PBI_AGENT_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    save_internal_config(
+        Settings(
+            api_key="anthropic-saved-key",
+            provider="anthropic",
+            responses_url=DEFAULT_RESPONSES_URL,
+            model="claude-opus-4-6",
+            anthropic_model="claude-sonnet-4-5",
+            reasoning_effort="high",
+        )
+    )
+
+    parser = build_parser()
+    args = parser.parse_args(["console"])
+
+    settings = resolve_settings(args)
+
+    assert settings.provider == "anthropic"
+    assert settings.model == "claude-opus-4-6"
+    assert settings.anthropic_model == "claude-sonnet-4-5"
+
+
 def test_save_internal_config_persists_by_provider_and_last_used(monkeypatch, tmp_path: Path) -> None:
     internal_config = tmp_path / "internal-config.json"
     monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))

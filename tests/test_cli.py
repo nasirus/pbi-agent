@@ -223,7 +223,7 @@ class DefaultWebCommandTests(unittest.TestCase):
     def test_handle_audit_command_uses_direct_single_turn_path(self) -> None:
         parser = cli.build_parser()
         with tempfile.TemporaryDirectory() as tmpdir:
-            report_dir = Path(tmpdir)
+            report_dir = Path(tmpdir).resolve()
             args = parser.parse_args(["audit", "--report-dir", str(report_dir)])
             settings = self._settings()
             (report_dir / "AUDIT-REPORT.md").write_text("# Audit\n", encoding="utf-8")

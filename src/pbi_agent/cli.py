@@ -123,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_group.add_argument(
         "--compact-threshold",
         type=int,
-        default=150000,
+        default=None,
         help="Context compaction token threshold (default: 150000).",
     )
 

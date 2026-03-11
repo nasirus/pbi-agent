@@ -114,6 +114,13 @@ def display_spy() -> DisplaySpy:
     return DisplaySpy()
 
 
+@pytest.fixture(autouse=True)
+def isolate_internal_config_path(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv(
+        "PBI_AGENT_INTERNAL_CONFIG_PATH", str(tmp_path / "internal-config.json")
+    )
+
+
 @pytest.fixture
 def make_http_response() -> Callable[[dict[str, Any]], FakeHTTPResponse]:
     def factory(payload: dict[str, Any]) -> FakeHTTPResponse:
