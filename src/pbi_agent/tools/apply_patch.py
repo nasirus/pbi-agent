@@ -114,6 +114,8 @@ def _update_file(path: Path, diff: str | None) -> None:
     current = path.read_text(encoding="utf-8")
     updated = apply_diff(current, diff, mode="default")
     path.write_text(updated, encoding="utf-8")
+
+
 def _delete_file(path: Path) -> None:
     if not path.exists():
         raise FileNotFoundError(f"file not found: {path}")

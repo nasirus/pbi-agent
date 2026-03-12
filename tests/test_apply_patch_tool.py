@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from pbi_agent.tools import apply_patch as apply_patch_tool
 from pbi_agent.tools.output import MAX_OUTPUT_CHARS
