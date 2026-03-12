@@ -12,7 +12,7 @@ All providers expose the same four built-in tools through the shared tool regist
 | Tool | Destructive | Purpose |
 | --- | --- | --- |
 | `shell` | yes | Run a shell command in the workspace and return stdout, stderr, and exit code. |
-| `apply_patch` | yes | Read, create, update, or delete files through a V4A diff-style file operation. |
+| `apply_patch` | yes | Create, update, or delete files through a V4A diff-style file operation. |
 | `skill_knowledge` | no | Load bundled Power BI skill markdown from the local knowledge base. |
 | `init_report` | no | Scaffold the bundled PBIP template into a destination directory. |
 
@@ -44,9 +44,9 @@ Apply one file operation at a time with a V4A diff payload.
 
 | Parameter | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `operation_type` | `string` | yes | One of `read_file`, `create_file`, `update_file`, or `delete_file`. |
+| `operation_type` | `string` | yes | One of `create_file`, `update_file`, or `delete_file`. |
 | `path` | `string` | yes | Relative path, or absolute path that still resolves within the workspace root. |
-| `diff` | `string` | for create/update | Required for `create_file` and `update_file`; omitted for `read_file` and `delete_file`. |
+| `diff` | `string` | for create/update | Required for `create_file` and `update_file`; omitted for `delete_file`. |
 
 ```text
 *** Begin Patch
@@ -59,7 +59,7 @@ Apply one file operation at a time with a V4A diff payload.
 The `apply_patch` tool is different from this coding environment's patch helper. Inside `pbi-agent`, it is a provider-agnostic function tool backed by `pbi_agent.tools.apply_diff`.
 :::
 
-`shell` stdout/stderr and `apply_patch` `read_file` content are capped to a bounded result that preserves both the beginning and end of long output while marking omitted content.
+Tool output is capped to a bounded result that preserves both the beginning and end of long output while marking omitted content.
 
 ## `skill_knowledge`
 

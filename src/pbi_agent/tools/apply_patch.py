@@ -18,16 +18,16 @@ from pbi_agent.tools.types import ToolContext, ToolSpec
 SPEC = ToolSpec(
     name="apply_patch",
     description=(
-        "Apply a file operation (read, create, update, or delete) using V4A "
-        "diff format. Use this tool to inspect files, create new files, edit "
-        "existing files via diffs, or delete files in the workspace."
+        "Apply a file operation (create, update, or delete) using V4A diff format. "
+        "Use this tool to create new files, edit existing files via diffs, "
+        "or delete files in the workspace."
     ),
     parameters_schema={
         "type": "object",
         "properties": {
             "operation_type": {
                 "type": "string",
-                "enum": ["read_file", "create_file", "update_file", "delete_file"],
+                "enum": ["create_file", "update_file", "delete_file"],
                 "description": "The type of file operation to perform.",
             },
             "path": {
@@ -71,8 +71,6 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     try:
         target_path = _resolve_safe_path(root, path_value)
 
-        if operation_type == "read_file":
-            return _read_file(target_path, path_value)
         if operation_type == "create_file":
             _create_file(target_path, diff)
         elif operation_type == "update_file":
@@ -116,25 +114,6 @@ def _update_file(path: Path, diff: str | None) -> None:
     current = path.read_text(encoding="utf-8")
     updated = apply_diff(current, diff, mode="default")
     path.write_text(updated, encoding="utf-8")
-
-
-def _read_file(path: Path, path_value: str) -> dict[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(f"file not found: {path}")
-    if path.is_dir():
-        raise IsADirectoryError(f"path is a directory: {path}")
-
-    content, content_truncated = bound_output(path.read_text(encoding="utf-8"))
-    result: dict[str, Any] = {
-        "status": "completed",
-        "message": f"read_file succeeded for '{path_value}'",
-        "content": content,
-    }
-    if content_truncated:
-        result["content_truncated"] = True
-    return result
-
-
 def _delete_file(path: Path) -> None:
     if not path.exists():
         raise FileNotFoundError(f"file not found: {path}")
