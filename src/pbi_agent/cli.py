@@ -153,6 +153,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=CleanHelpFormatter,
     )
     run_parser.add_argument("--prompt", required=True, help="User prompt.")
+    run_parser.add_argument(
+        "--project-dir",
+        type=Path,
+        default=Path("."),
+        help="Relative project directory to scope tool execution to (default: current directory).",
+    )
 
     subparsers.add_parser(
         "console",
@@ -337,10 +343,30 @@ def _handle_console_command(settings: Settings) -> int:
 
 
 def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
-    return _run_single_turn_command(
-        prompt=args.prompt,
-        settings=settings,
-    )
+    project_dir = (Path.cwd() / args.project_dir).resolve()
+
+    if not project_dir.exists():
+        print(
+            f"Error: Project directory does not exist: {project_dir}",
+            file=sys.stderr,
+        )
+        return 1
+    if not project_dir.is_dir():
+        print(
+            f"Error: Project path is not a directory: {project_dir}",
+            file=sys.stderr,
+        )
+        return 1
+
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(project_dir)
+        return _run_single_turn_command(
+            prompt=args.prompt,
+            settings=settings,
+        )
+    finally:
+        os.chdir(original_cwd)
 
 
 def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
