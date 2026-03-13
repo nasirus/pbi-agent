@@ -52,36 +52,102 @@ def test_read_file_summarizes_csv_with_schema_and_stats(
 
     result = read_file_tool.handle({"path": "dataset.csv"}, ToolContext())
 
-    assert result["file_type"] == "csv"
-    assert result["rows"] == 3
-    assert result["columns"] == 3
-    assert result["column_names"] == ["city", "sales", "ordered_at"]
-    assert result["column_types"]["ordered_at"] == "Date"
-    assert result["datetime_columns"] == ["ordered_at"]
-    assert result["categorical_columns"] == ["city"]
-    assert result["numeric_summary"]["sales"] == {
-        "count": 3,
-        "min": 10,
-        "max": 30,
-        "mean": 20.0,
-        "std": 10.0,
-    }
+    assert result["shape"] == {"rows": 3, "columns": 3}
+    assert (
+        result["summary"]
+        == "3 rows x 3 columns; column mix: 1 numeric, 1 datetime, 1 text; missing values: no missing values."
+    )
+    assert "- city: String; kind=text; examples=Seattle, Portland" in result["schema"]
+    assert "- sales: Int64; kind=numeric; min=10; max=30; mean=20" in result["schema"]
+    assert (
+        "- ordered_at: Date; kind=datetime; range=2025-01-01..2025-01-03"
+        in result["schema"]
+    )
+    assert result["preview"] == (
+        "city,sales,ordered_at\n"
+        "Seattle,10,2025-01-01\n"
+        "Seattle,20,2025-01-02\n"
+        "Portland,30,2025-01-03\n"
+    )
 
 
-def test_read_file_summarizes_json_tabular_data(tmp_path: Path, monkeypatch) -> None:
+def test_read_file_summarizes_csv_with_cr_only_line_endings(
+    tmp_path: Path, monkeypatch
+) -> None:
     pytest.importorskip("polars")
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "dataset.json").write_text(
-        '[{"name": "A", "value": 1}, {"name": "B", "value": 2}]',
+    (tmp_path / "dataset.csv").write_bytes(
+        b"city,sales,ordered_at\rSeattle,10,2025-01-01\rPortland,30,2025-01-03\r"
+    )
+
+    result = read_file_tool.handle({"path": "dataset.csv"}, ToolContext())
+
+    assert result["shape"] == {"rows": 2, "columns": 3}
+    assert (
+        result["summary"]
+        == "2 rows x 3 columns; column mix: 1 numeric, 1 datetime, 1 text; missing values: no missing values."
+    )
+    assert (
+        "- ordered_at: Date; kind=datetime; range=2025-01-01..2025-01-03"
+        in result["schema"]
+    )
+    assert "- sales: Int64; kind=numeric; min=10; max=30; mean=20" in result["schema"]
+    assert result["preview"] == (
+        "city,sales,ordered_at\n"
+        "Seattle,10,2025-01-01\n"
+        "Portland,30,2025-01-03\n"
+    )
+
+
+def test_read_file_returns_all_excel_sheets(tmp_path: Path, monkeypatch) -> None:
+    pl = pytest.importorskip("polars")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "workbook.xlsx").write_bytes(b"placeholder")
+
+    monkeypatch.setattr(
+        read_file_tool,
+        "_read_excel_workbook",
+        lambda path: {
+            "Orders": pl.DataFrame({"city": ["Seattle", "Portland"], "sales": [10, 20]}),
+            "Returns": pl.DataFrame({"city": ["Seattle"], "count": [1]}),
+        },
+    )
+
+    result = read_file_tool.handle({"path": "workbook.xlsx"}, ToolContext())
+
+    assert result["path"] == "workbook.xlsx"
+    assert result["sheet_count"] == 2
+    assert [sheet["name"] for sheet in result["sheets"]] == ["Orders", "Returns"]
+    assert result["sheets"][0]["shape"] == {"rows": 2, "columns": 2}
+    assert result["sheets"][0]["preview"] == (
+        "city,sales\n"
+        "Seattle,10\n"
+        "Portland,20\n"
+    )
+    assert result["sheets"][1]["shape"] == {"rows": 1, "columns": 2}
+    assert result["sheets"][1]["preview"] == (
+        "city,count\n"
+        "Seattle,1\n"
+    )
+
+
+def test_read_file_bounds_tabular_schema_and_preview(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("polars")
+    monkeypatch.chdir(tmp_path)
+
+    headers = [f"column_{index}_{'x' * 40}" for index in range(120)]
+    values = [f"value_{index}_{'y' * 40}" for index in range(120)]
+    (tmp_path / "wide.csv").write_text(
+        ",".join(headers) + "\n" + ",".join(values) + "\n",
         encoding="utf-8",
     )
 
-    result = read_file_tool.handle({"path": "dataset.json"}, ToolContext())
+    result = read_file_tool.handle({"path": "wide.csv"}, ToolContext())
 
-    assert result["file_type"] == "json"
-    assert result["rows"] == 2
-    assert result["columns"] == 2
-    assert result["column_types"]["value"] in {"Int64", "Int32"}
+    assert len(result["schema"]) <= read_file_tool.MAX_TABULAR_SCHEMA_CHARS
+    assert len(result["preview"]) <= read_file_tool.MAX_TABULAR_PREVIEW_CHARS
+    assert result["schema_truncated"] is True
+    assert result["preview_truncated"] is True
 
 
 def test_read_file_summarizes_pdf_content_and_metadata(
@@ -101,7 +167,6 @@ def test_read_file_summarizes_pdf_content_and_metadata(
 
     result = read_file_tool.handle({"path": "report.pdf"}, ToolContext())
 
-    assert result["file_type"] == "pdf"
     assert result["metadata"]["pages"] == 1
     assert result["metadata"]["title"] == "Quarterly Report"
     assert result["metadata"]["author"] == "Agent"
