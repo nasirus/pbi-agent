@@ -46,8 +46,7 @@ SPEC = ToolSpec(
             "timeout_seconds": {
                 "type": "integer",
                 "description": (
-                    "Execution timeout in seconds, capped at 120. "
-                    "Defaults to 30."
+                    "Execution timeout in seconds, capped at 120. Defaults to 30."
                 ),
             },
             "capture_result": {
@@ -127,7 +126,9 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
 
     root = Path.cwd().resolve()
     try:
-        working_directory = _resolve_working_directory(root, arguments.get("working_directory"))
+        working_directory = _resolve_working_directory(
+            root, arguments.get("working_directory")
+        )
     except Exception as exc:
         return _failure_result(
             error_type=type(exc).__name__,
@@ -157,7 +158,12 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
             runner_path.write_text(_WRAPPER_SCRIPT, encoding="utf-8")
 
             completed = subprocess.run(
-                [sys.executable, str(runner_path), str(request_path), str(response_path)],
+                [
+                    sys.executable,
+                    str(runner_path),
+                    str(request_path),
+                    str(response_path),
+                ],
                 cwd=str(working_directory),
                 env=dict(os.environ),
                 capture_output=True,
@@ -269,7 +275,10 @@ def _timeout_result(
         "stderr": bounded_stderr,
         "result": None,
         "error_type": "TimeoutError",
-        "error_message": f"Execution exceeded timeout of {timeout_seconds} seconds",
+        "error_message": (
+            "Execution exceeded timeout of "
+            f"{timeout_seconds} second{'s' if timeout_seconds != 1 else ''}"
+        ),
         "timed_out": True,
         "execution_time_ms": execution_time_ms,
         "stdout_truncated": stdout_truncated,
@@ -287,8 +296,14 @@ def _failure_result(
     execution_time_ms: int = 0,
 ) -> dict[str, Any]:
     bounded_stdout, stdout_truncated = bound_output(stdout, limit=MAX_STDOUT_CHARS)
-    final_stderr = _append_stderr(stderr, error_message) if error_message and not stderr else stderr
-    bounded_stderr, stderr_truncated = bound_output(final_stderr, limit=MAX_STDERR_CHARS)
+    final_stderr = (
+        _append_stderr(stderr, error_message)
+        if error_message and not stderr
+        else stderr
+    )
+    bounded_stderr, stderr_truncated = bound_output(
+        final_stderr, limit=MAX_STDERR_CHARS
+    )
     return {
         "ok": False,
         "stdout": bounded_stdout,

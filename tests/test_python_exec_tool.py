@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -101,7 +100,7 @@ def test_python_exec_enforces_timeout(tmp_path: Path, monkeypatch) -> None:
 
     result = python_exec_tool.handle(
         {
-            "code": "import time\ntime.sleep(5)",
+            "code": "import time\ntime.sleep(2)",
             "timeout_seconds": 1,
         },
         ToolContext(),
@@ -109,7 +108,7 @@ def test_python_exec_enforces_timeout(tmp_path: Path, monkeypatch) -> None:
 
     assert result["ok"] is False
     assert result["error_type"] == "TimeoutError"
-    assert result["error_message"] == "Execution exceeded timeout of 1 seconds"
+    assert result["error_message"] == "Execution exceeded timeout of 1 second"
     assert result["timed_out"] is True
     assert result["result"] is None
 
@@ -128,7 +127,9 @@ def test_python_exec_bounds_large_stdout(tmp_path: Path, monkeypatch) -> None:
     assert "chars omitted" in result["stdout"]
 
 
-def test_python_exec_reports_non_serializable_result(tmp_path: Path, monkeypatch) -> None:
+def test_python_exec_reports_non_serializable_result(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.chdir(tmp_path)
 
     result = python_exec_tool.handle(
@@ -145,7 +146,9 @@ def test_python_exec_reports_non_serializable_result(tmp_path: Path, monkeypatch
     assert result["error_type"] is None
 
 
-def test_python_exec_uses_requested_working_directory(tmp_path: Path, monkeypatch) -> None:
+def test_python_exec_uses_requested_working_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     nested = tmp_path / "nested"
     nested.mkdir()
