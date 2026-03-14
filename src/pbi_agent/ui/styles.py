@@ -159,6 +159,11 @@ SubAgentBlock > CollapsibleTitle {
 }
 SubAgentBlock > Contents {
     padding: 0 2;
+    height: auto;
+}
+SubAgentBlock > Contents > Vertical {
+    height: auto;
+    min-height: 0;
 }
 
 /* ---- thinking block ---- */
