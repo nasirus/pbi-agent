@@ -507,6 +507,45 @@ def test_google_request_turn_retries_when_api_is_overloaded(
     assert display_spy.retry_notices == [(1, 1)]
 
 
+def test_google_request_turn_preserves_gemini_error_type_and_request_id(
+    monkeypatch,
+    display_spy,
+    make_http_error,
+) -> None:
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        raise make_http_error(
+            url=DEFAULT_GOOGLE_INTERACTIONS_URL,
+            code=400,
+            body=(
+                '{"error":{"status":"FAILED_PRECONDITION","message":"Gemini API '
+                'free tier is not available in your country. Please enable billing '
+                'on your project in Google AI Studio."}}'
+            ),
+            headers={"x-request-id": "req_gemini_precondition"},
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = GoogleProvider(_make_settings(max_retries=0))
+
+    with pytest.raises(RuntimeError) as exc_info:
+        provider.request_turn(
+            user_message="hello",
+            display=display_spy,
+            session_usage=TokenUsage(model=DEFAULT_GOOGLE_MODEL),
+            turn_usage=TokenUsage(model=DEFAULT_GOOGLE_MODEL),
+        )
+
+    assert str(exc_info.value) == (
+        'Google Interactions API error 400: {"error": {"message": "Gemini API '
+        'free tier is not available in your country. Please enable billing on '
+        'your project in Google AI Studio.", "type": "failed_precondition"}, '
+        '"request_id": "req_gemini_precondition", "status": 400, "type": "error"}'
+    )
 def test_google_request_turn_raises_for_failed_response_payload(
     monkeypatch,
     display_spy,
