@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pbi_agent.tools import read_file as read_file_tool
 from pbi_agent.tools.types import ToolContext
 
@@ -38,7 +40,142 @@ def test_read_file_auto_detects_utf16_bom(tmp_path: Path, monkeypatch) -> None:
     assert "windowed" not in result
 
 
-def test_read_file_allows_more_than_default_output_budget(tmp_path: Path, monkeypatch) -> None:
+def test_read_file_summarizes_csv_with_schema_and_stats(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pytest.importorskip("polars")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dataset.csv").write_text(
+        "city,sales,ordered_at\nSeattle,10,2025-01-01\nSeattle,20,2025-01-02\nPortland,30,2025-01-03\n",
+        encoding="utf-8",
+    )
+
+    result = read_file_tool.handle({"path": "dataset.csv"}, ToolContext())
+
+    assert result["shape"] == {"rows": 3, "columns": 3}
+    assert (
+        result["summary"]
+        == "3 rows x 3 columns; column mix: 1 numeric, 1 datetime, 1 text; missing values: no missing values."
+    )
+    assert "- city: String; kind=text; examples=Seattle, Portland" in result["schema"]
+    assert "- sales: Int64; kind=numeric; min=10; max=30; mean=20" in result["schema"]
+    assert (
+        "- ordered_at: Date; kind=datetime; range=2025-01-01..2025-01-03"
+        in result["schema"]
+    )
+    assert result["preview"] == (
+        "city,sales,ordered_at\n"
+        "Seattle,10,2025-01-01\n"
+        "Seattle,20,2025-01-02\n"
+        "Portland,30,2025-01-03\n"
+    )
+
+
+def test_read_file_summarizes_csv_with_cr_only_line_endings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pytest.importorskip("polars")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dataset.csv").write_bytes(
+        b"city,sales,ordered_at\rSeattle,10,2025-01-01\rPortland,30,2025-01-03\r"
+    )
+
+    result = read_file_tool.handle({"path": "dataset.csv"}, ToolContext())
+
+    assert result["shape"] == {"rows": 2, "columns": 3}
+    assert (
+        result["summary"]
+        == "2 rows x 3 columns; column mix: 1 numeric, 1 datetime, 1 text; missing values: no missing values."
+    )
+    assert (
+        "- ordered_at: Date; kind=datetime; range=2025-01-01..2025-01-03"
+        in result["schema"]
+    )
+    assert "- sales: Int64; kind=numeric; min=10; max=30; mean=20" in result["schema"]
+    assert result["preview"] == (
+        "city,sales,ordered_at\n"
+        "Seattle,10,2025-01-01\n"
+        "Portland,30,2025-01-03\n"
+    )
+
+
+def test_read_file_returns_all_excel_sheets(tmp_path: Path, monkeypatch) -> None:
+    pl = pytest.importorskip("polars")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "workbook.xlsx").write_bytes(b"placeholder")
+
+    monkeypatch.setattr(
+        read_file_tool,
+        "_read_excel_workbook",
+        lambda path: {
+            "Orders": pl.DataFrame({"city": ["Seattle", "Portland"], "sales": [10, 20]}),
+            "Returns": pl.DataFrame({"city": ["Seattle"], "count": [1]}),
+        },
+    )
+
+    result = read_file_tool.handle({"path": "workbook.xlsx"}, ToolContext())
+
+    assert result["path"] == "workbook.xlsx"
+    assert result["sheet_count"] == 2
+    assert [sheet["name"] for sheet in result["sheets"]] == ["Orders", "Returns"]
+    assert result["sheets"][0]["shape"] == {"rows": 2, "columns": 2}
+    assert result["sheets"][0]["preview"] == (
+        "city,sales\n"
+        "Seattle,10\n"
+        "Portland,20\n"
+    )
+    assert result["sheets"][1]["shape"] == {"rows": 1, "columns": 2}
+    assert result["sheets"][1]["preview"] == (
+        "city,count\n"
+        "Seattle,1\n"
+    )
+
+
+def test_read_file_bounds_tabular_schema_and_preview(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("polars")
+    monkeypatch.chdir(tmp_path)
+
+    headers = [f"column_{index}_{'x' * 40}" for index in range(120)]
+    values = [f"value_{index}_{'y' * 40}" for index in range(120)]
+    (tmp_path / "wide.csv").write_text(
+        ",".join(headers) + "\n" + ",".join(values) + "\n",
+        encoding="utf-8",
+    )
+
+    result = read_file_tool.handle({"path": "wide.csv"}, ToolContext())
+
+    assert len(result["schema"]) <= read_file_tool.MAX_TABULAR_SCHEMA_CHARS
+    assert len(result["preview"]) <= read_file_tool.MAX_TABULAR_PREVIEW_CHARS
+    assert result["schema_truncated"] is True
+    assert result["preview_truncated"] is True
+
+
+def test_read_file_summarizes_pdf_content_and_metadata(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pytest.importorskip("pypdf")
+    monkeypatch.chdir(tmp_path)
+
+    from pypdf import PdfWriter
+
+    pdf_path = tmp_path / "report.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.add_metadata({"/Title": "Quarterly Report", "/Author": "Agent"})
+    with pdf_path.open("wb") as file_handle:
+        writer.write(file_handle)
+
+    result = read_file_tool.handle({"path": "report.pdf"}, ToolContext())
+
+    assert result["metadata"]["pages"] == 1
+    assert result["metadata"]["title"] == "Quarterly Report"
+    assert result["metadata"]["author"] == "Agent"
+    assert result["content"] == ""
+
+
+def test_read_file_allows_more_than_default_output_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     long_line = (
         f"prefix-{'x' * (read_file_tool.MAX_READ_FILE_OUTPUT_CHARS // 2)}-suffix"
@@ -76,7 +213,9 @@ def test_read_file_rejects_binary_files(tmp_path: Path, monkeypatch) -> None:
     assert "binary file is not supported" in result["error"]
 
 
-def test_read_file_reports_empty_files_with_zero_range(tmp_path: Path, monkeypatch) -> None:
+def test_read_file_reports_empty_files_with_zero_range(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "empty.txt").write_text("", encoding="utf-8")
 
