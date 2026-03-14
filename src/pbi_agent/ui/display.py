@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import traceback
 from dataclasses import dataclass
@@ -58,7 +59,7 @@ class Display(DisplayProtocol):
         self._msg_counter = 0
         self._tool_group = PendingToolGroup()
         self._input_event = threading.Event()
-        self._input_value = ""
+        self._input_queue: queue.Queue[str] = queue.Queue()
         self._shutdown = threading.Event()
         self._turn_usage_widgets: dict[int, _TurnUsageWidget] = {}
         self._turn_usage_lock = threading.Lock()
@@ -191,6 +192,30 @@ class Display(DisplayProtocol):
         self._append_call_id(lines, call_id)
         return "\n".join(lines)
 
+    def _format_find_files_item(
+        self,
+        path: str,
+        *,
+        status: str,
+        call_id: str = "",
+        recursive: bool = True,
+        glob_pattern: str = "",
+        max_results: int | str = 200,
+    ) -> str:
+        flags: list[str] = []
+        if recursive:
+            flags.append("recursive")
+        if glob_pattern:
+            flags.append(f"glob={escape_markup_text(shorten(glob_pattern, 40))}")
+        flags.append(f"max={max_results}")
+        flag_str = "  ".join(f"[dim]{f}[/dim]" for f in flags)
+        lines = [
+            f"[#22C55E]\U0001f5ce[/#22C55E] [bold]{escape_markup_text(shorten(path, 96))}[/bold]  {status}",
+            flag_str,
+        ]
+        self._append_call_id(lines, call_id)
+        return "\n".join(lines)
+
     def _format_python_exec_item(
         self,
         code: str,
@@ -202,7 +227,7 @@ class Display(DisplayProtocol):
         capture_result: bool = False,
     ) -> str:
         first_line = next(
-            (l.strip() for l in code.splitlines() if l.strip()), "<empty>"
+            (line.strip() for line in code.splitlines() if line.strip()), "<empty>"
         )
         flags: list[str] = [
             f"[dim]wd:[/dim] {escape_markup_text(str(working_directory))}",
@@ -247,8 +272,22 @@ class Display(DisplayProtocol):
         self._input_event.set()
 
     def submit_input(self, value: str) -> None:
-        self._input_value = value
+        self._input_queue.put(value)
         self._input_event.set()
+
+    def request_new_chat(self) -> None:
+        from pbi_agent.agent.session import NEW_CHAT_SENTINEL
+
+        self._input_queue.put(NEW_CHAT_SENTINEL)
+        self._input_event.set()
+
+    def reset_chat(self) -> None:
+        self._waiting_widget_id = None
+        self._active_thinking_widget_id = None
+        self._tool_group.reset()
+        with self._turn_usage_lock:
+            self._turn_usage_widgets.clear()
+        self._safe_call(self.app.reset_chat_view)
 
     def welcome(
         self,
@@ -269,16 +308,19 @@ class Display(DisplayProtocol):
         )
 
     def user_prompt(self) -> str:
-        self._input_event.clear()
-        self._safe_call(self.app.enable_input)
         while True:
-            if self._input_event.wait(timeout=0.5):
-                break
             if self._shutdown.is_set():
                 return "exit"
-        if self._shutdown.is_set():
-            return "exit"
-        return self._input_value
+            try:
+                value = self._input_queue.get_nowait()
+            except queue.Empty:
+                self._safe_call(self.app.enable_input)
+                self._input_event.wait(timeout=0.5)
+                self._input_event.clear()
+                continue
+            if self._input_queue.empty():
+                self._input_event.clear()
+            return value
 
     def assistant_start(self) -> None:
         """Compatibility hook kept for the session/provider interface."""
@@ -492,6 +534,20 @@ class Display(DisplayProtocol):
                     status=status,
                     call_id=call_id,
                     force=bool(args.get("force", False)),
+                ),
+            )
+            return
+
+        if name == "find_files":
+            self._append_tool_line(
+                name,
+                self._format_find_files_item(
+                    str(args.get("path", ".")),
+                    status=status,
+                    call_id=call_id,
+                    recursive=bool(args.get("recursive", True)),
+                    glob_pattern=str(args.get("glob", "")),
+                    max_results=args.get("max_results", 200),
                 ),
             )
             return

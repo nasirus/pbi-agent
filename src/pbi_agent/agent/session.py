@@ -10,6 +10,7 @@ from pbi_agent.ui.display_protocol import DisplayProtocol
 
 _log = logging.getLogger(__name__)
 
+NEW_CHAT_SENTINEL = "__new_chat__"
 
 # ---------------------------------------------------------------------------
 # Public entry-points
@@ -66,19 +67,31 @@ def run_single_turn(
 
 
 def run_chat_loop(settings: Settings, display: DisplayProtocol) -> int:
-    display.welcome(
-        model=_selected_model(settings),
-        reasoning_effort=settings.reasoning_effort,
-    )
     model = _selected_model(settings)
-    session_usage = TokenUsage(model=model)
-    display.session_usage(session_usage)
+
+    def _reset_session(*, clear_display: bool = False) -> TokenUsage:
+        if clear_display:
+            display.reset_chat()
+        display.welcome(
+            model=model,
+            reasoning_effort=settings.reasoning_effort,
+        )
+        new_usage = TokenUsage(model=model)
+        display.session_usage(new_usage)
+        return new_usage
+
+    session_usage = _reset_session()
     had_tool_errors = False
 
     provider = create_provider(settings)
     with provider:
         while True:
             user_input = display.user_prompt().strip()
+            if user_input == NEW_CHAT_SENTINEL:
+                provider.reset_conversation()
+                session_usage = _reset_session(clear_display=True)
+                had_tool_errors = False
+                continue
             if user_input.lower() in {"exit", "quit"}:
                 break
             if not user_input:
