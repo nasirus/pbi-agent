@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -11,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pbi_agent.tools.output import bound_output
+from pbi_agent.tools.output import bound_output, decode_output
 from pbi_agent.tools.types import ToolContext, ToolSpec
 from pbi_agent.tools.workspace_access import normalize_positive_int, resolve_safe_path
 
@@ -83,26 +82,173 @@ response = {
     "error_message": None,
     "result": None,
     "result_present": False,
+    "result_truncated": False,
     "serialization_error": None,
 }
+
+TRUNCATED_DICT_KEY = "__pbi_agent_truncated__"
 
 cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.insert(0, cwd)
 
+
+def _bound_text(text: str, *, limit: int) -> tuple[str, bool]:
+    if len(text) <= limit:
+        return text, False
+    if limit <= 0:
+        return "", True
+
+    omitted_chars = len(text) - limit
+    while True:
+        marker = f" ... {omitted_chars} chars omitted ... "
+        available = limit - len(marker)
+        if available <= 0:
+            return text[: max(limit - 1, 0)] + ("..." if limit > 0 else ""), True
+
+        head = available // 2 + available % 2
+        tail = available // 2
+        new_omitted_chars = len(text) - head - tail
+        if new_omitted_chars == omitted_chars:
+            return f"{text[:head]}{marker}{text[-tail:] if tail else ''}", True
+        omitted_chars = new_omitted_chars
+
+
+def _json_size(value) -> int:
+    return len(json.dumps(value))
+
+
+def _truncate_string(value: str, *, limit: int) -> str:
+    if _json_size(value) <= limit:
+        return value
+
+    bounded, _ = _bound_text(value, limit=max(limit - 2, 1))
+    while _json_size(bounded) > limit and bounded:
+        bounded = bounded[:-1]
+    return bounded
+
+
+def _truncate_list(value: list[object], *, limit: int):
+    marker_template = "... {count} items omitted ..."
+    items: list[object] = []
+
+    for index, item in enumerate(value):
+        remaining = len(value) - index - 1
+        item_limit = max(64, limit // max(index + 2, 2))
+        truncated_item, _ = _truncate_json_value(item, limit=item_limit)
+        items.append(truncated_item)
+
+        candidate = list(items)
+        if remaining:
+            candidate.append(marker_template.format(count=remaining))
+        if _json_size(candidate) > limit:
+            items.pop()
+            break
+
+    omitted = len(value) - len(items)
+    candidate = list(items)
+    if omitted:
+        candidate.append(marker_template.format(count=omitted))
+
+    while _json_size(candidate) > limit and items:
+        items.pop()
+        omitted = len(value) - len(items)
+        candidate = list(items)
+        if omitted:
+            candidate.append(marker_template.format(count=omitted))
+
+    if _json_size(candidate) <= limit:
+        return candidate
+
+    marker_only = [marker_template.format(count=len(value))]
+    return marker_only if _json_size(marker_only) <= limit else []
+
+
+def _truncate_dict(value: dict[str, object], *, limit: int):
+    items: dict[str, object] = {}
+    marker_key = TRUNCATED_DICT_KEY
+    while marker_key in value:
+        marker_key = f"_{marker_key}"
+
+    source_items = list(value.items())
+    for index, (key, item) in enumerate(source_items):
+        remaining = len(source_items) - index - 1
+        item_limit = max(96, limit // max(index + 2, 2))
+        truncated_item, _ = _truncate_json_value(item, limit=item_limit)
+        items[key] = truncated_item
+
+        candidate = dict(items)
+        if remaining:
+            suffix = "s" if remaining != 1 else ""
+            candidate[marker_key] = f"{remaining} item{suffix} omitted"
+        if _json_size(candidate) > limit:
+            items.pop(key)
+            break
+
+    omitted = len(source_items) - len(items)
+    candidate = dict(items)
+    if omitted:
+        suffix = "s" if omitted != 1 else ""
+        candidate[marker_key] = f"{omitted} item{suffix} omitted"
+
+    while _json_size(candidate) > limit and items:
+        last_key = next(reversed(items))
+        items.pop(last_key)
+        omitted = len(source_items) - len(items)
+        candidate = dict(items)
+        if omitted:
+            suffix = "s" if omitted != 1 else ""
+            candidate[marker_key] = f"{omitted} item{suffix} omitted"
+
+    if _json_size(candidate) <= limit:
+        return candidate
+
+    marker_only = {marker_key: f"{len(source_items)} items omitted"}
+    return marker_only if _json_size(marker_only) <= limit else {}
+
+
+def _truncate_json_value(value, *, limit: int):
+    if _json_size(value) <= limit:
+        return value, False
+
+    if isinstance(value, str):
+        return _truncate_string(value, limit=limit), True
+    if isinstance(value, list):
+        return _truncate_list(value, limit=limit), True
+    if isinstance(value, dict):
+        return _truncate_dict(value, limit=limit), True
+
+    return value, False
+
+
 try:
     exec(compile(request["code"], "<python_exec>", "exec"), namespace)
     if request.get("capture_result") and "result" in namespace:
         response["result_present"] = True
-        try:
-            json.dumps(namespace["result"])
-        except TypeError as exc:
-            response["serialization_error"] = (
-                "Failed to serialize `result` as JSON: "
-                f"{type(exc).__name__}: {exc}"
-            )
-        else:
-            response["result"] = namespace["result"]
+        response["result"], response["result_truncated"] = _truncate_json_value(
+            namespace["result"],
+            limit=max(int(request.get("max_result_chars", 0) or 0), 1),
+        )
+except SystemExit as exc:
+    exit_code = exc.code
+    if exit_code in (None, 0):
+        response["ok"] = True
+        response["error_type"] = None
+        response["error_message"] = None
+    else:
+        response["ok"] = False
+        response["error_type"] = "SystemExit"
+        response["error_message"] = str(exit_code)
+        if isinstance(exit_code, str):
+            print(exit_code, file=sys.stderr)
+except TypeError as exc:
+    response["serialization_error"] = (
+        "Failed to serialize `result` as JSON: "
+        f"{type(exc).__name__}: {exc}"
+    )
+    response["result_present"] = False
+    response["result"] = None
+    response["result_truncated"] = False
 except BaseException as exc:
     response["ok"] = False
     response["error_type"] = type(exc).__name__
@@ -151,6 +297,7 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
                     {
                         "code": code,
                         "capture_result": capture_result,
+                        "max_result_chars": MAX_RESULT_CHARS,
                     }
                 ),
                 encoding="utf-8",
@@ -165,7 +312,6 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
                     str(response_path),
                 ],
                 cwd=str(working_directory),
-                env=dict(os.environ),
                 capture_output=True,
                 text=False,
                 timeout=float(timeout_seconds),
@@ -214,8 +360,8 @@ def _completed_result(
     capture_result: bool,
     execution_time_ms: int,
 ) -> dict[str, Any]:
-    stdout = _decode_output(completed.stdout)
-    stderr = _decode_output(completed.stderr)
+    stdout = decode_output(completed.stdout)
+    stderr = decode_output(completed.stderr)
     response = _read_response_payload(response_path)
 
     ok = completed.returncode == 0
@@ -232,7 +378,8 @@ def _completed_result(
         if serialization_error:
             stderr = _append_stderr(stderr, serialization_error)
         if capture_result and response.get("result_present"):
-            result, result_truncated = _bound_result(response.get("result"))
+            result = response.get("result")
+            result_truncated = bool(response.get("result_truncated", False))
     elif completed.returncode != 0:
         error_type = "RuntimeError"
         error_message = f"Python execution failed with exit code {completed.returncode}"
@@ -262,11 +409,11 @@ def _timeout_result(
     execution_time_ms: int,
 ) -> dict[str, Any]:
     bounded_stdout, stdout_truncated = bound_output(
-        _decode_output(exc.stdout),
+        decode_output(exc.stdout),
         limit=MAX_STDOUT_CHARS,
     )
     bounded_stderr, stderr_truncated = bound_output(
-        _decode_output(exc.stderr),
+        decode_output(exc.stderr),
         limit=MAX_STDERR_CHARS,
     )
     return {
@@ -319,34 +466,16 @@ def _failure_result(
     }
 
 
-def _decode_output(value: bytes | str | None) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    return value.decode("utf-8", errors="replace")
-
-
 def _elapsed_ms(started_at: float) -> int:
     return int((time.monotonic() - started_at) * 1000)
 
 
 def _read_response_payload(response_path: Path) -> dict[str, Any] | None:
-    if not response_path.exists():
-        return None
     try:
         payload = json.loads(response_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
-
-
-def _bound_result(value: Any) -> tuple[Any, bool]:
-    serialized = json.dumps(value)
-    bounded_result, was_truncated = bound_output(serialized, limit=MAX_RESULT_CHARS)
-    if not was_truncated:
-        return value, False
-    return bounded_result, True
 
 
 def _append_stderr(stderr: str, message: str) -> str:

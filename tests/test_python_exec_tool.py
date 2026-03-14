@@ -146,6 +146,92 @@ def test_python_exec_reports_non_serializable_result(
     assert result["error_type"] is None
 
 
+def test_python_exec_treats_zero_system_exit_as_success(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = python_exec_tool.handle(
+        {
+            "code": "import sys\nsys.exit(0)",
+            "capture_result": True,
+        },
+        ToolContext(),
+    )
+
+    assert result["ok"] is True
+    assert result["stderr"] == ""
+    assert result["error_type"] is None
+    assert result["error_message"] is None
+    assert result["result"] is None
+
+
+def test_python_exec_truncates_large_structured_result_in_place(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = python_exec_tool.handle(
+        {
+            "code": (
+                "result = {\n"
+                "    'status': 'ok',\n"
+                f"    'payload': 'x' * {python_exec_tool.MAX_RESULT_CHARS * 2},\n"
+                "}\n"
+            ),
+            "capture_result": True,
+        },
+        ToolContext(),
+    )
+
+    assert result["ok"] is True
+    assert result["result_truncated"] is True
+    assert isinstance(result["result"], dict)
+    assert result["result"]["status"] == "ok"
+    assert isinstance(result["result"]["payload"], str)
+    assert len(json.dumps(result["result"])) <= python_exec_tool.MAX_RESULT_CHARS
+
+
+def test_python_exec_bounds_response_file_before_parent_reads_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    captured_temp_path: Path | None = None
+
+    class PersistentTemporaryDirectory:
+        def __enter__(self) -> str:
+            nonlocal captured_temp_path
+            captured_temp_path = tmp_path / "python-exec-temp"
+            captured_temp_path.mkdir()
+            return str(captured_temp_path)
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        python_exec_tool.tempfile,
+        "TemporaryDirectory",
+        lambda prefix: PersistentTemporaryDirectory(),
+    )
+
+    result = python_exec_tool.handle(
+        {
+            "code": f"result = 'x' * {python_exec_tool.MAX_RESULT_CHARS * 4}",
+            "capture_result": True,
+        },
+        ToolContext(),
+    )
+
+    assert result["ok"] is True
+    assert result["result_truncated"] is True
+    assert captured_temp_path is not None
+
+    response_path = captured_temp_path / "response.json"
+    response_payload = json.loads(response_path.read_text(encoding="utf-8"))
+    assert response_payload["result_truncated"] is True
+    assert response_path.stat().st_size <= python_exec_tool.MAX_RESULT_CHARS + 1024
+
+
 def test_python_exec_uses_requested_working_directory(
     tmp_path: Path, monkeypatch
 ) -> None:
