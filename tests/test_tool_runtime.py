@@ -243,14 +243,14 @@ def test_execute_tool_calls_serializes_tabular_read_file_output(
 
 
 def test_execute_tool_calls_passes_runtime_context_to_handler(monkeypatch) -> None:
-    seen_metadata: dict[str, object] = {}
+    captured_context: list[ToolContext] = []
 
     def fake_handler(
         arguments: dict[str, object],
         context: ToolContext,
     ) -> dict[str, object]:
         del arguments
-        seen_metadata.update(context.metadata)
+        captured_context.append(context)
         return {"ok": True}
 
     monkeypatch.setattr(tool_runtime, "get_tool_handler", lambda name: fake_handler)
@@ -258,8 +258,9 @@ def test_execute_tool_calls_passes_runtime_context_to_handler(monkeypatch) -> No
     batch = tool_runtime.execute_tool_calls(
         [ToolCall(call_id="call_1", name="shell", arguments={})],
         max_workers=1,
-        context=ToolContext(metadata={"sub_agent_depth": 1, "mode": "child"}),
+        context=ToolContext(sub_agent_depth=1),
     )
 
     assert batch.had_errors is False
-    assert seen_metadata == {"sub_agent_depth": 1, "mode": "child"}
+    assert len(captured_context) == 1
+    assert captured_context[0].sub_agent_depth == 1

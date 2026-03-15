@@ -6,6 +6,8 @@ from typing import Any
 
 from pbi_agent.tools.types import ToolContext, ToolSpec
 
+_REASONING_EFFORT_VALUES = ("low", "medium", "high", "xhigh")
+
 SPEC = ToolSpec(
     name="sub_agent",
     description=(
@@ -21,7 +23,7 @@ SPEC = ToolSpec(
             },
             "reasoning_effort": {
                 "type": "string",
-                "enum": ["low", "medium", "high", "xhigh"],
+                "enum": list(_REASONING_EFFORT_VALUES),
                 "default": "low",
                 "description": "Reasoning effort for the child agent. Defaults to low.",
             },
@@ -44,20 +46,14 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         }
 
     reasoning_effort = arguments.get("reasoning_effort", "low")
-    if not isinstance(reasoning_effort, str) or reasoning_effort not in {
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-    }:
+    if not isinstance(reasoning_effort, str) or reasoning_effort not in _REASONING_EFFORT_VALUES:
         reasoning_effort = "low"
 
-    metadata = context.metadata
-    settings = metadata.get("settings")
-    display = metadata.get("display")
-    session_usage = metadata.get("session_usage")
-    turn_usage = metadata.get("turn_usage")
-    sub_agent_depth = int(metadata.get("sub_agent_depth", 0) or 0)
+    settings = context.settings
+    display = context.display
+    session_usage = context.session_usage
+    turn_usage = context.turn_usage
+    sub_agent_depth = context.sub_agent_depth
 
     if sub_agent_depth > 0:
         return {
@@ -73,7 +69,7 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
             "status": "failed",
             "error": {
                 "type": "invalid_runtime_context",
-                "message": "sub_agent requires runtime settings, display, and usage context.",
+                "message": "sub_agent requires runtime settings, display, session_usage, and turn_usage context.",
             },
         }
 

@@ -143,13 +143,11 @@ class GoogleProvider(Provider):
             response.function_calls,
             max_workers=max_workers,
             context=ToolContext(
-                metadata={
-                    "settings": self._settings,
-                    "display": display,
-                    "session_usage": session_usage,
-                    "turn_usage": turn_usage,
-                    "sub_agent_depth": sub_agent_depth,
-                }
+                settings=self._settings,
+                display=display,
+                session_usage=session_usage,
+                turn_usage=turn_usage,
+                sub_agent_depth=sub_agent_depth,
             ),
         )
 

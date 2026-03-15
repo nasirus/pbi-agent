@@ -7,14 +7,14 @@ from typing import Any
 
 from pbi_agent.agent.system_prompt import get_sub_agent_system_prompt
 from pbi_agent.config import Settings
-from pbi_agent.models.messages import AgentOutcome, TokenUsage
+from pbi_agent.models.messages import AgentOutcome, CompletedResponse, TokenUsage
 from pbi_agent.providers import create_provider
 from pbi_agent.ui.display_protocol import DisplayProtocol
 
 _log = logging.getLogger(__name__)
 
 NEW_CHAT_SENTINEL = "__new_chat__"
-SUB_AGENT_MAX_REQUESTS = 12
+SUB_AGENT_MAX_REQUESTS = 30
 SUB_AGENT_MAX_ELAPSED_SECONDS = 300.0
 SUB_AGENT_DISABLED_TOOLS = {"sub_agent"}
 
@@ -232,7 +232,7 @@ def _run_tool_iterations(
     request_count: int = 0,
     started_at: float | None = None,
     max_elapsed_seconds: float | None = None,
-) -> tuple:
+) -> tuple[CompletedResponse, bool, int]:
     had_errors = False
 
     while response.has_tool_calls:

@@ -171,7 +171,7 @@ class _ProviderStub:
 def test_sub_agent_tool_blocks_nested_calls() -> None:
     result = sub_agent_tool.handle(
         {"task_instruction": "Inspect src", "reasoning_effort": "medium"},
-        ToolContext(metadata={"sub_agent_depth": 1}),
+        ToolContext(sub_agent_depth=1),
     )
 
     assert result["status"] == "failed"

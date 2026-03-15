@@ -136,26 +136,23 @@ class OpenAIProvider(Provider):
             response.function_calls,
             max_workers=max_workers,
             context=ToolContext(
-                metadata={
-                    "settings": self._settings,
-                    "display": display,
-                    "session_usage": session_usage,
-                    "turn_usage": turn_usage,
-                    "sub_agent_depth": sub_agent_depth,
-                }
+                settings=self._settings,
+                display=display,
+                session_usage=session_usage,
+                turn_usage=turn_usage,
+                sub_agent_depth=sub_agent_depth,
             ),
         )
 
         for result in batch.results:
             call = _find_by_id(response.function_calls, result.call_id)
-            if call and call.name == "sub_agent":
-                continue
-            display.function_result(
-                name=call.name if call else "unknown",
-                success=not result.is_error,
-                call_id=result.call_id,
-                arguments=call.arguments if call else None,
-            )
+            if not (call and call.name == "sub_agent"):
+                display.function_result(
+                    name=call.name if call else "unknown",
+                    success=not result.is_error,
+                    call_id=result.call_id,
+                    arguments=call.arguments if call else None,
+                )
         if displayable_calls:
             display.tool_group_end()
 
