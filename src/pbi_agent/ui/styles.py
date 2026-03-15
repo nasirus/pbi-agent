@@ -94,6 +94,9 @@ ToolGroup.tool-group-read-file {
 ToolGroup.tool-group-python-exec {
     border-left: thick #A855F7;
 }
+ToolGroup.tool-group-sub-agent {
+    border-left: thick #14B8A6;
+}
 ToolGroup > CollapsibleTitle {
     padding: 1 2;
     color: $text-muted;
@@ -136,6 +139,31 @@ ToolItem.tool-call-read-file {
 }
 ToolItem.tool-call-python-exec {
     background: #A855F7 14%;
+}
+ToolItem.tool-call-sub-agent {
+    background: #14B8A6 14%;
+}
+
+/* ---- sub-agent block ---- */
+SubAgentBlock {
+    margin: 0 4;
+    padding: 0 0;
+    height: auto;
+    background: $boost;
+    border: none;
+    border-left: thick #14B8A6;
+}
+SubAgentBlock > CollapsibleTitle {
+    padding: 1 2;
+    color: $text-muted;
+}
+SubAgentBlock > Contents {
+    padding: 0 2;
+    height: auto;
+}
+SubAgentBlock > Contents > Vertical {
+    height: auto;
+    min-height: 0;
 }
 
 /* ---- thinking block ---- */

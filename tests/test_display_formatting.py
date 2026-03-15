@@ -7,6 +7,11 @@ from unittest.mock import MagicMock
 
 from pbi_agent.agent.session import NEW_CHAT_SENTINEL
 from pbi_agent.ui.display import Display
+from pbi_agent.ui.formatting import (
+    format_generic_function_item,
+    format_init_report_item,
+    format_skill_knowledge_item,
+)
 
 
 def _make_display(*, verbose: bool = False) -> Display:
@@ -15,86 +20,77 @@ def _make_display(*, verbose: bool = False) -> Display:
     return Display(app, verbose=verbose)
 
 
-# -- _format_skill_knowledge_item -------------------------------------------
+# -- format_skill_knowledge_item --------------------------------------------
 
 
 class TestFormatSkillKnowledgeItem:
     def test_single_skill(self) -> None:
-        d = _make_display()
-        result = d._format_skill_knowledge_item(
+        result = format_skill_knowledge_item(
             ["card_visual"], status="[green]done[/green]"
         )
         assert "card_visual" in result
         assert "[green]done[/green]" in result
 
     def test_multiple_skills(self) -> None:
-        d = _make_display()
-        result = d._format_skill_knowledge_item(
+        result = format_skill_knowledge_item(
             ["card_visual", "table_visual"], status="[green]done[/green]"
         )
         assert "card_visual, table_visual" in result
 
     def test_empty_skills_shows_none(self) -> None:
-        d = _make_display()
-        result = d._format_skill_knowledge_item([], status="[green]done[/green]")
+        result = format_skill_knowledge_item([], status="[green]done[/green]")
         assert "<none>" in result
 
     def test_verbose_includes_call_id(self) -> None:
-        d = _make_display(verbose=True)
-        result = d._format_skill_knowledge_item(
-            ["card_visual"], status="[green]done[/green]", call_id="call_42"
+        result = format_skill_knowledge_item(
+            ["card_visual"], verbose=True, status="[green]done[/green]", call_id="call_42"
         )
         assert "call_42" in result
 
     def test_non_verbose_omits_call_id(self) -> None:
-        d = _make_display(verbose=False)
-        result = d._format_skill_knowledge_item(
-            ["card_visual"], status="[green]done[/green]", call_id="call_42"
+        result = format_skill_knowledge_item(
+            ["card_visual"], verbose=False, status="[green]done[/green]", call_id="call_42"
         )
         assert "call_42" not in result
 
 
-# -- _format_init_report_item -----------------------------------------------
+# -- format_init_report_item ------------------------------------------------
 
 
 class TestFormatInitReportItem:
     def test_shows_destination(self) -> None:
-        d = _make_display()
-        result = d._format_init_report_item(".", status="[green]done[/green]")
+        result = format_init_report_item(".", status="[green]done[/green]")
         assert "." in result
         assert "[green]done[/green]" in result
 
     def test_force_true_shown(self) -> None:
-        d = _make_display()
-        result = d._format_init_report_item(
+        result = format_init_report_item(
             "/tmp/report", status="[green]done[/green]", force=True
         )
         assert "force" in result
         assert "true" in result
 
     def test_force_false_omitted(self) -> None:
-        d = _make_display()
-        result = d._format_init_report_item(
+        result = format_init_report_item(
             "/tmp/report", status="[green]done[/green]", force=False
         )
         assert "force" not in result
 
     def test_verbose_includes_call_id(self) -> None:
-        d = _make_display(verbose=True)
-        result = d._format_init_report_item(
-            ".", status="[green]done[/green]", call_id="call_7"
+        result = format_init_report_item(
+            ".", verbose=True, status="[green]done[/green]", call_id="call_7"
         )
         assert "call_7" in result
 
 
-# -- _format_generic_function_item (enhanced) --------------------------------
+# -- format_generic_function_item -------------------------------------------
 
 
 class TestFormatGenericFunctionItem:
     def test_non_verbose_with_args_shows_summary(self) -> None:
-        d = _make_display(verbose=False)
-        result = d._format_generic_function_item(
+        result = format_generic_function_item(
             "my_tool",
+            verbose=False,
             status="[green]done[/green]",
             arguments={"key": "value"},
         )
@@ -103,9 +99,9 @@ class TestFormatGenericFunctionItem:
         assert "value" in result
 
     def test_non_verbose_no_args_shows_name_only(self) -> None:
-        d = _make_display(verbose=False)
-        result = d._format_generic_function_item(
+        result = format_generic_function_item(
             "my_tool",
+            verbose=False,
             status="[green]done[/green]",
             arguments=None,
         )
@@ -114,9 +110,9 @@ class TestFormatGenericFunctionItem:
         assert "\n" not in result
 
     def test_non_verbose_empty_dict_args_shows_name_only(self) -> None:
-        d = _make_display(verbose=False)
-        result = d._format_generic_function_item(
+        result = format_generic_function_item(
             "my_tool",
+            verbose=False,
             status="[green]done[/green]",
             arguments={},
         )
@@ -125,9 +121,9 @@ class TestFormatGenericFunctionItem:
         assert "\n" not in result
 
     def test_verbose_includes_call_id_and_args(self) -> None:
-        d = _make_display(verbose=True)
-        result = d._format_generic_function_item(
+        result = format_generic_function_item(
             "my_tool",
+            verbose=True,
             status="[green]done[/green]",
             call_id="call_99",
             arguments={"key": "value"},
@@ -256,3 +252,46 @@ class TestFunctionResultRouting:
         text = d._tool_group.items[0].text
         assert "/tmp/file.txt" in text
         assert "create" in text
+
+
+def test_begin_sub_agent_mounts_nested_block_and_child_widgets() -> None:
+    app = MagicMock()
+    display = Display(app)
+
+    sub_display = display.begin_sub_agent(
+        task_instruction="Inspect source files for TODOs",
+        reasoning_effort="low",
+    )
+    sub_display.render_markdown("Found one TODO.")
+    sub_display.finish_sub_agent(status="completed")
+
+    first_call = app.call_from_thread.call_args_list[0]
+    assert first_call.args[0] == app.mount_sub_agent_block
+    assert "sub_agent" in first_call.args[2]
+    assert "Inspect source files for TODOs" in first_call.args[2]
+
+    callbacks = [call.args[0] for call in app.call_from_thread.call_args_list]
+    assert app.mount_widget_in_container in callbacks
+    assert app.update_sub_agent_title in callbacks
+
+
+def test_sub_agent_render_thinking_queries_via_call_from_thread() -> None:
+    app = MagicMock()
+
+    def call_from_thread(callback, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if callback is app._query_optional:
+            return None
+        return None
+
+    app.call_from_thread.side_effect = call_from_thread
+    display = Display(app)
+
+    sub_display = display.begin_sub_agent(
+        task_instruction="Inspect source files for TODOs",
+        reasoning_effort="low",
+    )
+    sub_display.render_thinking("Reasoning details", title="Thinking")
+
+    callbacks = [call.args[0] for call in app.call_from_thread.call_args_list]
+    assert app._query_optional in callbacks
+    assert app.mount_widget_in_container in callbacks

@@ -1,13 +1,8 @@
-"""Synchronous display bridge for the Textual chat UI."""
+"""Textual sub-agent display — renders child-agent output inside a collapsible block."""
 
 from __future__ import annotations
 
-import logging
-import queue
-import threading
-import traceback
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from textual.widgets import Static
 
@@ -17,12 +12,12 @@ from pbi_agent.ui.formatting import (
     REDACTED_THINKING_NOTICE,
     escape_markup_text,
     format_patch_tool_item,
-    format_session_subtitle,
     format_shell_tool_item,
     format_usage_summary,
     format_wait_seconds,
     resolve_reasoning_panel,
     route_function_result,
+    shorten,
     status_markup,
     tool_group_class,
     tool_item_class,
@@ -31,54 +26,67 @@ from pbi_agent.ui.widgets import (
     AssistantMarkdown,
     ErrorMessage,
     NoticeMessage,
-    ToolGroupEntry,
+    ThinkingBlock,
+    ThinkingContent,
+    ToolGroup,
+    ToolItem,
     UsageSummary,
     WaitingIndicator,
-    WelcomeBanner,
 )
 
+from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
-    from pbi_agent.ui.app import ChatApp
-
-_log = logging.getLogger(__name__)
+    from pbi_agent.ui.display import Display
 
 
-@dataclass(slots=True)
-class _TurnUsageWidget:
-    widget_id: str
-    elapsed_seconds: float
+class SubAgentDisplay(DisplayProtocol):
+    """Display bridge for sub-agent output rendered inside a Textual container."""
 
-
-class Display(DisplayProtocol):
-    """Sync bridge between session code and the Textual App."""
-
-    def __init__(self, app: ChatApp, *, verbose: bool = False) -> None:
-        self.app = app
-        self.verbose = verbose
+    def __init__(
+        self,
+        *,
+        parent: Display,
+        task_instruction: str,
+        reasoning_effort: str | None,
+    ) -> None:
+        self.parent = parent
+        self.verbose = parent.verbose
+        self._task_instruction = task_instruction
+        self._reasoning_effort = reasoning_effort
+        self._tool_group = PendingToolGroup()
         self._waiting_widget_id: str | None = None
         self._active_thinking_widget_id: str | None = None
-        self._msg_counter = 0
-        self._tool_group = PendingToolGroup()
-        self._input_event = threading.Event()
-        self._input_queue: queue.Queue[str] = queue.Queue()
-        self._shutdown = threading.Event()
-        self._turn_usage_widgets: dict[int, _TurnUsageWidget] = {}
-        self._turn_usage_lock = threading.Lock()
+        self._counter = 0
+        self._block_id = parent._next_id("subagent")
+        self._body_id = f"{self._block_id}-body"
+        self.parent._safe_call(
+            self.parent.app.mount_sub_agent_block,
+            self._block_id,
+            self._title("running"),
+            body_id=self._body_id,
+        )
 
-    def _next_id(self, prefix: str = "w") -> str:
-        self._msg_counter += 1
-        return f"{prefix}-{self._msg_counter}"
+    def _title(self, status: str) -> str:
+        summary = shorten(self._task_instruction.strip() or "sub-agent task", 72)
+        title = f"sub_agent \u00b7 {summary} \u00b7 {status}"
+        if self._reasoning_effort:
+            title += f" \u00b7 {self._reasoning_effort}"
+        return title
 
-    def _safe_call(self, callback: Any, *args: Any, **kwargs: Any) -> Any:
-        try:
-            return self.app.call_from_thread(callback, *args, **kwargs)
-        except Exception:
-            _log.debug(
-                "_safe_call failed for %s: %s",
-                getattr(callback, "__name__", callback),
-                traceback.format_exc(),
-            )
-            return None
+    def _next_id(self, prefix: str) -> str:
+        self._counter += 1
+        return f"{self._block_id}-{prefix}-{self._counter}"
+
+    def _mount_widget(self, widget: Static) -> None:
+        self.parent._safe_call(
+            self.parent.app.mount_widget_in_container,
+            self._body_id,
+            widget,
+        )
+
+    def _query_optional(self, selector: str) -> Any | None:
+        return self.parent._safe_call(self.parent.app._query_optional, selector)
 
     def _mount_static_message(
         self,
@@ -92,12 +100,7 @@ class Display(DisplayProtocol):
         kwargs: dict[str, Any] = {"id": widget_id}
         if classes:
             kwargs["classes"] = classes
-        self._safe_call(self.app.mount_widget, widget_cls(text, **kwargs))
-        return widget_id
-
-    def _mount_markdown(self, prefix: str, text: str) -> str:
-        widget_id = self._next_id(prefix)
-        self._safe_call(self.app.mount_widget, AssistantMarkdown(text, id=widget_id))
+        self._mount_widget(widget_cls(text, **kwargs))
         return widget_id
 
     def _start_tool_group(
@@ -112,27 +115,19 @@ class Display(DisplayProtocol):
     def _append_tool_line(self, tool_name: str, text: str) -> None:
         self._tool_group.add_item(text, classes=tool_item_class(tool_name))
 
+    # -- protocol stubs (no-ops for sub-agent context) -----------------------
+
     def request_shutdown(self) -> None:
-        self._shutdown.set()
-        self._input_event.set()
+        return None
 
     def submit_input(self, value: str) -> None:
-        self._input_queue.put(value)
-        self._input_event.set()
+        del value
 
     def request_new_chat(self) -> None:
-        from pbi_agent.agent.session import NEW_CHAT_SENTINEL
-
-        self._input_queue.put(NEW_CHAT_SENTINEL)
-        self._input_event.set()
+        raise RuntimeError("Sub-agent display does not support interactive chat.")
 
     def reset_chat(self) -> None:
-        self._waiting_widget_id = None
-        self._active_thinking_widget_id = None
-        self._tool_group.reset()
-        with self._turn_usage_lock:
-            self._turn_usage_widgets.clear()
-        self._safe_call(self.app.reset_chat_view)
+        return None
 
     def begin_sub_agent(
         self,
@@ -140,16 +135,16 @@ class Display(DisplayProtocol):
         task_instruction: str,
         reasoning_effort: str | None = None,
     ) -> DisplayProtocol:
-        from pbi_agent.ui.sub_agent_display import SubAgentDisplay
-
-        return SubAgentDisplay(
-            parent=self,
-            task_instruction=task_instruction,
-            reasoning_effort=reasoning_effort,
-        )
+        del task_instruction, reasoning_effort
+        return self
 
     def finish_sub_agent(self, *, status: str) -> None:
-        del status
+        self.wait_stop()
+        self.parent._safe_call(
+            self.parent.app.update_sub_agent_title,
+            self._block_id,
+            self._title(status),
+        )
 
     def welcome(
         self,
@@ -159,52 +154,34 @@ class Display(DisplayProtocol):
         reasoning_effort: str | None = None,
         single_turn_hint: str | None = None,
     ) -> None:
-        self._safe_call(
-            self.app.mount_widget,
-            WelcomeBanner(
-                interactive=interactive,
-                model=model,
-                reasoning_effort=reasoning_effort,
-                single_turn_hint=single_turn_hint,
-            ),
-        )
+        del interactive, model, reasoning_effort, single_turn_hint
 
     def user_prompt(self) -> str:
-        while True:
-            if self._shutdown.is_set():
-                return "exit"
-            try:
-                value = self._input_queue.get_nowait()
-            except queue.Empty:
-                self._safe_call(self.app.enable_input)
-                self._input_event.wait(timeout=0.5)
-                self._input_event.clear()
-                continue
-            if self._input_queue.empty():
-                self._input_event.clear()
-            return value
+        raise RuntimeError("Sub-agent display does not support user input.")
 
     def assistant_start(self) -> None:
-        """Compatibility hook kept for the session/provider interface."""
+        return None
+
+    # -- rendering -----------------------------------------------------------
 
     def wait_start(self, message: str = "model is processing your request...") -> None:
         if self._waiting_widget_id is not None:
             return
         self._active_thinking_widget_id = None
-        widget_id = self._next_id("think")
+        widget_id = self._next_id("wait")
         self._waiting_widget_id = widget_id
-        self._safe_call(
-            self.app.mount_widget,
-            WaitingIndicator(message=message, id=widget_id),
-        )
+        self._mount_widget(WaitingIndicator(message=message, id=widget_id))
 
     def wait_stop(self) -> None:
         if self._waiting_widget_id is not None:
-            self._safe_call(self.app.remove_widget, self._waiting_widget_id)
+            self.parent._safe_call(
+                self.parent.app.remove_widget, self._waiting_widget_id
+            )
             self._waiting_widget_id = None
 
     def render_markdown(self, text: str) -> None:
-        self._mount_markdown("md", text)
+        widget_id = self._next_id("md")
+        self._mount_widget(AssistantMarkdown(text, id=widget_id))
 
     def render_thinking(
         self,
@@ -227,8 +204,20 @@ class Display(DisplayProtocol):
         if replace_existing:
             self._active_thinking_widget_id = resolved_widget_id
 
-        self._safe_call(
-            self.app.update_thinking_block,
+        existing = self._query_optional(f"#{resolved_widget_id}")
+        if existing is None:
+            self._mount_widget(
+                ThinkingBlock(
+                    ThinkingContent(body or "", id=f"{resolved_widget_id}-content"),
+                    title=widget_title,
+                    collapsed=True,
+                    id=resolved_widget_id,
+                )
+            )
+            return resolved_widget_id
+
+        self.parent._safe_call(
+            self.parent.app.update_thinking_block,
             resolved_widget_id,
             widget_title,
             body,
@@ -236,46 +225,24 @@ class Display(DisplayProtocol):
         return resolved_widget_id
 
     def render_redacted_thinking(self) -> None:
-        self._mount_static_message(
-            "redact",
-            NoticeMessage,
-            REDACTED_THINKING_NOTICE,
-        )
+        self._mount_static_message("redact", NoticeMessage, REDACTED_THINKING_NOTICE)
 
     def session_usage(self, usage: TokenUsage) -> None:
-        self._safe_call(
-            self.app.update_session_header, format_session_subtitle(usage.snapshot())
-        )
+        del usage
 
     def turn_usage(self, usage: TokenUsage, elapsed_seconds: float) -> None:
         usage_text = format_usage_summary(
             usage.snapshot(),
             elapsed_seconds=elapsed_seconds,
-            label="Turn",
+            label="Sub-agent",
         )
-        widget_id = self._mount_static_message("usage", UsageSummary, usage_text)
-        with self._turn_usage_lock:
-            self._turn_usage_widgets[id(usage)] = _TurnUsageWidget(
-                widget_id=widget_id,
-                elapsed_seconds=elapsed_seconds,
-            )
+        self._mount_static_message("usage", UsageSummary, usage_text)
 
-    def _refresh_turn_usage_widget(self, usage: TokenUsage) -> None:
-        with self._turn_usage_lock:
-            target = self._turn_usage_widgets.get(id(usage))
-        if target is None:
-            return
-        text = format_usage_summary(
-            usage.snapshot(),
-            elapsed_seconds=target.elapsed_seconds,
-            label="Turn",
-        )
-        self._safe_call(self.app.update_usage_summary, target.widget_id, text)
+    # -- tool display --------------------------------------------------------
 
     def shell_start(self, commands: list[str]) -> None:
-        count = len(commands)
         self._start_tool_group(
-            f"Running {count} shell command{'s' if count != 1 else ''}",
+            f"Running {len(commands)} shell command{'s' if len(commands) != 1 else ''}",
             classes=tool_group_class("shell"),
         )
 
@@ -351,19 +318,24 @@ class Display(DisplayProtocol):
         self._append_tool_line(tool_name, text)
 
     def tool_group_end(self) -> None:
-        if self._tool_group.items:
-            group_id = self._next_id("tg")
-            self._safe_call(
-                self.app.mount_tool_group,
-                group_id,
-                self._tool_group.label,
-                [
-                    ToolGroupEntry(text=item.text, classes=item.classes)
-                    for item in self._tool_group.items
-                ],
-                group_classes=self._tool_group.classes,
-            )
+        if not self._tool_group.items:
+            self._tool_group.reset()
+            return
+        group_id = self._next_id("tg")
+        group = ToolGroup(
+            *[
+                ToolItem(item.text, classes=item.classes)
+                for item in self._tool_group.items
+            ],
+            title=self._tool_group.label,
+            collapsed=True,
+            id=group_id,
+            classes=self._tool_group.classes,
+        )
+        self._mount_widget(group)
         self._tool_group.reset()
+
+    # -- notices -------------------------------------------------------------
 
     def retry_notice(self, attempt: int, max_retries: int) -> None:
         self.wait_stop()
@@ -403,9 +375,6 @@ class Display(DisplayProtocol):
 
     def error(self, message: str) -> None:
         self.wait_stop()
-        if self._active_thinking_widget_id:
-            self._safe_call(self.app.remove_widget, self._active_thinking_widget_id)
-            self._active_thinking_widget_id = None
         self._tool_group.reset()
         self._mount_static_message(
             "err",
@@ -421,6 +390,3 @@ class Display(DisplayProtocol):
                 f"[dim]{message}[/dim]",
                 classes="debug-msg",
             )
-
-
-__all__ = ["Display"]

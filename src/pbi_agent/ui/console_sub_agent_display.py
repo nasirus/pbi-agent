@@ -1,10 +1,9 @@
-"""Console-oriented display bridge for single-turn CLI modes."""
+"""Console sub-agent display — renders child-agent output to the terminal."""
 
 from __future__ import annotations
 
-from typing import Any, TextIO
+from typing import Any, TYPE_CHECKING
 
-from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
@@ -18,79 +17,66 @@ from pbi_agent.ui.formatting import (
     TOOL_ICONS,
     escape_markup_text,
     format_patch_tool_item,
-    format_session_subtitle,
     format_shell_tool_item,
     format_usage_summary,
     format_wait_seconds,
     resolve_reasoning_panel,
     route_function_result,
+    shorten,
     status_markup,
     tool_group_class,
     tool_item_class,
 )
 
+if TYPE_CHECKING:
+    from pbi_agent.ui.console_display import ConsoleDisplay
 
-class ConsoleDisplay(DisplayProtocol):
-    """Sync stdout/stderr display for headless single-turn execution."""
+
+class ConsoleSubAgentDisplay(DisplayProtocol):
+    """Console display bridge for sub-agent output."""
 
     def __init__(
         self,
         *,
-        verbose: bool = False,
-        stdout: TextIO | None = None,
-        stderr: TextIO | None = None,
+        parent: ConsoleDisplay,
+        task_instruction: str,
+        reasoning_effort: str | None,
     ) -> None:
-        self.verbose = verbose
-        self._console = Console(file=stdout)
-        self._error_console = Console(file=stderr, stderr=True)
+        self.parent = parent
+        self.verbose = parent.verbose
+        self._task_instruction = task_instruction
+        self._reasoning_effort = reasoning_effort
         self._tool_group = PendingToolGroup()
-        self._thinking_counter = 0
-        self._latest_session_subtitle: str | None = None
-        self._usage_section_open = False
-        self._turn_count = 0
-        self._status: Any = None
+        self.parent._stop_spinner()
+        self.parent._console.print(
+            Panel(
+                self._title("running"),
+                border_style=TOOL_BORDER_STYLES["sub-agent"],
+                expand=True,
+                padding=(0, 1),
+            )
+        )
 
-    def _stop_spinner(self) -> None:
-        """Stop the wait spinner if one is currently active."""
-        if self._status is not None:
-            self._status.stop()
-            self._status = None
+    def _title(self, status: str) -> str:
+        summary = shorten(self._task_instruction.strip() or "sub-agent task", 72)
+        title = f"sub_agent \u00b7 {summary} \u00b7 {status}"
+        if self._reasoning_effort:
+            title += f" \u00b7 {self._reasoning_effort}"
+        return title
 
-    def _start_tool_group(
-        self,
-        label: str,
-        *,
-        classes: str = "",
-        function_count: int = 0,
-    ) -> None:
-        self._tool_group.start(label, classes=classes, function_count=function_count)
-
-    def _append_tool_line(self, tool_name: str, text: str) -> None:
-        self._tool_group.add_item(text, classes=tool_item_class(tool_name))
-
-    def _print_tool_item(self, text: str) -> None:
-        lines = text.splitlines() or [text]
-        for index, line in enumerate(lines):
-            prefix = "  - " if index == 0 else "    "
-            self._console.print(f"{prefix}{line}")
+    # -- protocol stubs ------------------------------------------------------
 
     def request_shutdown(self) -> None:
         return None
 
     def submit_input(self, value: str) -> None:
         del value
-        return None
 
     def request_new_chat(self) -> None:
-        raise RuntimeError(
-            "ConsoleDisplay does not support interactive new-chat requests."
-        )
+        raise RuntimeError("Sub-agent display does not support interactive chat.")
 
     def reset_chat(self) -> None:
-        self._stop_spinner()
-        self._tool_group.reset()
-        self._usage_section_open = False
-        self._turn_count = 0
+        return None
 
     def begin_sub_agent(
         self,
@@ -98,16 +84,13 @@ class ConsoleDisplay(DisplayProtocol):
         task_instruction: str,
         reasoning_effort: str | None = None,
     ) -> DisplayProtocol:
-        from pbi_agent.ui.console_sub_agent_display import ConsoleSubAgentDisplay
-
-        return ConsoleSubAgentDisplay(
-            parent=self,
-            task_instruction=task_instruction,
-            reasoning_effort=reasoning_effort,
-        )
+        del task_instruction, reasoning_effort
+        return self
 
     def finish_sub_agent(self, *, status: str) -> None:
-        del status
+        self.parent._console.print(
+            f"[bold #F59E0B]{escape_markup_text(self._title(status))}[/bold #F59E0B]"
+        )
 
     def welcome(
         self,
@@ -117,55 +100,26 @@ class ConsoleDisplay(DisplayProtocol):
         reasoning_effort: str | None = None,
         single_turn_hint: str | None = None,
     ) -> None:
-        mode = "interactive" if interactive else "single-turn"
-        detail_parts: list[str] = []
-        if model:
-            detail_parts.append(f"[dim]model:[/dim] {escape_markup_text(model)}")
-        if reasoning_effort:
-            detail_parts.append(
-                f"[dim]reasoning:[/dim] {escape_markup_text(reasoning_effort)}"
-            )
-        subtitle = "  ".join(detail_parts) if detail_parts else None
-        self._console.print(
-            Panel(
-                f"[dim]{escape_markup_text(mode)}[/dim]",
-                title="[bold cyan]PBI Agent[/bold cyan]",
-                subtitle=subtitle,
-                border_style="cyan",
-                expand=False,
-                padding=(0, 2),
-            )
-        )
-        if single_turn_hint:
-            self._console.print(f"[dim]{escape_markup_text(single_turn_hint)}[/dim]")
+        del interactive, model, reasoning_effort, single_turn_hint
 
     def user_prompt(self) -> str:
-        raise RuntimeError("ConsoleDisplay does not support interactive user input.")
+        raise RuntimeError("Sub-agent display does not support user input.")
 
     def assistant_start(self) -> None:
         return None
 
-    def wait_start(self, message: str = "model is processing your request...") -> None:
-        self._stop_spinner()
-        if self._console.is_terminal:
-            from rich.status import Status
+    # -- rendering -----------------------------------------------------------
 
-            self._status = Status(
-                escape_markup_text(message),
-                console=self._console,
-                spinner="dots",
-                spinner_style="cyan",
-            )
-            self._status.start()
-        else:
-            self._console.print(f"[dim]... {escape_markup_text(message)}[/dim]")
+    def wait_start(self, message: str = "model is processing your request...") -> None:
+        self.parent._console.print(
+            f"[dim]sub-agent: {escape_markup_text(message)}[/dim]"
+        )
 
     def wait_stop(self) -> None:
-        self._stop_spinner()
+        return None
 
     def render_markdown(self, text: str) -> None:
-        self._stop_spinner()
-        self._console.print(Markdown(text))
+        self.parent._console.print(Markdown(text))
 
     def render_thinking(
         self,
@@ -175,20 +129,12 @@ class ConsoleDisplay(DisplayProtocol):
         replace_existing: bool = False,
         widget_id: str | None = None,
     ) -> str | None:
-        self._stop_spinner()
-        del replace_existing
-        summary = title or ""
-        body, display_title = resolve_reasoning_panel(text, summary)
-        if body is None and not summary.strip():
+        del replace_existing, widget_id
+        body, display_title = resolve_reasoning_panel(text, title or "")
+        if body is None and not (title or "").strip():
             return None
-
-        resolved_widget_id = widget_id
-        if resolved_widget_id is None:
-            self._thinking_counter += 1
-            resolved_widget_id = f"thinking-{self._thinking_counter}"
-
         content = Markdown(body) if body else Text("...", style="dim")
-        self._console.print(
+        self.parent._console.print(
             Panel(
                 content,
                 title=f"[italic]{escape_markup_text(display_title)}[/italic]",
@@ -197,32 +143,21 @@ class ConsoleDisplay(DisplayProtocol):
                 padding=(0, 1),
             )
         )
-        return resolved_widget_id
+        return "sub-agent-thinking"
 
     def render_redacted_thinking(self) -> None:
-        self._stop_spinner()
-        self._console.print(REDACTED_THINKING_NOTICE)
+        self.parent._console.print(REDACTED_THINKING_NOTICE)
 
     def session_usage(self, usage: TokenUsage) -> None:
-        self._latest_session_subtitle = format_session_subtitle(usage.snapshot())
-        if (
-            self._usage_section_open
-            and self._latest_session_subtitle
-            and self._turn_count > 1
-        ):
-            self._console.print(f"[dim]{self._latest_session_subtitle}[/dim]")
-            self._usage_section_open = False
+        del usage
 
     def turn_usage(self, usage: TokenUsage, elapsed_seconds: float) -> None:
-        self._stop_spinner()
-        self._turn_count += 1
-        self._console.print()
         summary = format_usage_summary(
             usage.snapshot(),
             elapsed_seconds=elapsed_seconds,
-            label="Turn",
+            label="Sub-agent",
         )
-        self._console.print(
+        self.parent._console.print(
             Panel(
                 summary,
                 title="[bold]Usage[/bold]",
@@ -232,12 +167,12 @@ class ConsoleDisplay(DisplayProtocol):
                 padding=(0, 1),
             )
         )
-        self._usage_section_open = True
+
+    # -- tool display --------------------------------------------------------
 
     def shell_start(self, commands: list[str]) -> None:
-        count = len(commands)
-        self._start_tool_group(
-            f"Running {count} shell command{'s' if count != 1 else ''}",
+        self._tool_group.start(
+            f"Running {len(commands)} shell command{'s' if len(commands) != 1 else ''}",
             classes=tool_group_class("shell"),
         )
 
@@ -251,8 +186,7 @@ class ConsoleDisplay(DisplayProtocol):
         working_directory: str = ".",
         timeout_ms: int | str = "default",
     ) -> None:
-        self._append_tool_line(
-            "shell",
+        self._tool_group.add_item(
             format_shell_tool_item(
                 command,
                 verbose=self.verbose,
@@ -262,10 +196,11 @@ class ConsoleDisplay(DisplayProtocol):
                 working_directory=working_directory,
                 timeout_ms=timeout_ms,
             ),
+            classes=tool_item_class("shell"),
         )
 
     def patch_start(self, count: int) -> None:
-        self._start_tool_group(
+        self._tool_group.start(
             f"Editing {count} file{'s' if count != 1 else ''}",
             classes=tool_group_class("apply_patch"),
         )
@@ -279,8 +214,7 @@ class ConsoleDisplay(DisplayProtocol):
         call_id: str = "",
         detail: str = "",
     ) -> None:
-        self._append_tool_line(
-            "apply_patch",
+        self._tool_group.add_item(
             format_patch_tool_item(
                 path,
                 operation,
@@ -289,10 +223,11 @@ class ConsoleDisplay(DisplayProtocol):
                 call_id=call_id,
                 detail=detail,
             ),
+            classes=tool_item_class("apply_patch"),
         )
 
     def function_start(self, count: int) -> None:
-        self._start_tool_group(
+        self._tool_group.start(
             f"Tool call{'s' if count != 1 else ''}",
             classes="tool-group-generic",
             function_count=count,
@@ -312,31 +247,30 @@ class ConsoleDisplay(DisplayProtocol):
             status=status_markup(success=success),
             call_id=call_id, arguments=arguments,
         )
-        self._append_tool_line(tool_name, text)
+        self._tool_group.add_item(text, classes=tool_item_class(tool_name))
 
     def tool_group_end(self) -> None:
-        self._stop_spinner()
         if not self._tool_group.items:
             self._tool_group.reset()
             return
-
         label = self._tool_group.label
         style_key = self._tool_group.classes.replace("tool-group-", "")
         icon = TOOL_ICONS.get(style_key, TOOL_ICONS["generic"])
         border = TOOL_BORDER_STYLES.get(style_key, TOOL_BORDER_STYLES["generic"])
-
         tree = Tree(f"[bold]{icon} {escape_markup_text(label)}[/bold]")
         for item in self._tool_group.items:
             tree.add(item.text)
-
-        self._console.print(
+        self.parent._console.print(
             Panel(tree, border_style=border, padding=(0, 1), expand=True)
         )
         self._tool_group.reset()
 
+    # -- notices -------------------------------------------------------------
+
     def retry_notice(self, attempt: int, max_retries: int) -> None:
-        self.wait_stop()
-        self._console.print(f"[yellow]Retrying... ({attempt}/{max_retries})[/yellow]")
+        self.parent._console.print(
+            f"[yellow]Retrying... ({attempt}/{max_retries})[/yellow]"
+        )
 
     def rate_limit_notice(
         self,
@@ -345,8 +279,7 @@ class ConsoleDisplay(DisplayProtocol):
         attempt: int,
         max_retries: int,
     ) -> None:
-        self.wait_stop()
-        self._console.print(
+        self.parent._console.print(
             "[yellow]Rate limit reached. "
             f"Retrying in {format_wait_seconds(wait_seconds)}s ({attempt}/{max_retries})[/yellow]"
         )
@@ -358,20 +291,16 @@ class ConsoleDisplay(DisplayProtocol):
         attempt: int,
         max_retries: int,
     ) -> None:
-        self.wait_stop()
-        self._console.print(
+        self.parent._console.print(
             "[yellow]Provider overloaded. "
             f"Retrying in {format_wait_seconds(wait_seconds)}s ({attempt}/{max_retries})[/yellow]"
         )
 
     def error(self, message: str) -> None:
-        self.wait_stop()
-        self._tool_group.reset()
-        self._error_console.print(f"[red]Error: {escape_markup_text(message)}[/red]")
+        self.parent._error_console.print(
+            f"[red]Error: {escape_markup_text(message)}[/red]"
+        )
 
     def debug(self, message: str) -> None:
         if self.verbose:
-            self._console.print(f"[dim]{escape_markup_text(message)}[/dim]")
-
-
-__all__ = ["ConsoleDisplay"]
+            self.parent._console.print(f"[dim]{escape_markup_text(message)}[/dim]")
