@@ -273,3 +273,25 @@ def test_begin_sub_agent_mounts_nested_block_and_child_widgets() -> None:
     callbacks = [call.args[0] for call in app.call_from_thread.call_args_list]
     assert app.mount_widget_in_container in callbacks
     assert app.update_sub_agent_title in callbacks
+
+
+def test_sub_agent_render_thinking_queries_via_call_from_thread() -> None:
+    app = MagicMock()
+
+    def call_from_thread(callback, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if callback is app._query_optional:
+            return None
+        return None
+
+    app.call_from_thread.side_effect = call_from_thread
+    display = Display(app)
+
+    sub_display = display.begin_sub_agent(
+        task_instruction="Inspect source files for TODOs",
+        reasoning_effort="low",
+    )
+    sub_display.render_thinking("Reasoning details", title="Thinking")
+
+    callbacks = [call.args[0] for call in app.call_from_thread.call_args_list]
+    assert app._query_optional in callbacks
+    assert app.mount_widget_in_container in callbacks

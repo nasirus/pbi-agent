@@ -85,6 +85,9 @@ class SubAgentDisplay(DisplayProtocol):
             widget,
         )
 
+    def _query_optional(self, selector: str) -> Any | None:
+        return self.parent._safe_call(self.parent.app._query_optional, selector)
+
     def _mount_static_message(
         self,
         prefix: str,
@@ -201,7 +204,7 @@ class SubAgentDisplay(DisplayProtocol):
         if replace_existing:
             self._active_thinking_widget_id = resolved_widget_id
 
-        existing = self.parent.app._query_optional(f"#{resolved_widget_id}")
+        existing = self._query_optional(f"#{resolved_widget_id}")
         if existing is None:
             self._mount_widget(
                 ThinkingBlock(
