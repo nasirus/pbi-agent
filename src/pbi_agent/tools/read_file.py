@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import math
+from zipfile import BadZipFile
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,8 @@ SPEC = ToolSpec(
     description=(
         "Read a workspace file safely, with line-range support for text files and "
         "compact summarization for tabular data such as CSV, TSV, and Excel, plus "
-        "text extraction and metadata for PDF files."
+        "text extraction for DOCX files and text extraction and metadata for PDF "
+        "files."
     ),
     parameters_schema={
         "type": "object",
@@ -93,6 +95,8 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
             return _handle_excel_workbook(root, target_path)
         if suffix in _TABULAR_EXTENSIONS:
             return _handle_tabular_file(root, target_path, suffix)
+        if suffix == ".docx":
+            return _handle_docx_file(root, target_path)
         if suffix == ".pdf":
             return _handle_pdf_file(root, target_path)
 
@@ -155,6 +159,35 @@ def _handle_excel_workbook(root: Path, target_path: Path) -> dict[str, Any]:
         "sheet_count": len(sheets),
         "sheets": sheets,
     }
+
+
+def _handle_docx_file(root: Path, target_path: Path) -> dict[str, Any]:
+    full_text = _extract_docx_text(target_path)
+    bounded_text, was_truncated = bound_output(
+        full_text, limit=MAX_READ_FILE_OUTPUT_CHARS
+    )
+
+    result: dict[str, Any] = {
+        "path": relative_workspace_path(root, target_path),
+        "content": bounded_text,
+    }
+    if was_truncated:
+        result["content_truncated"] = True
+    return result
+
+
+def _extract_docx_text(path: Path) -> str:
+    from docx import Document
+    from docx.opc.exceptions import PackageNotFoundError
+
+    try:
+        document = Document(str(path))
+    except (BadZipFile, PackageNotFoundError) as exc:
+        raise ValueError(
+            f"unable to read docx file: {path.name} is unreadable or corrupt"
+        ) from exc
+
+    return "\n".join(paragraph.text for paragraph in document.paragraphs)
 
 
 def _summarize_dataframe(dataframe: Any) -> dict[str, Any]:
@@ -338,11 +371,7 @@ def _tabular_dataset_summary(
         kind: sum(1 for value in kind_by_column.values() if value == kind)
         for kind in kind_order
     }
-    mix_parts = [
-        f"{count} {kind}"
-        for kind, count in kind_counts.items()
-        if count > 0
-    ]
+    mix_parts = [f"{count} {kind}" for kind, count in kind_counts.items() if count > 0]
     total_nulls = sum(null_counts.values())
     missing_summary = (
         "no missing values"

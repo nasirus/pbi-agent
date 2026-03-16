@@ -19,7 +19,7 @@ All providers expose the same built-in tools through the shared tool registry.
 | `find_files` | no | Fast file-only glob finder for locating files like `README*`, `*.md`, or `docs/**/*.md`. |
 | `list_files` | no | List files and directories in the workspace, optionally recursively. |
 | `search_files` | no | Search text file contents for a string or regex pattern. |
-| `read_file` | no | Read a text file with optional line ranges. |
+| `read_file` | no | Read text files with optional line ranges, summarize tabular files, and extract text from PDF and DOCX files. |
 | `read_web_url` | no | Fetch a public web page through markdown.new and return Markdown. |
 
 ## `shell`
