@@ -28,6 +28,7 @@ class DefaultWebCommandTests(unittest.TestCase):
             max_tool_workers=4,
             max_retries=3,
             compact_threshold=150000,
+            service_tier=None,
         )
 
     def test_main_defaults_to_web_for_global_options_only(self) -> None:
@@ -240,7 +241,9 @@ class DefaultWebCommandTests(unittest.TestCase):
         process = Mock()
         process.poll.return_value = 0
 
-        with patch("pbi_agent.cli.subprocess.Popen", return_value=process) as mock_popen:
+        with patch(
+            "pbi_agent.cli.subprocess.Popen", return_value=process
+        ) as mock_popen:
             opened = cli._open_url_in_windows_browser("http://127.0.0.1:9001")
 
         self.assertTrue(opened)
@@ -267,7 +270,9 @@ class DefaultWebCommandTests(unittest.TestCase):
             ["cmd.exe", "/c", "start", "", "http://127.0.0.1:9001"],
         )
 
-    def test_open_url_in_windows_browser_returns_false_when_all_commands_fail(self) -> None:
+    def test_open_url_in_windows_browser_returns_false_when_all_commands_fail(
+        self,
+    ) -> None:
         with patch(
             "pbi_agent.cli.subprocess.Popen",
             side_effect=[OSError("missing"), OSError("missing")],
@@ -428,6 +433,44 @@ class DefaultWebCommandTests(unittest.TestCase):
                 "AUDIT-REPORT.md."
             ),
         )
+
+    def test_parser_accepts_service_tier_flag(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["--service-tier", "flex", "console"])
+
+        self.assertEqual(args.service_tier, "flex")
+
+    def test_parser_rejects_unsupported_service_tier(self) -> None:
+        parser = cli.build_parser()
+
+        with self.assertRaises(SystemExit) as exc_info:
+            parser.parse_args(["--service-tier", "scale", "console"])
+
+        self.assertEqual(exc_info.exception.code, 2)
+
+    def test_service_tier_with_non_openai_provider_errors(self) -> None:
+        stderr = io.StringIO()
+
+        with (
+            patch("pbi_agent.config.load_dotenv"),
+            patch("sys.stderr", stderr),
+        ):
+            rc = cli.main(
+                [
+                    "--provider",
+                    "xai",
+                    "--service-tier",
+                    "flex",
+                    "--api-key",
+                    "k",
+                    "console",
+                ]
+            )
+
+        self.assertEqual(rc, 2)
+        self.assertIn("--service-tier", stderr.getvalue())
+        self.assertIn("OpenAI", stderr.getvalue())
 
 
 if __name__ == "__main__":

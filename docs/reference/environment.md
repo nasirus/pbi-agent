@@ -23,6 +23,7 @@ The CLI calls `load_dotenv()` during settings resolution, so a local `.env` file
 | `PBI_AGENT_COMPACT_THRESHOLD` | `150000` | Intended context compaction threshold for OpenAI. |
 | `PBI_AGENT_RESPONSES_URL` | provider-specific | Responses or Interactions endpoint override for OpenAI, xAI, or Google. |
 | `PBI_AGENT_GENERIC_API_URL` | `https://openrouter.ai/api/v1/chat/completions` | Chat Completions endpoint override for the Generic backend. |
+| `PBI_AGENT_SERVICE_TIER` | none | OpenAI service tier: `auto`, `default`, `flex`, or `priority`. Only valid with the OpenAI provider. |
 
 Settings resolution precedence is: CLI flags, then environment variables, then saved provider-scoped internal config, then provider defaults.
 
