@@ -20,6 +20,7 @@ DEFAULT_XAI_MODEL = "grok-4-1-fast-reasoning"
 DEFAULT_GOOGLE_MODEL = "gemini-3.1-flash-lite-preview"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-6"
 DEFAULT_MAX_TOKENS = 16384
+OPENAI_SERVICE_TIERS = ("auto", "default", "flex", "priority")
 PROVIDER_API_KEY_ENVS = {
     "openai": "OPENAI_API_KEY",
     "xai": "XAI_API_KEY",
@@ -62,6 +63,7 @@ class Settings:
     # Provider selection
     provider: str = "openai"
     generic_api_url: str = DEFAULT_GENERIC_API_URL
+    service_tier: str | None = None
 
     def validate(self) -> None:
         if self.provider not in {"openai", "xai", "google", "anthropic", "generic"}:
@@ -82,6 +84,16 @@ class Settings:
             raise ConfigError("--compact-threshold must be >= 1.")
         if self.max_tokens < 1:
             raise ConfigError("--max-tokens must be >= 1.")
+        if self.service_tier is not None and self.provider != "openai":
+            raise ConfigError(
+                "--service-tier is only supported with the OpenAI provider."
+            )
+        if (
+            self.service_tier is not None
+            and self.service_tier not in OPENAI_SERVICE_TIERS
+        ):
+            allowed = ", ".join(OPENAI_SERVICE_TIERS)
+            raise ConfigError(f"--service-tier must be one of: {allowed}.")
 
     def redacted(self) -> dict[str, str | int | bool]:
         return {
@@ -96,6 +108,7 @@ class Settings:
             "reasoning_effort": self.reasoning_effort,
             "compact_threshold": self.compact_threshold,
             "generic_api_url": self.generic_api_url,
+            "service_tier": self.service_tier,
         }
 
 
@@ -210,6 +223,12 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
     else:
         max_tokens = int(max_tokens_raw)
 
+    service_tier = (
+        getattr(args, "service_tier", None)
+        or os.getenv("PBI_AGENT_SERVICE_TIER")
+        or _config_string(provider_config, "service_tier")
+    )
+
     return Settings(
         api_key=api_key,
         responses_url=responses_url,
@@ -222,6 +241,7 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         reasoning_effort=reasoning_effort,
         compact_threshold=compact_threshold,
         provider=provider,
+        service_tier=service_tier,
     )
 
 
@@ -239,6 +259,7 @@ def save_internal_config(settings: Settings) -> None:
         "max_tool_workers": settings.max_tool_workers,
         "max_retries": settings.max_retries,
         "compact_threshold": settings.compact_threshold,
+        "service_tier": settings.service_tier,
     }
     data["providers"] = providers
     data["last_used_provider"] = settings.provider

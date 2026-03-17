@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from pbi_agent.config import (
     ConfigError,
+    OPENAI_SERVICE_TIERS,
     Settings,
     resolve_settings,
     save_internal_config,
@@ -109,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["low", "medium", "high", "xhigh"],
         default=None,
         help="Set model reasoning effort (default: xhigh for OpenAI; high for other providers).",
+    )
+    model_group.add_argument(
+        "--service-tier",
+        choices=list(OPENAI_SERVICE_TIERS),
+        default=None,
+        help="OpenAI service tier for request processing (OpenAI provider only).",
     )
 
     runtime_group = parser.add_argument_group("Runtime and resilience")
@@ -485,6 +492,8 @@ def _settings_env(settings: Settings) -> dict[str, str]:
         "PBI_AGENT_COMPACT_THRESHOLD": str(settings.compact_threshold),
         "PBI_AGENT_MAX_TOKENS": str(settings.max_tokens),
     }
+    if settings.service_tier:
+        env["PBI_AGENT_SERVICE_TIER"] = settings.service_tier
     return env
 
 
@@ -597,9 +606,10 @@ def _is_wsl_environment() -> bool:
         return True
 
     try:
-        return "microsoft" in Path("/proc/sys/kernel/osrelease").read_text(
-            encoding="utf-8"
-        ).lower()
+        return (
+            "microsoft"
+            in Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8").lower()
+        )
     except OSError:
         return False
 

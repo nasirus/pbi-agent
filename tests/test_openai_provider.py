@@ -180,6 +180,28 @@ def test_openai_build_request_body_uses_http_responses_shape() -> None:
     assert "previous_response_id" not in body
 
 
+def test_openai_build_request_body_includes_service_tier() -> None:
+    provider = OpenAIProvider(_make_settings(service_tier="flex"))
+
+    body = provider._build_request_body(
+        input_items=[{"role": "user", "content": "hello"}],
+        instructions="be concise",
+    )
+
+    assert body["service_tier"] == "flex"
+
+
+def test_openai_build_request_body_omits_service_tier_when_none() -> None:
+    provider = OpenAIProvider(_make_settings())
+
+    body = provider._build_request_body(
+        input_items=[{"role": "user", "content": "hello"}],
+        instructions="be concise",
+    )
+
+    assert "service_tier" not in body
+
+
 def test_openai_provider_can_exclude_sub_agent_tool() -> None:
     provider = OpenAIProvider(_make_settings(), excluded_tools={"sub_agent"})
 

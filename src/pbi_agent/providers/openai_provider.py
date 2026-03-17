@@ -301,6 +301,8 @@ class OpenAIProvider(Provider):
         }
         if self._previous_response_id:
             body["previous_response_id"] = self._previous_response_id
+        if self._settings.service_tier:
+            body["service_tier"] = self._settings.service_tier
         return body
 
     def _parse_response(self, response_json: dict[str, Any]) -> CompletedResponse:
