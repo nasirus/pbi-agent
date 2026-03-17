@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -93,9 +95,7 @@ def test_read_file_summarizes_csv_with_cr_only_line_endings(
     )
     assert "- sales: Int64; kind=numeric; min=10; max=30; mean=20" in result["schema"]
     assert result["preview"] == (
-        "city,sales,ordered_at\n"
-        "Seattle,10,2025-01-01\n"
-        "Portland,30,2025-01-03\n"
+        "city,sales,ordered_at\nSeattle,10,2025-01-01\nPortland,30,2025-01-03\n"
     )
 
 
@@ -108,7 +108,9 @@ def test_read_file_returns_all_excel_sheets(tmp_path: Path, monkeypatch) -> None
         read_file_tool,
         "_read_excel_workbook",
         lambda path: {
-            "Orders": pl.DataFrame({"city": ["Seattle", "Portland"], "sales": [10, 20]}),
+            "Orders": pl.DataFrame(
+                {"city": ["Seattle", "Portland"], "sales": [10, 20]}
+            ),
             "Returns": pl.DataFrame({"city": ["Seattle"], "count": [1]}),
         },
     )
@@ -119,19 +121,14 @@ def test_read_file_returns_all_excel_sheets(tmp_path: Path, monkeypatch) -> None
     assert result["sheet_count"] == 2
     assert [sheet["name"] for sheet in result["sheets"]] == ["Orders", "Returns"]
     assert result["sheets"][0]["shape"] == {"rows": 2, "columns": 2}
-    assert result["sheets"][0]["preview"] == (
-        "city,sales\n"
-        "Seattle,10\n"
-        "Portland,20\n"
-    )
+    assert result["sheets"][0]["preview"] == ("city,sales\nSeattle,10\nPortland,20\n")
     assert result["sheets"][1]["shape"] == {"rows": 1, "columns": 2}
-    assert result["sheets"][1]["preview"] == (
-        "city,count\n"
-        "Seattle,1\n"
-    )
+    assert result["sheets"][1]["preview"] == ("city,count\nSeattle,1\n")
 
 
-def test_read_file_bounds_tabular_schema_and_preview(tmp_path: Path, monkeypatch) -> None:
+def test_read_file_bounds_tabular_schema_and_preview(
+    tmp_path: Path, monkeypatch
+) -> None:
     pytest.importorskip("polars")
     monkeypatch.chdir(tmp_path)
 
@@ -171,6 +168,133 @@ def test_read_file_summarizes_pdf_content_and_metadata(
     assert result["metadata"]["title"] == "Quarterly Report"
     assert result["metadata"]["author"] == "Agent"
     assert result["content"] == ""
+
+
+def test_read_file_extracts_docx_text(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("docx")
+    monkeypatch.chdir(tmp_path)
+
+    from docx import Document
+
+    docx_path = tmp_path / "report.docx"
+    document = Document()
+    document.add_paragraph("Quarterly report")
+    document.add_paragraph("Revenue grew 12%")
+    document.save(docx_path)
+
+    result = read_file_tool.handle({"path": "report.docx"}, ToolContext())
+
+    assert result == {
+        "path": "report.docx",
+        "content": "Quarterly report\nRevenue grew 12%",
+    }
+
+
+def test_read_file_extracts_docx_tables(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("docx")
+    monkeypatch.chdir(tmp_path)
+
+    from docx import Document
+
+    docx_path = tmp_path / "report.docx"
+    document = Document()
+    document.add_paragraph("Summary")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "City"
+    table.cell(0, 1).text = "Sales"
+    table.cell(1, 0).text = "Seattle"
+    table.cell(1, 1).text = "100"
+    document.add_paragraph("End")
+    document.save(docx_path)
+
+    result = read_file_tool.handle({"path": "report.docx"}, ToolContext())
+
+    assert result["content"] == "Summary\nCity\tSales\nSeattle\t100\nEnd"
+
+
+def test_read_file_extracts_docx_headers_and_footers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pytest.importorskip("docx")
+    monkeypatch.chdir(tmp_path)
+
+    from docx import Document
+
+    docx_path = tmp_path / "report.docx"
+    document = Document()
+    section = document.sections[0]
+    section.header.is_linked_to_previous = False
+    section.header.paragraphs[0].text = "Company Inc."
+    section.footer.is_linked_to_previous = False
+    section.footer.paragraphs[0].text = "Page 1"
+    document.add_paragraph("Body text")
+    document.save(docx_path)
+
+    result = read_file_tool.handle({"path": "report.docx"}, ToolContext())
+
+    assert "Body text" in result["content"]
+    assert "Company Inc." in result["content"]
+    assert "Page 1" in result["content"]
+
+
+def test_read_file_does_not_truncate_docx_content(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "report.docx").write_bytes(b"placeholder")
+    full_text = "Quarterly report\n" + (
+        "Revenue grew 12%. " * read_file_tool.MAX_READ_FILE_OUTPUT_CHARS
+    )
+    monkeypatch.setattr(read_file_tool, "_extract_docx_text", lambda path: full_text)
+
+    result = read_file_tool.handle({"path": "report.docx"}, ToolContext())
+
+    assert result == {
+        "path": "report.docx",
+        "content": full_text,
+    }
+
+
+def test_read_file_does_not_truncate_pdf_content(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    full_text = "Quarterly report\n" + (
+        "Revenue grew 12%. " * read_file_tool.MAX_READ_FILE_OUTPUT_CHARS
+    )
+
+    fake_pypdf = ModuleType("pypdf")
+
+    class FakePdfReader:
+        def __init__(self, path: str) -> None:
+            assert path == str(pdf_path)
+            self.pages = [SimpleNamespace(extract_text=lambda: full_text)]
+            self.metadata = SimpleNamespace(title="Quarterly Report", author="Agent")
+
+    fake_pypdf.PdfReader = FakePdfReader
+    monkeypatch.setitem(sys.modules, "pypdf", fake_pypdf)
+
+    result = read_file_tool.handle({"path": "report.pdf"}, ToolContext())
+
+    assert result == {
+        "path": "report.pdf",
+        "content": full_text,
+        "metadata": {
+            "pages": 1,
+            "title": "Quarterly Report",
+            "author": "Agent",
+        },
+    }
+
+
+def test_read_file_reports_unreadable_docx_files(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("docx")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "broken.docx").write_bytes(b"not-a-valid-docx")
+
+    result = read_file_tool.handle({"path": "broken.docx"}, ToolContext())
+
+    assert result == {
+        "error": "unable to read docx file: broken.docx is unreadable or corrupt"
+    }
 
 
 def test_read_file_allows_more_than_default_output_budget(
