@@ -57,6 +57,20 @@ def test_populate_sidebar_filters_sessions_to_active_provider(monkeypatch) -> No
             created_at="2026-03-19T10:00:00+00:00",
             updated_at="2026-03-19T10:00:00+00:00",
         ),
+        SessionRecord(
+            session_id="other-openai-model",
+            directory="/workspace",
+            provider="openai",
+            model="gpt-4.1",
+            previous_id="resp_3",
+            title="Older OpenAI chat",
+            total_tokens=10,
+            input_tokens=6,
+            output_tokens=4,
+            cost_usd=0.01,
+            created_at="2026-03-19T10:00:00+00:00",
+            updated_at="2026-03-19T10:00:00+00:00",
+        ),
     ]
 
     class FakeStore:
@@ -88,5 +102,6 @@ def test_populate_sidebar_filters_sessions_to_active_provider(monkeypatch) -> No
     app._populate_sidebar(sidebar)
 
     assert sidebar.items == [
-        ("openai-session", "OpenAI chat\n[dim]openai · 2026-03-19[/dim]")
+        ("openai-session", "OpenAI chat\n[dim]openai · 2026-03-19[/dim]"),
+        ("other-openai-model", "Older OpenAI chat\n[dim]openai · 2026-03-19[/dim]"),
     ]

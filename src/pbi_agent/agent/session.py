@@ -74,7 +74,6 @@ def run_single_turn(
     )
 
     with provider:
-        _add_message(store, session_id, "user", prompt)
         response = provider.request_turn(
             user_message=prompt,
             display=display,
@@ -89,6 +88,7 @@ def run_single_turn(
             session_usage=session_usage,
             turn_usage=turn_usage,
         )
+        _add_message(store, session_id, "user", prompt)
         _add_message(store, session_id, "assistant", response.text)
         _update_session_after_turn(
             store, session_id, response.response_id, session_usage
@@ -180,7 +180,6 @@ def run_chat_loop(
                 _update_session_title(store, session_id, user_input[:80])
                 title_set = True
 
-            _add_message(store, session_id, "user", user_input)
             turn_start = time.monotonic()
             turn_usage = TokenUsage(model=model)
             display.assistant_start()
@@ -199,6 +198,7 @@ def run_chat_loop(
                 turn_usage=turn_usage,
             )
 
+            _add_message(store, session_id, "user", user_input)
             _add_message(store, session_id, "assistant", response.text)
             _update_session_after_turn(
                 store, session_id, response.response_id, session_usage

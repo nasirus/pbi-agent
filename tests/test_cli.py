@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import io
 import os
 import sys
@@ -13,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pbi_agent import cli
 from pbi_agent.config import DEFAULT_XAI_RESPONSES_URL
-from pbi_agent.session_store import SessionStore
+from pbi_agent.session_store import SessionRecord, SessionStore
 
 
 class DefaultWebCommandTests(unittest.TestCase):
@@ -515,6 +516,38 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertEqual(settings.responses_url, DEFAULT_XAI_RESPONSES_URL)
         self.assertEqual(session.session_id, session_id)
         self.assertEqual(session.provider, "xai")
+
+    def test_handle_open_command_switches_to_saved_session_directory(self) -> None:
+        settings = Mock(verbose=False)
+        session = SessionRecord(
+            session_id="session-1",
+            directory=tempfile.gettempdir(),
+            provider="openai",
+            model="gpt-5.4-2026-03-05",
+            previous_id="resp_1",
+            title="saved chat",
+            total_tokens=0,
+            input_tokens=0,
+            output_tokens=0,
+            cost_usd=0.0,
+            created_at="2026-03-19T10:00:00+00:00",
+            updated_at="2026-03-19T10:00:00+00:00",
+        )
+        args = argparse.Namespace(session_id=session.session_id)
+        original_cwd = Path.cwd()
+
+        def fake_run_app(_app) -> int:
+            self.assertEqual(Path.cwd(), Path(session.directory))
+            return 23
+
+        with (
+            patch("pbi_agent.cli._run_app", side_effect=fake_run_app),
+            patch("pbi_agent.ui.ChatApp"),
+        ):
+            rc = cli._handle_open_command(args, settings, session)
+
+        self.assertEqual(rc, 23)
+        self.assertEqual(Path.cwd(), original_cwd)
 
 
 if __name__ == "__main__":

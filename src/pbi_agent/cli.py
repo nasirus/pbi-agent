@@ -768,12 +768,31 @@ def _handle_open_command(
 ) -> int:
     from pbi_agent.ui import ChatApp
 
-    app = ChatApp(
-        settings=settings,
-        verbose=settings.verbose,
-        resume_session_id=args.session_id,
-    )
-    return _run_app(app)
+    session_dir = Path(session.directory).expanduser()
+    if not session_dir.exists():
+        print(
+            f"Error: saved session directory does not exist: {session_dir}",
+            file=sys.stderr,
+        )
+        return 1
+    if not session_dir.is_dir():
+        print(
+            f"Error: saved session directory is not a directory: {session_dir}",
+            file=sys.stderr,
+        )
+        return 1
+
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(session_dir)
+        app = ChatApp(
+            settings=settings,
+            verbose=settings.verbose,
+            resume_session_id=args.session_id,
+        )
+        return _run_app(app)
+    finally:
+        os.chdir(original_cwd)
 
 
 def _handle_init_command(args: argparse.Namespace) -> int:
