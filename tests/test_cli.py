@@ -23,6 +23,7 @@ class DefaultWebCommandTests(unittest.TestCase):
             responses_url="https://api.openai.com/v1/responses",
             generic_api_url="https://openrouter.ai/api/v1/chat/completions",
             model="gpt-5",
+            sub_agent_model="gpt-5-mini",
             max_tokens=16384,
             reasoning_effort="medium",
             max_tool_workers=4,
@@ -101,6 +102,13 @@ class DefaultWebCommandTests(unittest.TestCase):
 
         self.assertEqual(args.max_tokens, 2048)
 
+    def test_parser_accepts_sub_agent_model_flag(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["--sub-agent-model", "gpt-5-mini", "console"])
+
+        self.assertEqual(args.sub_agent_model, "gpt-5-mini")
+
     def test_web_chat_command_uses_parent_pid_wrapper(self) -> None:
         command = cli._web_chat_command(self._settings(verbose=True), parent_pid=4321)
 
@@ -147,6 +155,7 @@ class DefaultWebCommandTests(unittest.TestCase):
             self.assertFalse(debug)
             self.assertEqual(os.environ["PBI_AGENT_PROVIDER"], "openai")
             self.assertEqual(os.environ["PBI_AGENT_API_KEY"], "test-key")
+            self.assertEqual(os.environ["PBI_AGENT_SUB_AGENT_MODEL"], "gpt-5-mini")
 
         server.serve.side_effect = assert_env
 
