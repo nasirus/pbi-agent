@@ -59,16 +59,19 @@ def run_single_turn(
     turn_usage = TokenUsage(model=model)
 
     store, session_id = _open_session_store(
-        settings, resume_session_id=resume_session_id, title=prompt[:80],
+        settings,
+        resume_session_id=resume_session_id,
+        title=prompt[:80],
     )
 
     provider = create_provider(settings)
-    if resume_session_id and store:
-        rec = store.get_session(resume_session_id)
-        if rec and rec.previous_id:
-            provider.set_previous_response_id(rec.previous_id)
-        _restore_session_usage(store, resume_session_id, session_usage, display)
-        _replay_session_history(store, resume_session_id, display)
+    _resume_session(
+        provider=provider,
+        store=store,
+        session_id=resume_session_id,
+        session_usage=session_usage,
+        display=display,
+    )
 
     with provider:
         _add_message(store, session_id, "user", prompt)
@@ -87,7 +90,9 @@ def run_single_turn(
             turn_usage=turn_usage,
         )
         _add_message(store, session_id, "assistant", response.text)
-        _update_session_after_turn(store, session_id, response.response_id, session_usage)
+        _update_session_after_turn(
+            store, session_id, response.response_id, session_usage
+        )
         elapsed = time.monotonic() - session_start
         display.turn_usage(turn_usage, elapsed)
         display.session_usage(session_usage)
@@ -125,13 +130,13 @@ def run_chat_loop(
     had_tool_errors = False
 
     provider = create_provider(settings)
-
-    if resume_session_id and store:
-        rec = store.get_session(resume_session_id)
-        if rec and rec.previous_id:
-            provider.set_previous_response_id(rec.previous_id)
-        _restore_session_usage(store, resume_session_id, session_usage, display)
-        _replay_session_history(store, resume_session_id, display)
+    _resume_session(
+        provider=provider,
+        store=store,
+        session_id=resume_session_id,
+        session_usage=session_usage,
+        display=display,
+    )
 
     with provider:
         while True:
@@ -144,18 +149,20 @@ def run_chat_loop(
                 title_set = False
                 continue
             if user_input.startswith(RESUME_SESSION_PREFIX):
-                resume_id = user_input[len(RESUME_SESSION_PREFIX):]
+                resume_id = user_input[len(RESUME_SESSION_PREFIX) :]
                 provider.reset_conversation()
                 session_usage = _reset_session(clear_display=True)
                 had_tool_errors = False
                 if store:
-                    rec = store.get_session(resume_id)
-                    if rec and rec.previous_id:
-                        provider.set_previous_response_id(rec.previous_id)
                     session_id = resume_id
                     title_set = True
-                    _restore_session_usage(store, resume_id, session_usage, display)
-                    _replay_session_history(store, resume_id, display)
+                    _resume_session(
+                        provider=provider,
+                        store=store,
+                        session_id=resume_id,
+                        session_usage=session_usage,
+                        display=display,
+                    )
                 continue
             if user_input.lower() in {"exit", "quit"}:
                 break
@@ -164,7 +171,9 @@ def run_chat_loop(
 
             if session_id is None:
                 session_id = _create_session(
-                    store, settings, title=user_input[:80],
+                    store,
+                    settings,
+                    title=user_input[:80],
                 )
                 title_set = True
             elif not title_set:
@@ -191,7 +200,9 @@ def run_chat_loop(
             )
 
             _add_message(store, session_id, "assistant", response.text)
-            _update_session_after_turn(store, session_id, response.response_id, session_usage)
+            _update_session_after_turn(
+                store, session_id, response.response_id, session_usage
+            )
             had_tool_errors = had_tool_errors or loop_had_errors
             elapsed = time.monotonic() - turn_start
             display.turn_usage(turn_usage, elapsed)
@@ -437,7 +448,9 @@ def _update_session_after_turn(
 
 
 def _update_session_title(
-    store: SessionStore | None, session_id: str | None, title: str,
+    store: SessionStore | None,
+    session_id: str | None,
+    title: str,
 ) -> None:
     if store is None or session_id is None:
         return
@@ -448,7 +461,10 @@ def _update_session_title(
 
 
 def _add_message(
-    store: SessionStore | None, session_id: str | None, role: str, content: str,
+    store: SessionStore | None,
+    session_id: str | None,
+    role: str,
+    content: str,
 ) -> None:
     if store is None or session_id is None:
         return
@@ -469,19 +485,36 @@ def _restore_session_usage(
     try:
         rec = store.get_session(session_id)
         if rec and (rec.input_tokens or rec.output_tokens):
-            session_usage.add(TokenUsage(
-                input_tokens=rec.input_tokens,
-                output_tokens=rec.output_tokens,
-                provider_total_tokens=rec.total_tokens,
-                model=session_usage.model,
-            ))
+            session_usage.add(
+                TokenUsage(
+                    input_tokens=rec.input_tokens,
+                    output_tokens=rec.output_tokens,
+                    provider_total_tokens=rec.total_tokens,
+                    model=session_usage.model,
+                )
+            )
             display.session_usage(session_usage)
     except Exception:
         _log.warning("Failed to restore session usage", exc_info=True)
 
 
+def _restore_provider_history(
+    provider: Any,
+    store: SessionStore | None,
+    session_id: str | None,
+) -> None:
+    if store is None or session_id is None:
+        return
+    try:
+        provider.restore_messages(store.list_messages(session_id))
+    except Exception:
+        _log.warning("Failed to restore provider history", exc_info=True)
+
+
 def _replay_session_history(
-    store: SessionStore | None, session_id: str | None, display: DisplayProtocol,
+    store: SessionStore | None,
+    session_id: str | None,
+    display: DisplayProtocol,
 ) -> None:
     if store is None or session_id is None:
         return
@@ -491,6 +524,27 @@ def _replay_session_history(
             display.replay_history(messages)
     except Exception:
         _log.warning("Failed to replay session history", exc_info=True)
+
+
+def _resume_session(
+    *,
+    provider: Any,
+    store: SessionStore | None,
+    session_id: str | None,
+    session_usage: TokenUsage,
+    display: DisplayProtocol,
+) -> None:
+    if store is None or session_id is None:
+        return
+    try:
+        rec = store.get_session(session_id)
+        if rec and rec.previous_id:
+            provider.set_previous_response_id(rec.previous_id)
+    except Exception:
+        _log.warning("Failed to restore previous response id", exc_info=True)
+    _restore_provider_history(provider, store, session_id)
+    _restore_session_usage(store, session_id, session_usage, display)
+    _replay_session_history(store, session_id, display)
 
 
 def _close_store(store: SessionStore | None) -> None:

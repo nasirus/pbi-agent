@@ -336,6 +336,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sessions":
         return _handle_sessions_command(args)
 
+    if args.command == "open":
+        session = _load_session_record(args.session_id)
+        if session is None:
+            return 1
+        args.provider = session.provider
+        if not args.model:
+            args.model = session.model
+
     # ---- resolve settings for interactive/session commands ----
 
     try:
@@ -697,6 +705,24 @@ def _create_web_server(args: argparse.Namespace, command: str) -> object:
     )
 
 
+def _load_session_record(session_id: str):
+    from pbi_agent.session_store import SessionStore
+
+    try:
+        store = SessionStore()
+    except Exception as exc:
+        print(f"Error: unable to open session store: {exc}", file=sys.stderr)
+        return None
+
+    with store:
+        session = store.get_session(session_id)
+
+    if session is None:
+        print(f"Error: session '{session_id}' not found.", file=sys.stderr)
+        return None
+    return session
+
+
 def _handle_sessions_command(args: argparse.Namespace) -> int:
     from pbi_agent.session_store import SessionStore
 
@@ -735,29 +761,9 @@ def _handle_sessions_command(args: argparse.Namespace) -> int:
 
 
 def _handle_open_command(args: argparse.Namespace, settings: Settings) -> int:
-    from pbi_agent.session_store import SessionStore
-
-    try:
-        store = SessionStore()
-    except Exception as exc:
-        print(f"Error: unable to open session store: {exc}", file=sys.stderr)
-        return 1
-
-    with store:
-        session = store.get_session(args.session_id)
-
+    session = _load_session_record(args.session_id)
     if session is None:
-        print(f"Error: session '{args.session_id}' not found.", file=sys.stderr)
         return 1
-
-    if session.provider != settings.provider:
-        settings.provider = session.provider
-
-    if session.provider in ("anthropic", "generic"):
-        print(
-            f"Notice: Provider '{session.provider}' does not support server-side "
-            "conversation resume. Starting a fresh session with the same settings.",
-        )
 
     from pbi_agent.ui import ChatApp
 

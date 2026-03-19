@@ -12,6 +12,8 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pbi_agent import cli
+from pbi_agent.config import DEFAULT_XAI_RESPONSES_URL
+from pbi_agent.session_store import SessionStore
 
 
 class DefaultWebCommandTests(unittest.TestCase):
@@ -471,6 +473,46 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("--service-tier", stderr.getvalue())
         self.assertIn("OpenAI", stderr.getvalue())
+
+    def test_main_open_uses_stored_provider_settings_before_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            db_path = tmp_path / "sessions.db"
+            config_path = tmp_path / "config.json"
+            config_path.write_text("{}", encoding="utf-8")
+            with SessionStore(db_path=db_path) as store:
+                session_id = store.create_session(
+                    "/tmp/project", "xai", "grok-4", "saved xai session"
+                )
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "PBI_AGENT_SESSION_DB_PATH": str(db_path),
+                        "PBI_AGENT_INTERNAL_CONFIG_PATH": str(config_path),
+                        "PBI_AGENT_PROVIDER": "openai",
+                        "XAI_API_KEY": "xai-key",
+                    },
+                    clear=False,
+                ),
+                patch("pbi_agent.config.load_dotenv"),
+                patch("pbi_agent.cli.configure_logging"),
+                patch("pbi_agent.cli.save_internal_config"),
+                patch(
+                    "pbi_agent.cli._handle_open_command", return_value=41
+                ) as mock_open,
+            ):
+                os.environ.pop("PBI_AGENT_API_KEY", None)
+                os.environ.pop("OPENAI_API_KEY", None)
+                rc = cli.main(["open", "--session-id", session_id])
+
+        self.assertEqual(rc, 41)
+        args, settings = mock_open.call_args.args
+        self.assertEqual(args.session_id, session_id)
+        self.assertEqual(settings.provider, "xai")
+        self.assertEqual(settings.model, "grok-4")
+        self.assertEqual(settings.responses_url, DEFAULT_XAI_RESPONSES_URL)
 
 
 if __name__ == "__main__":

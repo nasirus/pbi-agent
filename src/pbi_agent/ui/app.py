@@ -166,7 +166,8 @@ class ChatApp(App):
 
         if self._mode == "chat":
             return run_chat_loop(
-                self._settings, display,
+                self._settings,
+                display,
                 resume_session_id=self._resume_session_id,
             )
         if self._mode == "audit":
@@ -363,13 +364,20 @@ class ChatApp(App):
 
             with SessionStore() as store:
                 sessions = store.list_sessions(os.getcwd(), limit=30)
+            sessions = [
+                session
+                for session in sessions
+                if session.provider == self._settings.provider
+            ]
             items = []
             for s in sessions:
                 title = s.title or "(untitled)"
                 if len(title) > 24:
                     title = title[:21] + "..."
                 updated = s.updated_at[:10]
-                items.append((s.session_id, f"{title}\n[dim]{s.provider} · {updated}[/dim]"))
+                items.append(
+                    (s.session_id, f"{title}\n[dim]{s.provider} · {updated}[/dim]")
+                )
             sidebar.refresh_sessions(items)
         except Exception:
             _log.debug("Failed to populate session sidebar", exc_info=True)
