@@ -11,6 +11,8 @@ Provider selection resolves in this order: `--provider`, then `PBI_AGENT_PROVIDE
 
 For provider-scoped settings such as API key, model, retry limits, and token limits, resolution prefers CLI flags, then environment variables, then the saved config for the selected provider, then provider defaults. API keys still fall back to the provider-specific environment variable before saved config.
 
+`sub_agent` uses the same provider as the parent session. Its model defaults to the main `--model`, but you can override it independently with `--sub-agent-model` or `PBI_AGENT_SUB_AGENT_MODEL`.
+
 ## Provider Matrix
 
 | Provider | API Shape | Default Endpoint | Default Model | Env Var for Key |

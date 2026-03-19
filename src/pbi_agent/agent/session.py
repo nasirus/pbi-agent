@@ -38,6 +38,10 @@ def _selected_model(settings: Settings) -> str:
     return settings.model
 
 
+def _selected_sub_agent_model(settings: Settings) -> str:
+    return settings.sub_agent_model or settings.model
+
+
 def run_single_turn(
     prompt: str,
     settings: Settings,
@@ -222,7 +226,11 @@ def run_sub_agent_task(
     parent_turn_usage: TokenUsage,
     sub_agent_depth: int = 0,
 ) -> dict[str, Any]:
-    child_settings = replace(settings, reasoning_effort=reasoning_effort)
+    child_settings = replace(
+        settings,
+        model=_selected_sub_agent_model(settings),
+        reasoning_effort=reasoning_effort,
+    )
     child_display = display.begin_sub_agent(
         task_instruction=task_instruction,
         reasoning_effort=reasoning_effort,

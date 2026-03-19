@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from pbi_agent.agent.session import run_sub_agent_task
 from pbi_agent.models.messages import CompletedResponse, TokenUsage
 from pbi_agent.tools import sub_agent as sub_agent_tool
@@ -178,7 +180,16 @@ def test_sub_agent_tool_blocks_nested_calls() -> None:
     assert result["error"]["type"] == "nested_sub_agent_disabled"
 
 
-def test_run_sub_agent_task_uses_child_prompt_and_aggregates_usage(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("sub_agent_model", "expected_model"),
+    [
+        ("gpt-5-mini", "gpt-5-mini"),
+        (None, "gpt-5"),
+    ],
+)
+def test_run_sub_agent_task_uses_child_prompt_and_aggregates_usage(
+    monkeypatch, sub_agent_model: str | None, expected_model: str
+) -> None:
     captured: dict[str, object] = {}
 
     def fake_create_provider(
@@ -197,7 +208,12 @@ def test_run_sub_agent_task_uses_child_prompt_and_aggregates_usage(monkeypatch) 
     parent_display = _ParentDisplay()
     parent_session_usage = TokenUsage(model="gpt-5")
     parent_turn_usage = TokenUsage(model="gpt-5")
-    settings = Settings(api_key="test-key", provider="openai", model="gpt-5")
+    settings = Settings(
+        api_key="test-key",
+        provider="openai",
+        model="gpt-5",
+        sub_agent_model=sub_agent_model,
+    )
 
     result = run_sub_agent_task(
         "Summarize the repo structure",
@@ -226,4 +242,5 @@ def test_run_sub_agent_task_uses_child_prompt_and_aggregates_usage(monkeypatch) 
     assert captured["excluded_tools"] == {"sub_agent"}
     assert "delegated sub-agent" in str(captured["system_prompt"])
     assert isinstance(captured["settings"], Settings)
+    assert captured["settings"].model == expected_model
     assert captured["settings"].reasoning_effort == "medium"

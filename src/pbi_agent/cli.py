@@ -100,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override model name for the selected provider; omit for generic provider default routing.",
     )
     model_group.add_argument(
+        "--sub-agent-model",
+        dest="sub_agent_model",
+        help="Override the model used by sub_agent; defaults to --model when unset.",
+    )
+    model_group.add_argument(
         "--max-tokens",
         dest="max_tokens",
         type=int,
@@ -529,6 +534,7 @@ def _settings_env(settings: Settings) -> dict[str, str]:
         "PBI_AGENT_RESPONSES_URL": settings.responses_url,
         "PBI_AGENT_GENERIC_API_URL": settings.generic_api_url,
         "PBI_AGENT_MODEL": settings.model,
+        "PBI_AGENT_SUB_AGENT_MODEL": settings.sub_agent_model or "",
         "PBI_AGENT_REASONING_EFFORT": settings.reasoning_effort,
         "PBI_AGENT_MAX_TOOL_WORKERS": str(settings.max_tool_workers),
         "PBI_AGENT_MAX_RETRIES": str(settings.max_retries),

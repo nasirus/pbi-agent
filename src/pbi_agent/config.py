@@ -54,6 +54,7 @@ class Settings:
     api_key: str
     responses_url: str = DEFAULT_RESPONSES_URL
     model: str = DEFAULT_MODEL
+    sub_agent_model: str | None = None
     max_tokens: int = DEFAULT_MAX_TOKENS
     verbose: bool = False
     max_tool_workers: int = 4
@@ -95,12 +96,13 @@ class Settings:
             allowed = ", ".join(OPENAI_SERVICE_TIERS)
             raise ConfigError(f"--service-tier must be one of: {allowed}.")
 
-    def redacted(self) -> dict[str, str | int | bool]:
+    def redacted(self) -> dict[str, str | int | bool | None]:
         return {
             "provider": self.provider,
             "api_key": redact_secret(self.api_key),
             "responses_url": self.responses_url,
             "model": self.model,
+            "sub_agent_model": self.sub_agent_model,
             "max_tokens": self.max_tokens,
             "verbose": self.verbose,
             "max_tool_workers": self.max_tool_workers,
@@ -179,6 +181,11 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
     if not model_override:
         model_override = _config_string(provider_config, "model")
     model = model_override or _default_model(provider)
+    sub_agent_model = (
+        getattr(args, "sub_agent_model", None)
+        or os.getenv("PBI_AGENT_SUB_AGENT_MODEL")
+        or _config_string(provider_config, "sub_agent_model")
+    )
     max_tool_workers = args.max_tool_workers
     if max_tool_workers is None:
         max_tool_workers = int(
@@ -234,6 +241,7 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         responses_url=responses_url,
         generic_api_url=generic_api_url or DEFAULT_GENERIC_API_URL,
         model=model,
+        sub_agent_model=sub_agent_model,
         max_tokens=max_tokens,
         verbose=bool(args.verbose),
         max_tool_workers=max_tool_workers,
@@ -254,6 +262,7 @@ def save_internal_config(settings: Settings) -> None:
         "responses_url": settings.responses_url,
         "generic_api_url": settings.generic_api_url,
         "model": settings.model,
+        "sub_agent_model": settings.sub_agent_model,
         "max_tokens": settings.max_tokens,
         "reasoning_effort": settings.reasoning_effort,
         "max_tool_workers": settings.max_tool_workers,
