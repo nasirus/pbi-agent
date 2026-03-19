@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import logging
+import os
 import time
 from typing import Any
 
@@ -9,11 +10,13 @@ from pbi_agent.agent.system_prompt import get_sub_agent_system_prompt
 from pbi_agent.config import Settings
 from pbi_agent.models.messages import AgentOutcome, CompletedResponse, TokenUsage
 from pbi_agent.providers import create_provider
+from pbi_agent.session_store import SessionStore
 from pbi_agent.ui.display_protocol import DisplayProtocol
 
 _log = logging.getLogger(__name__)
 
 NEW_CHAT_SENTINEL = "__new_chat__"
+RESUME_SESSION_PREFIX = "__resume_session__:"
 SUB_AGENT_MAX_REQUESTS = 30
 SUB_AGENT_MAX_ELAPSED_SECONDS = 300.0
 SUB_AGENT_DISABLED_TOOLS = {"sub_agent"}
@@ -41,6 +44,7 @@ def run_single_turn(
     display: DisplayProtocol,
     *,
     single_turn_hint: str | None = None,
+    resume_session_id: str | None = None,
 ) -> AgentOutcome:
     display.welcome(
         interactive=False,
@@ -54,7 +58,16 @@ def run_single_turn(
     session_start = time.monotonic()
     turn_usage = TokenUsage(model=model)
 
+    store, session_id = _open_session_store(
+        settings, resume_session_id=resume_session_id, title=prompt[:80],
+    )
+
     provider = create_provider(settings)
+    if resume_session_id and store:
+        rec = store.get_session(resume_session_id)
+        if rec and rec.previous_id:
+            provider.set_previous_response_id(rec.previous_id)
+
     with provider:
         response = provider.request_turn(
             user_message=prompt,
@@ -70,9 +83,11 @@ def run_single_turn(
             session_usage=session_usage,
             turn_usage=turn_usage,
         )
+        _update_session_after_turn(store, session_id, response.response_id, session_usage)
         elapsed = time.monotonic() - session_start
         display.turn_usage(turn_usage, elapsed)
         display.session_usage(session_usage)
+        _close_store(store)
         return AgentOutcome(
             response_id=response.response_id,
             text=response.text,
@@ -80,8 +95,17 @@ def run_single_turn(
         )
 
 
-def run_chat_loop(settings: Settings, display: DisplayProtocol) -> int:
+def run_chat_loop(
+    settings: Settings,
+    display: DisplayProtocol,
+    *,
+    resume_session_id: str | None = None,
+) -> int:
     model = _selected_model(settings)
+    store, session_id = _open_session_store(
+        settings, resume_session_id=resume_session_id,
+    )
+    title_set = bool(resume_session_id)
 
     def _reset_session(*, clear_display: bool = False) -> TokenUsage:
         if clear_display:
@@ -98,6 +122,12 @@ def run_chat_loop(settings: Settings, display: DisplayProtocol) -> int:
     had_tool_errors = False
 
     provider = create_provider(settings)
+
+    if resume_session_id and store:
+        rec = store.get_session(resume_session_id)
+        if rec and rec.previous_id:
+            provider.set_previous_response_id(rec.previous_id)
+
     with provider:
         while True:
             user_input = display.user_prompt().strip()
@@ -105,11 +135,29 @@ def run_chat_loop(settings: Settings, display: DisplayProtocol) -> int:
                 provider.reset_conversation()
                 session_usage = _reset_session(clear_display=True)
                 had_tool_errors = False
+                store, session_id = _open_session_store(settings)
+                title_set = False
+                continue
+            if user_input.startswith(RESUME_SESSION_PREFIX):
+                resume_id = user_input[len(RESUME_SESSION_PREFIX):]
+                provider.reset_conversation()
+                session_usage = _reset_session(clear_display=True)
+                had_tool_errors = False
+                if store:
+                    rec = store.get_session(resume_id)
+                    if rec and rec.previous_id:
+                        provider.set_previous_response_id(rec.previous_id)
+                    session_id = resume_id
+                    title_set = True
                 continue
             if user_input.lower() in {"exit", "quit"}:
                 break
             if not user_input:
                 continue
+
+            if not title_set:
+                _update_session_title(store, session_id, user_input[:80])
+                title_set = True
 
             turn_start = time.monotonic()
             turn_usage = TokenUsage(model=model)
@@ -129,11 +177,13 @@ def run_chat_loop(settings: Settings, display: DisplayProtocol) -> int:
                 turn_usage=turn_usage,
             )
 
+            _update_session_after_turn(store, session_id, response.response_id, session_usage)
             had_tool_errors = had_tool_errors or loop_had_errors
             elapsed = time.monotonic() - turn_start
             display.turn_usage(turn_usage, elapsed)
             display.session_usage(session_usage)
 
+    _close_store(store)
     return 4 if had_tool_errors else 0
 
 
@@ -300,3 +350,72 @@ def _raise_if_sub_agent_timed_out(
             "timeout",
             (f"Sub-agent exceeded the wall-clock limit ({int(max_elapsed_seconds)}s)."),
         )
+
+
+# ---------------------------------------------------------------------------
+# Session store helpers (fail-safe: never crash the main loop)
+# ---------------------------------------------------------------------------
+
+
+def _open_session_store(
+    settings: Settings,
+    *,
+    resume_session_id: str | None = None,
+    title: str = "",
+) -> tuple[SessionStore | None, str | None]:
+    try:
+        store = SessionStore()
+        if resume_session_id:
+            return store, resume_session_id
+        sid = store.create_session(
+            directory=os.getcwd(),
+            provider=settings.provider,
+            model=settings.model,
+            title=title,
+        )
+        return store, sid
+    except Exception:
+        _log.warning("Failed to open session store", exc_info=True)
+        return None, None
+
+
+def _update_session_after_turn(
+    store: SessionStore | None,
+    session_id: str | None,
+    response_id: str | None,
+    session_usage: TokenUsage,
+) -> None:
+    if store is None or session_id is None:
+        return
+    try:
+        snap = session_usage.snapshot()
+        store.update_session(
+            session_id,
+            previous_id=response_id or None,
+            total_tokens=snap.total_tokens,
+            input_tokens=snap.input_tokens,
+            output_tokens=snap.output_tokens,
+            cost_usd=snap.estimated_cost_usd,
+        )
+    except Exception:
+        _log.warning("Failed to update session after turn", exc_info=True)
+
+
+def _update_session_title(
+    store: SessionStore | None, session_id: str | None, title: str,
+) -> None:
+    if store is None or session_id is None:
+        return
+    try:
+        store.update_session(session_id, title=title)
+    except Exception:
+        _log.warning("Failed to update session title", exc_info=True)
+
+
+def _close_store(store: SessionStore | None) -> None:
+    if store is None:
+        return
+    try:
+        store.close()
+    except Exception:
+        _log.warning("Failed to close session store", exc_info=True)

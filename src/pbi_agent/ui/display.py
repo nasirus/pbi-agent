@@ -135,6 +135,12 @@ class Display(DisplayProtocol):
         self._input_queue.put(NEW_CHAT_SENTINEL)
         self._input_event.set()
 
+    def request_resume_session(self, session_id: str) -> None:
+        from pbi_agent.agent.session import RESUME_SESSION_PREFIX
+
+        self._input_queue.put(f"{RESUME_SESSION_PREFIX}{session_id}")
+        self._input_event.set()
+
     def reset_chat(self) -> None:
         self._waiting_widget_id = None
         self._active_thinking_widget_id = None

@@ -216,6 +216,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Relative report directory to audit (default: current directory).",
     )
 
+    sessions_parser = subparsers.add_parser(
+        "sessions",
+        help="List past sessions for the current directory.",
+        formatter_class=CleanHelpFormatter,
+    )
+    sessions_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of sessions to show (default: 20).",
+    )
+    sessions_parser.add_argument(
+        "--all-dirs",
+        action="store_true",
+        help="Show sessions from all directories, not just the current one.",
+    )
+
+    open_parser = subparsers.add_parser(
+        "open",
+        help="Resume a previous session by ID.",
+        formatter_class=CleanHelpFormatter,
+    )
+    open_parser.add_argument(
+        "--session-id",
+        required=True,
+        help="Session ID to resume.",
+    )
+
     init_parser = subparsers.add_parser(
         "init",
         help="Scaffold a new Power BI report project from the bundled template.",
@@ -305,6 +333,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "init":
         return _handle_init_command(args)
 
+    if args.command == "sessions":
+        return _handle_sessions_command(args)
+
     # ---- resolve settings for interactive/session commands ----
 
     try:
@@ -326,6 +357,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "console":
         return _handle_console_command(settings)
+
+    if args.command == "open":
+        return _handle_open_command(args, settings)
 
     if args.command == "audit":
         return _handle_audit_command(args, settings)
@@ -661,6 +695,78 @@ def _create_web_server(args: argparse.Namespace, command: str) -> object:
         title=args.title,
         public_url=args.url,
     )
+
+
+def _handle_sessions_command(args: argparse.Namespace) -> int:
+    from pbi_agent.session_store import SessionStore
+
+    try:
+        store = SessionStore()
+    except Exception as exc:
+        print(f"Error: unable to open session store: {exc}", file=sys.stderr)
+        return 1
+
+    with store:
+        if args.all_dirs:
+            sessions = store.list_all_sessions(limit=args.limit)
+        else:
+            sessions = store.list_sessions(os.getcwd(), limit=args.limit)
+
+    if not sessions:
+        print("No sessions found.")
+        return 0
+
+    header = (
+        f"{'ID':<34} {'Provider':<12} {'Model':<24} "
+        f"{'Title':<24} {'Tokens':>10} {'Cost':>8} {'Updated'}"
+    )
+    print(header)
+    print("-" * len(header))
+    for s in sessions:
+        title = (s.title[:21] + "...") if len(s.title) > 24 else s.title
+        updated = s.updated_at[:19].replace("T", " ")
+        tokens = f"{s.total_tokens:,}" if s.total_tokens else "-"
+        cost = f"${s.cost_usd:.4f}" if s.cost_usd else "-"
+        print(
+            f"{s.session_id:<34} {s.provider:<12} {s.model:<24} "
+            f"{title:<24} {tokens:>10} {cost:>8} {updated}"
+        )
+    return 0
+
+
+def _handle_open_command(args: argparse.Namespace, settings: Settings) -> int:
+    from pbi_agent.session_store import SessionStore
+
+    try:
+        store = SessionStore()
+    except Exception as exc:
+        print(f"Error: unable to open session store: {exc}", file=sys.stderr)
+        return 1
+
+    with store:
+        session = store.get_session(args.session_id)
+
+    if session is None:
+        print(f"Error: session '{args.session_id}' not found.", file=sys.stderr)
+        return 1
+
+    if session.provider != settings.provider:
+        settings.provider = session.provider
+
+    if session.provider in ("anthropic", "generic"):
+        print(
+            f"Notice: Provider '{session.provider}' does not support server-side "
+            "conversation resume. Starting a fresh session with the same settings.",
+        )
+
+    from pbi_agent.ui import ChatApp
+
+    app = ChatApp(
+        settings=settings,
+        verbose=settings.verbose,
+        resume_session_id=args.session_id,
+    )
+    return _run_app(app)
 
 
 def _handle_init_command(args: argparse.Namespace) -> int:

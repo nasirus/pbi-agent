@@ -72,6 +72,11 @@ class Provider(ABC):
     def settings(self) -> Settings:
         """Return the provider runtime settings."""
 
+    # -- session resume -------------------------------------------------------
+
+    def set_previous_response_id(self, response_id: str | None) -> None:
+        """Set conversation continuation ID for session resume. No-op by default."""
+
     # -- context manager convenience ----------------------------------------
 
     def __enter__(self) -> Provider:
