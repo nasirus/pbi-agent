@@ -363,6 +363,7 @@ class DefaultWebCommandTests(unittest.TestCase):
             settings,
             mock_display_cls.return_value,
             single_turn_hint=None,
+            image_paths=[],
         )
 
     def test_handle_run_command_scopes_to_requested_project_dir(self) -> None:
@@ -390,8 +391,9 @@ class DefaultWebCommandTests(unittest.TestCase):
                 display,
                 *,
                 single_turn_hint: str | None = None,
+                image_paths: list[str] | None = None,
             ) -> object:
-                del prompt, runtime_settings, display, single_turn_hint
+                del prompt, runtime_settings, display, single_turn_hint, image_paths
                 seen_cwds.append(Path.cwd())
                 return Mock(tool_errors=False)
 

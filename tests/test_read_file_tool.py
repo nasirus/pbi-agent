@@ -354,3 +354,16 @@ def test_read_file_reports_empty_files_with_zero_range(
         "has_more_lines": False,
         "empty": True,
     }
+
+
+def test_read_file_redirects_supported_images_to_read_image(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "chart.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    result = read_file_tool.handle({"path": "chart.png"}, ToolContext())
+
+    assert result == {
+        "error": "image file is not supported by read_file: chart.png; use read_image instead"
+    }

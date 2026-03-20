@@ -83,17 +83,44 @@ pbi-agent console
 
 This command has no command-specific flags. It uses the global provider, model, and runtime options.
 
+Image input in `console` and `web` mode is path-based and staged through chat commands:
+
+```text
+/image add ./screen.png
+/image add ./before.png ./after.png
+/image list
+/image clear
+```
+
+After `/image add`, send your normal prompt. The staged images are attached to the next turn and then cleared automatically.
+
 ## `pbi-agent run`
 
 Execute a single prompt turn and exit.
 
 ```bash
 pbi-agent run --prompt "Summarize the tables in this model."
+pbi-agent run --prompt "Read the text in this image." --image ./general_ocr_002.png
 ```
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `--prompt` | required | User prompt to send to the agent. |
+| `--image` | repeatable, none by default | Attach a local workspace image to the prompt. Paths must stay inside the workspace. |
+
+## Image Input Support
+
+Supported image formats are `.png`, `.jpg`, `.jpeg`, and `.webp`.
+
+| Provider | Explicit image attachments (`--image`, `/image add`) | `read_image` tool |
+| --- | --- | --- |
+| OpenAI | yes | yes |
+| Google | yes | yes |
+| Anthropic | yes | yes |
+| xAI | no | no |
+| Generic | no | no |
+
+For unsupported providers, image input fails fast with a clear error.
 
 ## `pbi-agent audit`
 

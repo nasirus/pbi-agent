@@ -19,7 +19,12 @@ from pbi_agent.agent.tool_runtime import (
     to_function_call_output_items,
 )
 from pbi_agent.config import Settings
-from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    TokenUsage,
+    ToolCall,
+    UserTurnInput,
+)
 from pbi_agent.providers.base import Provider
 from pbi_agent.tools.registry import get_openai_tool_definitions
 from pbi_agent.tools.types import ToolContext
@@ -95,18 +100,24 @@ class XAIProvider(Provider):
         self,
         *,
         user_message: str | None = None,
+        user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, Any]] | None = None,
         instructions: str | None = None,
         display: DisplayProtocol,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
     ) -> CompletedResponse:
-        if user_message is not None:
-            input_items: list[dict[str, Any]] = [_build_user_input_item(user_message)]
+        if user_input is None and user_message is not None:
+            user_input = UserTurnInput(text=user_message)
+
+        if user_input is not None:
+            if user_input.images:
+                raise ValueError("xAI image inputs are not enabled in this build.")
+            input_items = [_build_user_input_item(user_input.text)]
         elif tool_result_items is not None:
             input_items = tool_result_items
         else:
-            raise ValueError("Either user_message or tool_result_items is required")
+            raise ValueError("Either user_input or tool_result_items is required")
 
         result = self._http_request(
             input_items=input_items,

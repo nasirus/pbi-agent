@@ -13,7 +13,13 @@ from pbi_agent.config import (
     Settings,
     resolve_settings,
 )
-from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    ImageAttachment,
+    TokenUsage,
+    ToolCall,
+    UserTurnInput,
+)
 from pbi_agent.providers.openai_provider import OpenAIProvider
 from pbi_agent.tools.types import ToolResult
 
@@ -792,3 +798,117 @@ def test_openai_request_turn_raises_for_failed_response_payload(
         )
     else:
         raise AssertionError("Expected RuntimeError for failed OpenAI response")
+
+
+def test_openai_request_turn_serializes_user_input_images(monkeypatch) -> None:
+    requests: list[dict[str, object]] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        payload = request.data.decode("utf-8") if request.data else "{}"
+        requests.append(json.loads(payload))
+        return _FakeHTTPResponse(
+            {
+                "id": "resp_1",
+                "model": DEFAULT_MODEL,
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "done"}],
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings())
+    provider.request_turn(
+        user_input=UserTurnInput(
+            text="Describe this image.",
+            images=[
+                ImageAttachment(
+                    path="chart.png",
+                    mime_type="image/png",
+                    data_base64="QUJDRA==",
+                )
+            ],
+        ),
+        display=_DisplayStub(),
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    user_item = next(
+        item for item in requests[0]["input"] if item.get("role") == "user"
+    )
+    assert user_item["content"] == [
+        {"type": "input_text", "text": "Describe this image."},
+        {"type": "input_image", "image_url": "data:image/png;base64,QUJDRA=="},
+    ]
+
+
+def test_openai_execute_tool_calls_serializes_image_attachments(
+    monkeypatch,
+    display_spy,
+) -> None:
+    provider = OpenAIProvider(_make_settings())
+    response = CompletedResponse(
+        response_id="resp_1",
+        text="",
+        function_calls=[
+            ToolCall(
+                call_id="call_1", name="read_image", arguments={"path": "chart.png"}
+            )
+        ],
+    )
+    batch = ToolExecutionBatch(
+        results=[
+            ToolResult(
+                call_id="call_1",
+                output_json='{"ok": true, "result": {"path": "chart.png"}}',
+                attachments=[
+                    ImageAttachment(
+                        path="chart.png",
+                        mime_type="image/png",
+                        data_base64="QUJDRA==",
+                    )
+                ],
+            )
+        ],
+        had_errors=False,
+    )
+
+    monkeypatch.setattr(
+        "pbi_agent.providers.openai_provider._execute_tool_calls",
+        lambda calls, max_workers, context=None: batch,
+    )
+
+    tool_result_items, had_errors = provider.execute_tool_calls(
+        response,
+        max_workers=1,
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    assert had_errors is False
+    assert tool_result_items == [
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": [
+                {
+                    "type": "input_text",
+                    "text": '{"ok": true, "result": {"path": "chart.png"}}',
+                },
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,QUJDRA==",
+                },
+            ],
+        }
+    ]

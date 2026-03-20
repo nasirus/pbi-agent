@@ -19,7 +19,13 @@ from typing import Any
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
-from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    ImageAttachment,
+    TokenUsage,
+    ToolCall,
+    UserTurnInput,
+)
 from pbi_agent.providers.base import Provider
 from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.registry import get_anthropic_tool_definitions
@@ -115,6 +121,7 @@ class AnthropicProvider(Provider):
         self,
         *,
         user_message: str | None = None,
+        user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, Any]] | None = None,
         instructions: str | None = None,
         display: DisplayProtocol,
@@ -122,11 +129,14 @@ class AnthropicProvider(Provider):
         turn_usage: TokenUsage,
     ) -> CompletedResponse:
         # Build the new message to append to history.
-        if user_message is not None:
+        if user_input is None and user_message is not None:
+            user_input = UserTurnInput(text=user_message)
+
+        if user_input is not None:
             self._messages.append(
                 {
                     "role": "user",
-                    "content": [{"type": "text", "text": user_message}],
+                    "content": _anthropic_user_content_blocks(user_input),
                 }
             )
         elif tool_result_items is not None:
@@ -139,7 +149,7 @@ class AnthropicProvider(Provider):
                 }
             )
         else:
-            raise ValueError("Either user_message or tool_result_items is required")
+            raise ValueError("Either user_input or tool_result_items is required")
 
         system_prompt = instructions or self._system_prompt
 
@@ -220,7 +230,7 @@ class AnthropicProvider(Provider):
                 {
                     "type": "tool_result",
                     "tool_use_id": result.call_id,
-                    "content": result.output_json,
+                    "content": _anthropic_tool_result_content(result),
                     **({"is_error": True} if result.is_error else {}),
                 }
             )
@@ -476,6 +486,35 @@ def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
         if c.call_id == call_id:
             return c
     return None
+
+
+def _anthropic_user_content_blocks(user_input: UserTurnInput) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for image in user_input.images:
+        blocks.append(_anthropic_image_block(image))
+    if user_input.text:
+        blocks.append({"type": "text", "text": user_input.text})
+    return blocks or [{"type": "text", "text": ""}]
+
+
+def _anthropic_tool_result_content(result) -> str | list[dict[str, Any]]:
+    if not result.attachments:
+        return result.output_json
+
+    blocks = [_anthropic_image_block(image) for image in result.attachments]
+    blocks.append({"type": "text", "text": result.output_json})
+    return blocks
+
+
+def _anthropic_image_block(image: ImageAttachment) -> dict[str, Any]:
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": image.mime_type,
+            "data": image.data_base64,
+        },
+    }
 
 
 def _extract_retry_after(exc: urllib.error.HTTPError, attempt: int) -> float:

@@ -6,7 +6,12 @@ import pytest
 
 from pbi_agent.agent.session import NEW_CHAT_SENTINEL, run_chat_loop, run_single_turn
 from pbi_agent.config import DEFAULT_MODEL, Settings
-from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    TokenUsage,
+    ToolCall,
+    UserTurnInput,
+)
 from pbi_agent.session_store import SessionStore
 
 
@@ -87,6 +92,7 @@ class _ProviderStub:
         self,
         *,
         user_message: str | None = None,
+        user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, object]] | None = None,
         instructions: str | None = None,
         display,
@@ -94,6 +100,8 @@ class _ProviderStub:
         turn_usage: TokenUsage,
     ) -> CompletedResponse:
         del display, instructions
+        if user_input is not None and user_message is None:
+            user_message = user_input.text
         self.request_calls.append(
             {
                 "user_message": user_message,
@@ -256,6 +264,7 @@ class _ChatProviderStub:
         self,
         *,
         user_message: str | None = None,
+        user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, object]] | None = None,
         instructions: str | None = None,
         display,
@@ -263,6 +272,8 @@ class _ChatProviderStub:
         turn_usage: TokenUsage,
     ) -> CompletedResponse:
         del display, instructions, tool_result_items
+        if user_input is not None and user_message is None:
+            user_message = user_input.text
         self.request_messages.append(user_message)
         response = CompletedResponse(
             response_id="resp_chat",
@@ -317,6 +328,7 @@ def test_run_chat_loop_does_not_persist_unanswered_user_turn(monkeypatch) -> Non
             self,
             *,
             user_message: str | None = None,
+            user_input: UserTurnInput | None = None,
             tool_result_items: list[dict[str, object]] | None = None,
             instructions: str | None = None,
             display,
@@ -325,6 +337,7 @@ def test_run_chat_loop_does_not_persist_unanswered_user_turn(monkeypatch) -> Non
         ) -> CompletedResponse:
             del (
                 user_message,
+                user_input,
                 tool_result_items,
                 instructions,
                 display,

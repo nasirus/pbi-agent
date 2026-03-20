@@ -307,6 +307,20 @@ class ToolCall:
 
 
 @dataclass(slots=True)
+class ImageAttachment:
+    path: str
+    mime_type: str
+    data_base64: str
+    byte_count: int = 0
+
+
+@dataclass(slots=True)
+class UserTurnInput:
+    text: str = ""
+    images: list[ImageAttachment] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class CompletedResponse:
     response_id: str | None
     text: str

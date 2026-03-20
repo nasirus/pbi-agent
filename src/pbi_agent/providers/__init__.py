@@ -7,6 +7,7 @@ the current :class:`~pbi_agent.config.Settings`.
 from __future__ import annotations
 
 from pbi_agent.config import Settings
+from pbi_agent.providers.capabilities import image_excluded_tools
 from pbi_agent.providers.base import Provider
 
 
@@ -27,6 +28,8 @@ def create_provider(
     - ``"generic"``          → OpenAI-compatible Chat Completions HTTP provider
     """
     name = settings.provider.lower()
+    effective_excluded_tools = set(excluded_tools or set())
+    effective_excluded_tools.update(image_excluded_tools(name))
 
     if name == "openai":
         from pbi_agent.providers.openai_provider import OpenAIProvider
@@ -34,7 +37,7 @@ def create_provider(
         return OpenAIProvider(
             settings,
             system_prompt=system_prompt,
-            excluded_tools=excluded_tools,
+            excluded_tools=effective_excluded_tools,
         )
 
     if name == "xai":
@@ -43,7 +46,7 @@ def create_provider(
         return XAIProvider(
             settings,
             system_prompt=system_prompt,
-            excluded_tools=excluded_tools,
+            excluded_tools=effective_excluded_tools,
         )
 
     if name == "google":
@@ -52,7 +55,7 @@ def create_provider(
         return GoogleProvider(
             settings,
             system_prompt=system_prompt,
-            excluded_tools=excluded_tools,
+            excluded_tools=effective_excluded_tools,
         )
 
     if name == "anthropic":
@@ -61,7 +64,7 @@ def create_provider(
         return AnthropicProvider(
             settings,
             system_prompt=system_prompt,
-            excluded_tools=excluded_tools,
+            excluded_tools=effective_excluded_tools,
         )
 
     if name == "generic":
@@ -70,7 +73,7 @@ def create_provider(
         return GenericProvider(
             settings,
             system_prompt=system_prompt,
-            excluded_tools=excluded_tools,
+            excluded_tools=effective_excluded_tools,
         )
 
     raise ValueError(

@@ -3,13 +3,22 @@ from __future__ import annotations
 from dataclasses import replace
 import logging
 import os
+import shlex
 import time
+from pathlib import Path
 from typing import Any
 
 from pbi_agent.agent.system_prompt import get_sub_agent_system_prompt
 from pbi_agent.config import Settings
-from pbi_agent.models.messages import AgentOutcome, CompletedResponse, TokenUsage
+from pbi_agent.media import load_workspace_image
+from pbi_agent.models.messages import (
+    AgentOutcome,
+    CompletedResponse,
+    TokenUsage,
+    UserTurnInput,
+)
 from pbi_agent.providers import create_provider
+from pbi_agent.providers.capabilities import provider_supports_images
 from pbi_agent.session_store import SessionStore
 from pbi_agent.ui.display_protocol import DisplayProtocol
 
@@ -49,6 +58,7 @@ def run_single_turn(
     *,
     single_turn_hint: str | None = None,
     resume_session_id: str | None = None,
+    image_paths: list[str] | None = None,
 ) -> AgentOutcome:
     display.welcome(
         interactive=False,
@@ -63,10 +73,15 @@ def run_single_turn(
     session_start = time.monotonic()
     turn_usage = TokenUsage(model=model, service_tier=_tier)
 
+    user_input = _build_user_turn_input(
+        text=prompt,
+        image_paths=image_paths or [],
+        settings=settings,
+    )
     store, session_id = _open_session_store(
         settings,
         resume_session_id=resume_session_id,
-        title=prompt[:80],
+        title=_session_title_for_user_turn(user_input),
     )
 
     provider = create_provider(settings)
@@ -79,8 +94,9 @@ def run_single_turn(
     )
 
     with provider:
-        response = provider.request_turn(
-            user_message=prompt,
+        response = _request_user_turn(
+            provider=provider,
+            user_input=user_input,
             display=display,
             session_usage=session_usage,
             turn_usage=turn_usage,
@@ -93,7 +109,7 @@ def run_single_turn(
             session_usage=session_usage,
             turn_usage=turn_usage,
         )
-        _add_message(store, session_id, "user", prompt)
+        _add_message(store, session_id, "user", _user_turn_history_text(user_input))
         _add_message(store, session_id, "assistant", response.text)
         _update_session_after_turn(
             store, session_id, response.response_id, session_usage
@@ -134,6 +150,7 @@ def run_chat_loop(
 
     session_usage = _reset_session()
     had_tool_errors = False
+    pending_image_paths: list[str] = []
 
     provider = create_provider(settings)
     _resume_session(
@@ -172,25 +189,43 @@ def run_chat_loop(
                 continue
             if user_input.lower() in {"exit", "quit"}:
                 break
-            if not user_input:
+            if _handle_image_command(
+                user_input,
+                pending_image_paths=pending_image_paths,
+                settings=settings,
+                display=display,
+            ):
                 continue
+            if not user_input and not pending_image_paths:
+                continue
+
+            turn_input = _build_user_turn_input(
+                text=user_input,
+                image_paths=pending_image_paths,
+                settings=settings,
+            )
 
             if session_id is None:
                 session_id = _create_session(
                     store,
                     settings,
-                    title=user_input[:80],
+                    title=_session_title_for_user_turn(turn_input),
                 )
                 title_set = True
             elif not title_set:
-                _update_session_title(store, session_id, user_input[:80])
+                _update_session_title(
+                    store,
+                    session_id,
+                    _session_title_for_user_turn(turn_input),
+                )
                 title_set = True
 
             turn_start = time.monotonic()
             turn_usage = TokenUsage(model=model, service_tier=_tier)
             display.assistant_start()
-            response = provider.request_turn(
-                user_message=user_input,
+            response = _request_user_turn(
+                provider=provider,
+                user_input=turn_input,
                 display=display,
                 session_usage=session_usage,
                 turn_usage=turn_usage,
@@ -204,12 +239,18 @@ def run_chat_loop(
                 turn_usage=turn_usage,
             )
 
-            _add_message(store, session_id, "user", user_input)
+            _add_message(
+                store,
+                session_id,
+                "user",
+                _user_turn_history_text(turn_input),
+            )
             _add_message(store, session_id, "assistant", response.text)
             _update_session_after_turn(
                 store, session_id, response.response_id, session_usage
             )
             had_tool_errors = had_tool_errors or loop_had_errors
+            pending_image_paths.clear()
             elapsed = time.monotonic() - turn_start
             display.turn_usage(turn_usage, elapsed)
             display.session_usage(session_usage)
@@ -534,3 +575,125 @@ def _close_store(store: SessionStore | None) -> None:
         store.close()
     except Exception:
         _log.warning("Failed to close session store", exc_info=True)
+
+
+def _build_user_turn_input(
+    *,
+    text: str,
+    image_paths: list[str],
+    settings: Settings,
+) -> UserTurnInput:
+    images = []
+    if image_paths:
+        if not provider_supports_images(settings.provider):
+            raise ValueError(
+                f"Provider '{settings.provider}' does not support image inputs in this build."
+            )
+        root = Path.cwd().resolve()
+        images = [load_workspace_image(root, path) for path in image_paths]
+    return UserTurnInput(text=text, images=images)
+
+
+def _request_user_turn(
+    *,
+    provider: Any,
+    user_input: UserTurnInput,
+    display: DisplayProtocol,
+    session_usage: TokenUsage,
+    turn_usage: TokenUsage,
+) -> CompletedResponse:
+    return provider.request_turn(
+        user_input=user_input,
+        display=display,
+        session_usage=session_usage,
+        turn_usage=turn_usage,
+    )
+
+
+def _user_turn_history_text(user_input: UserTurnInput) -> str:
+    text = user_input.text.strip()
+    if not user_input.images:
+        return text
+
+    attachment_label = ", ".join(image.path for image in user_input.images)
+    if text:
+        return f"{text}\n\n[attached images: {attachment_label}]"
+    return f"[attached images: {attachment_label}]"
+
+
+def _session_title_for_user_turn(user_input: UserTurnInput) -> str:
+    return _user_turn_history_text(user_input)[:80]
+
+
+def _handle_image_command(
+    raw_input: str,
+    *,
+    pending_image_paths: list[str],
+    settings: Settings,
+    display: DisplayProtocol,
+) -> bool:
+    stripped = raw_input.strip()
+    if not stripped.startswith("/image"):
+        return False
+
+    try:
+        parts = shlex.split(stripped)
+    except ValueError as exc:
+        display.error(f"Invalid /image command: {exc}")
+        return True
+
+    if len(parts) < 2:
+        display.render_markdown(
+            "Image commands: `/image add <path> [more paths]`, `/image list`, `/image clear`."
+        )
+        return True
+
+    action = parts[1].lower()
+    if action == "list":
+        if pending_image_paths:
+            display.render_markdown(
+                "Staged images: "
+                + ", ".join(f"`{path}`" for path in pending_image_paths)
+            )
+        else:
+            display.render_markdown("No staged images.")
+        return True
+
+    if action == "clear":
+        pending_image_paths.clear()
+        display.render_markdown("Cleared staged images.")
+        return True
+
+    if action != "add":
+        display.error("Unsupported /image command. Use add, list, or clear.")
+        return True
+
+    if not provider_supports_images(settings.provider):
+        display.error(
+            f"Provider '{settings.provider}' does not support image inputs in this build."
+        )
+        return True
+
+    if len(parts) < 3:
+        display.error("Usage: /image add <path> [more paths]")
+        return True
+
+    root = Path.cwd().resolve()
+    added_paths: list[str] = []
+    for path in parts[2:]:
+        try:
+            image = load_workspace_image(root, path)
+        except ValueError as exc:
+            display.error(str(exc))
+            return True
+        if image.path not in pending_image_paths:
+            pending_image_paths.append(image.path)
+            added_paths.append(image.path)
+
+    if added_paths:
+        display.render_markdown(
+            "Staged images: " + ", ".join(f"`{path}`" for path in added_paths)
+        )
+    else:
+        display.render_markdown("All requested images were already staged.")
+    return True

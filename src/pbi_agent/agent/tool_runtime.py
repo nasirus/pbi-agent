@@ -7,9 +7,10 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
+from pbi_agent.media import data_url_for_image
 from pbi_agent.models.messages import ToolCall
 from pbi_agent.tools.registry import get_tool_handler
-from pbi_agent.tools.types import ToolContext, ToolResult
+from pbi_agent.tools.types import ToolContext, ToolOutput, ToolResult
 
 _log = logging.getLogger(__name__)
 
@@ -51,14 +52,26 @@ def execute_tool_calls(
 
 
 def to_function_call_output_items(results: list[ToolResult]) -> list[dict[str, Any]]:
-    return [
-        {
-            "type": "function_call_output",
-            "call_id": result.call_id,
-            "output": result.output_json,
-        }
-        for result in results
-    ]
+    items: list[dict[str, Any]] = []
+    for result in results:
+        output: str | list[dict[str, Any]] = result.output_json
+        if result.attachments:
+            output = [{"type": "input_text", "text": result.output_json}]
+            for attachment in result.attachments:
+                output.append(
+                    {
+                        "type": "input_image",
+                        "image_url": data_url_for_image(attachment),
+                    }
+                )
+        items.append(
+            {
+                "type": "function_call_output",
+                "call_id": result.call_id,
+                "output": output,
+            }
+        )
+    return items
 
 
 def _execute_one_tool_call(
@@ -93,12 +106,17 @@ def _execute_one_tool_call(
 
     try:
         output = handler(args_or_error, context or ToolContext())
-        if isinstance(output, str):
-            payload = {"ok": True, "result": output}
+        attachments = []
+        if isinstance(output, ToolOutput):
+            payload = {"ok": True, "result": output.result}
+            attachments = list(output.attachments)
         else:
             payload = {"ok": True, "result": output}
         result = ToolResult(
-            call_id=call.call_id, output_json=json.dumps(payload), is_error=False
+            call_id=call.call_id,
+            output_json=json.dumps(payload),
+            is_error=False,
+            attachments=attachments,
         )
         _log.debug(
             "Finished tool call %s (%s) in %.3fs",

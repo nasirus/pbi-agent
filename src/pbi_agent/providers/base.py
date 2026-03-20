@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from pbi_agent.config import Settings
-from pbi_agent.models.messages import CompletedResponse, TokenUsage
+from pbi_agent.models.messages import CompletedResponse, TokenUsage, UserTurnInput
 from pbi_agent.session_store import MessageRecord
 from pbi_agent.ui.display_protocol import DisplayProtocol
 
@@ -36,6 +36,7 @@ class Provider(ABC):
         self,
         *,
         user_message: str | None = None,
+        user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, Any]] | None = None,
         instructions: str | None = None,
         display: DisplayProtocol,
@@ -44,7 +45,7 @@ class Provider(ABC):
     ) -> CompletedResponse:
         """Send a turn and return the model response.
 
-        Exactly one of *user_message* or *tool_result_items* should be
+        Exactly one of *user_message* / *user_input* or *tool_result_items* should be
         provided.  The provider manages history internally (server-side
         ``previous_response_id`` for OpenAI/xAI, client-side ``messages``
         list for Anthropic and generic chat-completions providers).

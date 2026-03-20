@@ -18,6 +18,7 @@ TOOL_STYLE_MAP = {
     "list_files": "list-files",
     "search_files": "search-files",
     "read_file": "read-file",
+    "read_image": "read-image",
     "read_web_url": "read-web-url",
     "python_exec": "python-exec",
     "sub_agent": "sub-agent",
@@ -30,6 +31,7 @@ TOOL_ICONS: dict[str, str] = {
     "list-files": "\u2630",  # ☰
     "search-files": "\u2315",  # ⌕
     "read-file": "\u2610",  # ☐
+    "read-image": "\U0001f5bc",  # 🖼
     "read-web-url": "\U0001f310",  # 🌐
     "python-exec": "\u2699",  # ⚙
     "sub-agent": "\u25c9",  # ◉
@@ -44,6 +46,7 @@ TOOL_BORDER_STYLES: dict[str, str] = {
     "list-files": "#818CF8",
     "search-files": "#EC4899",
     "read-file": "#EAB308",
+    "read-image": "#FB7185",
     "read-web-url": "#06B6D4",
     "python-exec": "#A855F7",
     "sub-agent": "#F59E0B",
