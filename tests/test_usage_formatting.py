@@ -12,6 +12,7 @@ from pbi_agent.models.messages import (
 )
 from pbi_agent.ui.formatting import (
     format_context_tooltip,
+    format_session_subtitle_parts,
     format_session_subtitle,
     format_usage_summary,
 )
@@ -195,3 +196,22 @@ def test_format_context_tooltip_unknown_model() -> None:
     assert tip is not None
     assert "50,000" in tip
     assert "200,000" in tip
+
+
+def test_format_session_subtitle_parts_extracts_context_label() -> None:
+    usage = TokenUsage(
+        input_tokens=8,
+        output_tokens=3,
+        context_tokens=100_000,
+        model="gpt-5.3-codex",
+    )
+
+    subtitle, context_label = format_session_subtitle_parts(
+        usage,
+        model="gpt-5.3-codex",
+    )
+
+    assert "gpt-5.3-codex" in subtitle
+    assert "11 tok" in subtitle
+    assert "ctx" not in subtitle
+    assert context_label == "ctx 37%"

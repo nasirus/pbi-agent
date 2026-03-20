@@ -19,7 +19,7 @@ from pbi_agent.ui.formatting import (
     escape_markup_text,
     format_context_tooltip,
     format_patch_tool_item,
-    format_session_subtitle,
+    format_session_subtitle_parts,
     format_shell_tool_item,
     format_usage_summary,
     format_wait_seconds,
@@ -261,13 +261,15 @@ class Display(DisplayProtocol):
 
     def session_usage(self, usage: TokenUsage) -> None:
         snapshot = usage.snapshot()
+        sub_title, context_label = format_session_subtitle_parts(
+            snapshot,
+            model=self._model,
+            reasoning_effort=self._reasoning_effort,
+        )
         self._safe_call(
             self.app.update_session_header,
-            format_session_subtitle(
-                snapshot,
-                model=self._model,
-                reasoning_effort=self._reasoning_effort,
-            ),
+            sub_title,
+            context_label=context_label,
             tooltip=format_context_tooltip(snapshot, model=self._model),
         )
 
