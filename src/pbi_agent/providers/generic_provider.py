@@ -16,7 +16,12 @@ from pbi_agent import __version__
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
-from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    TokenUsage,
+    ToolCall,
+    UserTurnInput,
+)
 from pbi_agent.providers.base import Provider
 from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.registry import get_openai_chat_tool_definitions
@@ -69,18 +74,26 @@ class GenericProvider(Provider):
         self,
         *,
         user_message: str | None = None,
+        user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, Any]] | None = None,
         instructions: str | None = None,
         display: DisplayProtocol,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
     ) -> CompletedResponse:
-        if user_message is not None:
-            self._messages.append({"role": "user", "content": user_message})
+        if user_input is None and user_message is not None:
+            user_input = UserTurnInput(text=user_message)
+
+        if user_input is not None:
+            if user_input.images:
+                raise ValueError(
+                    "Generic provider image inputs are not enabled in this build."
+                )
+            self._messages.append({"role": "user", "content": user_input.text})
         elif tool_result_items is not None:
             self._messages.extend(tool_result_items)
         else:
-            raise ValueError("Either user_message or tool_result_items is required")
+            raise ValueError("Either user_input or tool_result_items is required")
 
         result = self._http_request(
             instructions=instructions or self._system_prompt,

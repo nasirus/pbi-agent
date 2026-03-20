@@ -16,7 +16,13 @@ from pbi_agent import __version__
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings, missing_api_key_message
-from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    ImageAttachment,
+    TokenUsage,
+    ToolCall,
+    UserTurnInput,
+)
 from pbi_agent.providers.base import Provider
 from pbi_agent.tools.registry import get_openai_tool_definitions
 from pbi_agent.tools.types import ToolContext
@@ -87,18 +93,22 @@ class GoogleProvider(Provider):
         self,
         *,
         user_message: str | None = None,
+        user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, Any]] | None = None,
         instructions: str | None = None,
         display: DisplayProtocol,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
     ) -> CompletedResponse:
-        if user_message is not None:
-            input_value: str | list[dict[str, Any]] = user_message
+        if user_input is None and user_message is not None:
+            user_input = UserTurnInput(text=user_message)
+
+        if user_input is not None:
+            input_value = _google_user_input_value(user_input)
         elif tool_result_items is not None:
             input_value = tool_result_items
         else:
-            raise ValueError("Either user_message or tool_result_items is required")
+            raise ValueError("Either user_input or tool_result_items is required")
 
         result = self._http_request(
             input_value=input_value,
@@ -168,7 +178,7 @@ class GoogleProvider(Provider):
                 "type": "function_result",
                 "name": call.name if call else "",
                 "call_id": result.call_id,
-                "result": result.output_json,
+                "result": _google_function_result_value(result),
             }
             if result.is_error:
                 item["is_error"] = True
@@ -390,6 +400,37 @@ def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
         if call.call_id == call_id:
             return call
     return None
+
+
+def _google_user_input_value(
+    user_input: UserTurnInput,
+) -> str | list[dict[str, Any]]:
+    if not user_input.images:
+        return user_input.text
+
+    content: list[dict[str, Any]] = []
+    if user_input.text:
+        content.append({"type": "text", "text": user_input.text})
+    for image in user_input.images:
+        content.append(_google_image_part(image))
+    return content
+
+
+def _google_function_result_value(result) -> str | list[dict[str, Any]]:
+    if not result.attachments:
+        return result.output_json
+
+    content = [{"type": "text", "text": result.output_json}]
+    content.extend(_google_image_part(image) for image in result.attachments)
+    return content
+
+
+def _google_image_part(image: ImageAttachment) -> dict[str, Any]:
+    return {
+        "type": "image",
+        "mime_type": image.mime_type,
+        "data": image.data_base64,
+    }
 
 
 def _google_tool_definitions(

@@ -12,7 +12,12 @@ from pbi_agent.config import (
     DEFAULT_MAX_TOKENS,
     Settings,
 )
-from pbi_agent.models.messages import CompletedResponse, TokenUsage
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    ImageAttachment,
+    TokenUsage,
+    UserTurnInput,
+)
 from pbi_agent.providers.anthropic_provider import ANTHROPIC_API_URL, AnthropicProvider
 from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.types import ToolResult
@@ -473,3 +478,129 @@ def test_anthropic_request_turn_uses_request_id_header_for_413_errors(
         'maximum allowed number of bytes.", "type": "request_too_large"}, '
         '"request_id": "req_413", "status": 413, "type": "error"}'
     )
+
+
+def test_anthropic_request_turn_serializes_user_input_images(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    requests: list[dict[str, object]] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ):
+        del timeout
+        payload = request.data.decode("utf-8") if request.data else "{}"
+        requests.append(json.loads(payload))
+        return make_http_response(
+            {
+                "id": "msg_1",
+                "content": [{"type": "text", "text": "done"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = AnthropicProvider(_make_settings())
+    provider.request_turn(
+        user_input=UserTurnInput(
+            text="Describe this image.",
+            images=[
+                ImageAttachment(
+                    path="chart.png",
+                    mime_type="image/png",
+                    data_base64="QUJDRA==",
+                )
+            ],
+        ),
+        display=display_spy,
+        session_usage=TokenUsage(),
+        turn_usage=TokenUsage(),
+    )
+
+    assert requests[0]["messages"][0]["content"] == [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "QUJDRA==",
+            },
+        },
+        {"type": "text", "text": "Describe this image."},
+    ]
+
+
+def test_anthropic_execute_tool_calls_serializes_image_attachments(
+    monkeypatch,
+    display_spy,
+) -> None:
+    provider = AnthropicProvider(_make_settings())
+    response = CompletedResponse(
+        response_id="msg_1",
+        text="",
+        provider_data={
+            "content_blocks": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read_image",
+                    "input": {"path": "chart.png"},
+                }
+            ]
+        },
+    )
+    batch = ToolExecutionBatch(
+        results=[
+            ToolResult(
+                call_id="toolu_1",
+                output_json='{"ok": true, "result": {"path": "chart.png"}}',
+                attachments=[
+                    ImageAttachment(
+                        path="chart.png",
+                        mime_type="image/png",
+                        data_base64="QUJDRA==",
+                    )
+                ],
+            )
+        ],
+        had_errors=False,
+    )
+
+    monkeypatch.setattr(
+        "pbi_agent.providers.anthropic_provider._execute_tool_calls",
+        lambda calls, max_workers, context=None: batch,
+    )
+
+    tool_result_items, had_errors = provider.execute_tool_calls(
+        response,
+        max_workers=1,
+        display=display_spy,
+        session_usage=TokenUsage(),
+        turn_usage=TokenUsage(),
+    )
+
+    assert had_errors is False
+    assert tool_result_items == [
+        {
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "QUJDRA==",
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": '{"ok": true, "result": {"path": "chart.png"}}',
+                },
+            ],
+        }
+    ]

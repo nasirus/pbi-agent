@@ -31,6 +31,7 @@ _TABULAR_EXTENSIONS = {
     ".ipc",
     ".arrow",
 }
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 SPEC = ToolSpec(
     name="read_file",
@@ -91,6 +92,13 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
             return {"error": f"path is not a file: {target_path}"}
 
         suffix = target_path.suffix.lower()
+        if suffix in _IMAGE_EXTENSIONS:
+            return {
+                "error": (
+                    f"image file is not supported by read_file: {target_path.name}; "
+                    "use read_image instead"
+                )
+            }
         if suffix in {".xlsx", ".xls"}:
             return _handle_excel_workbook(root, target_path)
         if suffix in _TABULAR_EXTENSIONS:

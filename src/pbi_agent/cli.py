@@ -184,6 +184,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = add_command_parser("run", "Run a single prompt turn.")
     run_parser.add_argument("--prompt", required=True, help="User prompt.")
     run_parser.add_argument(
+        "--image",
+        dest="images",
+        action="append",
+        default=[],
+        help="Attach a local workspace image to the prompt. Repeatable.",
+    )
+    run_parser.add_argument(
         "--project-dir",
         type=Path,
         default=Path("."),
@@ -418,6 +425,7 @@ def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
         return _run_single_turn_command(
             prompt=args.prompt,
             settings=settings,
+            image_paths=list(args.images or []),
         )
     finally:
         os.chdir(original_cwd)
@@ -484,6 +492,7 @@ def _run_single_turn_command(
     prompt: str,
     settings: Settings,
     single_turn_hint: str | None = None,
+    image_paths: list[str] | None = None,
 ) -> int:
     from pbi_agent.agent.error_formatting import format_user_facing_error
     from pbi_agent.agent.session import run_single_turn
@@ -497,6 +506,7 @@ def _run_single_turn_command(
             settings,
             display,
             single_turn_hint=single_turn_hint,
+            image_paths=image_paths,
         )
     except KeyboardInterrupt:
         return 130

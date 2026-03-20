@@ -19,7 +19,13 @@ from pbi_agent.agent.tool_runtime import (
     to_function_call_output_items,
 )
 from pbi_agent.config import Settings
-from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.media import data_url_for_image
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    TokenUsage,
+    ToolCall,
+    UserTurnInput,
+)
 from pbi_agent.providers.base import Provider
 from pbi_agent.tools.registry import get_openai_tool_definitions
 from pbi_agent.tools.types import ToolContext
@@ -77,18 +83,22 @@ class OpenAIProvider(Provider):
         self,
         *,
         user_message: str | None = None,
+        user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, Any]] | None = None,
         instructions: str | None = None,
         display: DisplayProtocol,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
     ) -> CompletedResponse:
-        if user_message is not None:
-            input_items: list[dict[str, Any]] = [_build_user_input_item(user_message)]
+        if user_input is None and user_message is not None:
+            user_input = UserTurnInput(text=user_message)
+
+        if user_input is not None:
+            input_items = [_build_user_input_item(user_input)]
         elif tool_result_items is not None:
             input_items = tool_result_items
         else:
-            raise ValueError("Either user_message or tool_result_items is required")
+            raise ValueError("Either user_input or tool_result_items is required")
 
         result = self._http_request(
             input_items=input_items,
@@ -408,8 +418,21 @@ class OpenAIProvider(Provider):
         )
 
 
-def _build_user_input_item(prompt: str) -> dict[str, Any]:
-    return {"role": "user", "content": prompt}
+def _build_user_input_item(user_input: UserTurnInput) -> dict[str, Any]:
+    if not user_input.images:
+        return {"role": "user", "content": user_input.text}
+
+    content: list[dict[str, Any]] = []
+    if user_input.text:
+        content.append({"type": "input_text", "text": user_input.text})
+    for image in user_input.images:
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": data_url_for_image(image),
+            }
+        )
+    return {"role": "user", "content": content}
 
 
 def _build_system_input_item(prompt: str) -> dict[str, Any]:

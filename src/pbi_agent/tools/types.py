@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, TYPE_CHECKING
+
+from pbi_agent.models.messages import ImageAttachment
 
 if TYPE_CHECKING:
     from pbi_agent.config import Settings
@@ -37,9 +39,16 @@ class ToolResult:
     call_id: str
     output_json: str
     is_error: bool = False
+    attachments: list[ImageAttachment] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ToolOutput:
+    result: dict[str, Any] | str
+    attachments: list[ImageAttachment] = field(default_factory=list)
 
 
 class ToolHandler(Protocol):
     def __call__(
         self, arguments: dict[str, Any], context: ToolContext
-    ) -> dict[str, Any] | str: ...
+    ) -> dict[str, Any] | str | ToolOutput: ...
