@@ -273,7 +273,13 @@ class ChatApp(App):
         context_label: str | None = None,
         tooltip: str | None = None,
     ) -> None:
+        if context_label:
+            context_suffix = f" \u00b7 {context_label}"
+            if sub_title.endswith(context_suffix):
+                sub_title = sub_title[: -len(context_suffix)]
         self.sub_title = sub_title
+        self.header_context_label = context_label
+        self.header_context_tooltip = tooltip
         context_widget = self._query_optional(
             "#session-header-context",
             SessionHeaderContext,

@@ -38,11 +38,13 @@ def test_update_session_header_scopes_tooltip_to_context_widget() -> None:
     app._query_optional = query  # type: ignore[method-assign]
 
     app.update_session_header(
-        "gpt-5.4-2026-03-05 \u00b7 v0.0.0 \u00b7 oai-ws \u00b7 11 tok \u00b7 $0.001",
+        "gpt-5.4-2026-03-05 \u00b7 v0.0.0 \u00b7 oai-ws \u00b7 11 tok \u00b7 $0.001 \u00b7 ctx 37%",
         context_label="ctx 37%",
         tooltip="Context tokens: 100,000",
     )
 
+    assert app.sub_title.endswith("$0.001")
+    assert "ctx 37%" not in app.sub_title
     context_widget.set_context.assert_called_once_with(
         "ctx 37%",
         tooltip="Context tokens: 100,000",
