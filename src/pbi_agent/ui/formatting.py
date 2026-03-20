@@ -537,19 +537,32 @@ def format_read_web_url_item(
 def format_web_search_sources_item(
     sources: list[dict[str, str]],
     *,
+    queries: list[str] | None = None,
     verbose: bool = False,
     status: str = "",
 ) -> str:
     """Format web search source citations for display."""
+    normalized_queries = [query for query in (queries or []) if query]
+    query_lines: list[str] = []
+    if normalized_queries:
+        query_text = escape_markup_text(", ".join(normalized_queries[:3]))
+        query_lines.append(f"  [dim]queries:[/dim] {query_text}")
+        if len(normalized_queries) > 3:
+            query_lines.append(
+                f"  [dim]\u2026 and {len(normalized_queries) - 3} more[/dim]"
+            )
     if not sources:
-        return f"[#10B981]\U0001f50d[/#10B981] [dim]no sources[/dim]  {status}"
+        lines = [f"[#10B981]\U0001f50d[/#10B981] [dim]no sources[/dim]  {status}"]
+        lines = query_lines + lines
+        return "\n".join(lines)
     count = len(sources)
     header = (
         f"[#10B981]\U0001f50d[/#10B981] [bold]web search[/bold]"
         f"  [dim]{count} source{'s' if count != 1 else ''}[/dim]  {status}"
     )
+    lines = [header]
+    lines.extend(query_lines)
     if not verbose:
-        lines = [header]
         for src in sources[:5]:
             title = escape_markup_text(shorten(src.get("title", ""), 60))
             url = escape_markup_text(shorten(src.get("url", ""), 60))
@@ -557,7 +570,6 @@ def format_web_search_sources_item(
         if count > 5:
             lines.append(f"  [dim]\u2026 and {count - 5} more[/dim]")
         return "\n".join(lines)
-    lines = [header]
     for src in sources:
         title = escape_markup_text(shorten(src.get("title", ""), 80))
         url = escape_markup_text(src.get("url", ""))
@@ -706,8 +718,11 @@ def route_function_result(
     if name == "web_search":
         raw_sources = args.get("sources", [])
         sources = raw_sources if isinstance(raw_sources, list) else []
+        raw_queries = args.get("queries", [])
+        queries = raw_queries if isinstance(raw_queries, list) else []
         return name, format_web_search_sources_item(
             sources,
+            queries=queries,
             verbose=verbose,
             status=status,
         )

@@ -144,8 +144,8 @@ class XAIProvider(Provider):
         if result.text:
             display.render_markdown(result.text)
 
-        if result.web_search_sources:
-            display.web_search_sources(result.web_search_sources)
+        if result.had_web_search_call or result.web_search_sources:
+            _display_web_search_result(display, result.web_search_sources)
 
         return result
 
@@ -327,6 +327,7 @@ class XAIProvider(Provider):
         encrypted_reasoning_parts: list[str] = []
         function_calls: list[ToolCall] = []
         web_search_sources: list[WebSearchSource] = []
+        had_web_search_call = False
 
         output_items = response_json.get("output", [])
         if not isinstance(output_items, list):
@@ -376,7 +377,8 @@ class XAIProvider(Provider):
                 function_calls.append(_parse_function_call(item))
 
             elif item_type == "web_search_call":
-                pass  # Server-side; no client action needed
+                had_web_search_call = True
+                web_search_sources.extend(_extract_web_search_sources(item))
 
         usage_obj = response_json.get("usage", {})
         input_tokens = int(_usage_value(usage_obj, "input_tokens"))
@@ -427,6 +429,7 @@ class XAIProvider(Provider):
                 "reasoning": response_json.get("reasoning"),
             },
             web_search_sources=web_search_sources,
+            had_web_search_call=had_web_search_call,
         )
 
 def _build_user_input_item(prompt: str) -> dict[str, Any]:
@@ -478,10 +481,58 @@ def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
     return None
 
 
+def _extract_web_search_sources(item: dict[str, Any]) -> list[WebSearchSource]:
+    action = item.get("action")
+    if not isinstance(action, dict):
+        return []
+
+    raw_sources = action.get("sources")
+    if not isinstance(raw_sources, list):
+        return []
+
+    sources: list[WebSearchSource] = []
+    for source in raw_sources:
+        if not isinstance(source, dict):
+            continue
+        url = str(source.get("url", "")).strip()
+        if not url:
+            continue
+        title = str(source.get("title", "")).strip() or url
+        snippet = str(source.get("snippet", "")).strip()
+        sources.append(
+            WebSearchSource(
+                title=title,
+                url=url,
+                snippet=snippet,
+            )
+        )
+    return sources
+
+
+def _display_web_search_result(
+    display: DisplayProtocol,
+    sources: list[WebSearchSource],
+) -> None:
+    display.function_start(1)
+    display.function_result(
+        name="web_search",
+        success=True,
+        call_id="",
+        arguments={
+            "sources": [
+                {"title": source.title, "url": source.url, "snippet": source.snippet}
+                for source in sources
+            ]
+        },
+    )
+    display.tool_group_end()
+
+
 def _response_include(model: str) -> list[str]:
+    include = ["web_search_call.action.sources"]
     if any(model.startswith(prefix) for prefix in _ENCRYPTED_REASONING_MODELS):
-        return ["reasoning.encrypted_content"]
-    return []
+        include.append("reasoning.encrypted_content")
+    return include
 
 
 def _reasoning_request(model: str, effort: str) -> dict[str, Any]:

@@ -165,7 +165,10 @@ def test_xai_build_request_body_omits_unsupported_reasoning_effort() -> None:
     assert body["max_output_tokens"] == DEFAULT_MAX_TOKENS
     assert body["stream"] is False
     assert body["parallel_tool_calls"] is True
-    assert body["include"] == ["reasoning.encrypted_content"]
+    assert body["include"] == [
+        "web_search_call.action.sources",
+        "reasoning.encrypted_content",
+    ]
     assert body["input"] == [
         {"role": "system", "content": "be concise"},
         {"role": "user", "content": "hello"},
@@ -187,7 +190,7 @@ def test_xai_build_request_body_maps_grok_3_mini_reasoning_effort() -> None:
     assert body["max_output_tokens"] == DEFAULT_MAX_TOKENS
     assert body["reasoning"] == {"effort": "high"}
     assert body["input"][0] == {"role": "system", "content": "be concise"}
-    assert "include" not in body
+    assert body["include"] == ["web_search_call.action.sources"]
 
 
 def test_xai_parse_response_extracts_function_calls_and_encrypted_reasoning() -> None:
@@ -600,6 +603,149 @@ def test_xai_request_turn_uses_request_id_header_for_non_json_errors(
     )
 
 
+def test_xai_request_turn_renders_web_search_as_tool_result(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "resp_ws_display",
+                "model": DEFAULT_XAI_MODEL,
+                "usage": {
+                    "input_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 7,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_1",
+                        "status": "completed",
+                        "action": {
+                            "type": "search",
+                            "queries": ["bitcoin price"],
+                            "sources": [
+                                {
+                                    "type": "url",
+                                    "url": "https://example.com/btc",
+                                    "title": "BTC",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "Done."},
+                        ],
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = XAIProvider(_make_settings())
+    response = provider.request_turn(
+        user_message="bitcoin price?",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+    )
+
+    assert response.text == "Done."
+    assert display_spy.markdown_calls == ["Done."]
+    assert display_spy.function_counts == [1]
+    assert display_spy.function_results == [
+        {
+            "name": "web_search",
+            "success": True,
+            "call_id": "",
+            "arguments": {
+                "sources": [
+                    {
+                        "title": "BTC",
+                        "url": "https://example.com/btc",
+                        "snippet": "",
+                    }
+                ]
+            },
+        }
+    ]
+    assert display_spy.tool_group_end_count == 1
+    assert display_spy.web_search_sources_calls == []
+
+
+def test_xai_request_turn_renders_web_search_block_without_sources(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "resp_ws_no_sources",
+                "model": DEFAULT_XAI_MODEL,
+                "usage": {
+                    "input_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 7,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_1",
+                        "status": "completed",
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "Done."},
+                        ],
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = XAIProvider(_make_settings())
+    response = provider.request_turn(
+        user_message="bitcoin price?",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+    )
+
+    assert response.text == "Done."
+    assert response.had_web_search_call is True
+    assert display_spy.markdown_calls == ["Done."]
+    assert display_spy.function_counts == [1]
+    assert display_spy.function_results == [
+        {
+            "name": "web_search",
+            "success": True,
+            "call_id": "",
+            "arguments": {"sources": []},
+        }
+    ]
+    assert display_spy.tool_group_end_count == 1
+
+
 def test_xai_web_search_tool_included_when_enabled() -> None:
     provider = XAIProvider(_make_settings(web_search=True))
     assert {"type": "web_search"} in provider._tools
@@ -660,6 +806,51 @@ def test_xai_parse_response_extracts_web_search_sources() -> None:
     assert result.web_search_sources[0].title == "Example Article"
     assert result.web_search_sources[0].url == "https://example.com/article"
     assert result.web_search_sources[1].title == "Another Source"
+
+
+def test_xai_parse_response_extracts_web_search_action_sources() -> None:
+    provider = XAIProvider(_make_settings())
+
+    result = provider._parse_response(
+        {
+            "id": "resp_ws_action",
+            "model": DEFAULT_XAI_MODEL,
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 5,
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                    "action": {
+                        "type": "search",
+                        "queries": ["bitcoin price"],
+                        "sources": [
+                            {"type": "url", "url": "https://example.com/btc"},
+                            {"type": "url", "url": "https://example.com/chart"},
+                        ],
+                    },
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Done."},
+                    ],
+                },
+            ],
+        }
+    )
+
+    assert len(result.web_search_sources) == 2
+    assert result.web_search_sources[0].title == "https://example.com/btc"
+    assert result.web_search_sources[0].url == "https://example.com/btc"
+    assert result.web_search_sources[1].title == "https://example.com/chart"
+    assert result.web_search_sources[1].url == "https://example.com/chart"
 
 
 def test_xai_web_search_sources_preserve_duplicate_urls() -> None:

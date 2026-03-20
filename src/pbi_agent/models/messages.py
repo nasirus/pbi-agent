@@ -346,6 +346,8 @@ class CompletedResponse:
     provider_data: Any = None
     # Web search citations returned by the provider's native search tool.
     web_search_sources: list[WebSearchSource] = field(default_factory=list)
+    # Whether the provider response included a hosted web search call item.
+    had_web_search_call: bool = False
 
     @property
     def has_tool_calls(self) -> bool:

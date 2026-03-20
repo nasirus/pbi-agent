@@ -806,6 +806,231 @@ def test_openai_request_turn_raises_for_failed_response_payload(
         raise AssertionError("Expected RuntimeError for failed OpenAI response")
 
 
+def test_openai_request_turn_renders_web_search_as_tool_result(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "resp_ws_display",
+                "model": DEFAULT_MODEL,
+                "usage": {
+                    "input_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 7,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_1",
+                        "status": "completed",
+                        "action": {
+                            "type": "search",
+                            "queries": ["bitcoin price"],
+                            "sources": [
+                                {
+                                    "type": "url",
+                                    "url": "https://example.com/btc",
+                                    "title": "BTC",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "Done."},
+                        ],
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings())
+    response = provider.request_turn(
+        user_message="bitcoin price?",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    assert response.text == "Done."
+    assert display_spy.markdown_calls == ["Done."]
+    assert display_spy.function_counts == [1]
+    assert display_spy.function_results == [
+        {
+            "name": "web_search",
+            "success": True,
+            "call_id": "",
+            "arguments": {
+                "queries": ["bitcoin price"],
+                "sources": [
+                    {
+                        "title": "BTC",
+                        "url": "https://example.com/btc",
+                        "snippet": "",
+                    }
+                ]
+            },
+        }
+    ]
+    assert display_spy.tool_group_end_count == 1
+    assert display_spy.web_search_sources_calls == []
+
+
+def test_openai_request_turn_renders_web_search_block_without_sources(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "resp_ws_no_sources",
+                "model": DEFAULT_MODEL,
+                "usage": {
+                    "input_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 7,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_1",
+                        "status": "completed",
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "Done."},
+                        ],
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings())
+    response = provider.request_turn(
+        user_message="bitcoin price?",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    assert response.text == "Done."
+    assert response.had_web_search_call is True
+    assert display_spy.markdown_calls == ["Done."]
+    assert display_spy.function_counts == [1]
+    assert display_spy.function_results == [
+        {
+            "name": "web_search",
+            "success": True,
+            "call_id": "",
+            "arguments": {"queries": [], "sources": []},
+        }
+    ]
+    assert display_spy.tool_group_end_count == 1
+
+
+def test_openai_request_turn_preserves_web_search_order_from_output(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    events: list[tuple[str, object]] = []
+
+    original_render_markdown = display_spy.render_markdown
+    original_function_result = display_spy.function_result
+
+    def capture_markdown(text: str) -> None:
+        events.append(("message", text))
+        original_render_markdown(text)
+
+    def capture_function_result(
+        *,
+        name: str,
+        success: bool,
+        call_id: str,
+        arguments: object,
+    ) -> None:
+        events.append(("tool", name))
+        original_function_result(
+            name=name,
+            success=success,
+            call_id=call_id,
+            arguments=arguments,
+        )
+
+    display_spy.render_markdown = capture_markdown
+    display_spy.function_result = capture_function_result
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "resp_ws_order",
+                "model": DEFAULT_MODEL,
+                "usage": {
+                    "input_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 7,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_1",
+                        "status": "completed",
+                        "action": {
+                            "type": "search",
+                            "queries": ["finance: BTC"],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "Done."},
+                        ],
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings())
+    provider.request_turn(
+        user_message="bitcoin price?",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    assert events == [("tool", "web_search"), ("message", "Done.")]
+
+
 def test_openai_request_turn_serializes_user_input_images(monkeypatch) -> None:
     requests: list[dict[str, object]] = []
 
@@ -1019,6 +1244,51 @@ def test_openai_web_search_call_not_in_function_calls() -> None:
 
     assert result.function_calls == []
     assert not result.has_tool_calls
+
+
+def test_openai_parse_response_extracts_web_search_action_sources() -> None:
+    provider = OpenAIProvider(_make_settings())
+
+    result = provider._parse_response(
+        {
+            "id": "resp_ws_action",
+            "model": DEFAULT_MODEL,
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 5,
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                    "action": {
+                        "type": "search",
+                        "queries": ["bitcoin price"],
+                        "sources": [
+                            {"type": "url", "url": "https://example.com/btc"},
+                            {"type": "url", "url": "https://example.com/chart"},
+                        ],
+                    },
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Done."},
+                    ],
+                },
+            ],
+        }
+    )
+
+    assert len(result.web_search_sources) == 2
+    assert result.web_search_sources[0].title == "https://example.com/btc"
+    assert result.web_search_sources[0].url == "https://example.com/btc"
+    assert result.web_search_sources[1].title == "https://example.com/chart"
+    assert result.web_search_sources[1].url == "https://example.com/chart"
 
 
 def test_openai_web_search_sources_preserve_duplicate_urls() -> None:
