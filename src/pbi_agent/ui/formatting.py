@@ -206,6 +206,27 @@ def format_session_subtitle(
     return " \u00b7 ".join(parts)
 
 
+def format_context_tooltip(
+    usage: TokenUsage,
+    *,
+    model: str | None = None,
+) -> str | None:
+    """Build a tooltip string showing context token details.
+
+    Returns ``None`` when there is no context information to display.
+    """
+    if not usage.context_tokens:
+        return None
+    ctx_model = model or usage.model
+    ctx_window = context_window_for_model(ctx_model) if ctx_model else 0
+    lines = [f"Context tokens: {usage.context_tokens:,}"]
+    if ctx_window:
+        pct = min(usage.context_tokens / ctx_window * 100, 100)
+        lines.append(f"Context window: {ctx_window:,}")
+        lines.append(f"Utilization: {pct:.1f}%")
+    return "\n".join(lines)
+
+
 def status_markup(
     *,
     success: bool | None = None,
@@ -628,6 +649,7 @@ __all__ = [
     "TOOL_ICONS",
     "compact_json",
     "escape_markup_text",
+    "format_context_tooltip",
     "format_generic_function_item",
     "format_init_report_item",
     "format_list_files_item",

@@ -13,6 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Button, Footer, Header
+from textual.widgets._header import HeaderTitle
 
 from pbi_agent.models.messages import TokenUsage
 from pbi_agent.agent.error_formatting import format_user_facing_error
@@ -264,8 +265,13 @@ class ChatApp(App):
         widget.update(text)
         self._scroll_chat_end()
 
-    def update_session_header(self, sub_title: str) -> None:
+    def update_session_header(
+        self, sub_title: str, *, tooltip: str | None = None
+    ) -> None:
         self.sub_title = sub_title
+        header_title = self._query_optional("HeaderTitle", HeaderTitle)
+        if header_title is not None:
+            header_title.tooltip = tooltip
 
     def enable_input(self) -> None:
         self._set_input_enabled(True)
