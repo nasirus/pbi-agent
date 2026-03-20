@@ -1,45 +1,100 @@
 from __future__ import annotations
 
+import importlib.resources
+import json
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+_ZERO_PRICING: tuple[float, float, float, float, float] = (0.0, 0.0, 0.0, 0.0, 0.0)
 
-# Context window sizes per model (in tokens).
-_MODEL_CONTEXT_WINDOW: dict[str, int] = {
-    "gpt-5.3-codex": 1_047_576,
-    "gpt-5.4-2026-03-05": 1_047_576,
-    "claude-opus-4-6": 200_000,
-    "claude-sonnet-4-6": 200_000,
-}
-_DEFAULT_CONTEXT_WINDOW: int = 200_000
+
+class ModelCatalog:
+    """Registry of model pricing and context window sizes.
+
+    Loads a bundled ``model_catalog.json`` and optionally merges user
+    overrides from ``~/.pbi-agent/model_catalog.json``.
+    """
+
+    def __init__(self) -> None:
+        self._models: dict[str, dict] = {}
+        self._default_context_window: int = 200_000
+        self._load_bundled()
+        self._load_user_overrides()
+
+    # ------------------------------------------------------------------
+    def _load_bundled(self) -> None:
+        ref = importlib.resources.files("pbi_agent.models").joinpath(
+            "model_catalog.json"
+        )
+        data = json.loads(ref.read_text(encoding="utf-8"))
+        self._models.update(data.get("models", {}))
+        self._default_context_window = data.get("defaults", {}).get(
+            "context_window", self._default_context_window
+        )
+
+    def _load_user_overrides(self) -> None:
+        user_path = Path.home() / ".pbi-agent" / "model_catalog.json"
+        if not user_path.is_file():
+            return
+        try:
+            data = json.loads(user_path.read_text(encoding="utf-8"))
+            self._models.update(data.get("models", {}))
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # ------------------------------------------------------------------
+    def _find_entry(self, model: str) -> dict | None:
+        if model in self._models:
+            return self._models[model]
+        for key, entry in self._models.items():
+            if model.startswith(key):
+                return entry
+        return None
+
+    def get_pricing(self, model: str) -> tuple[float, float, float, float, float]:
+        """Return per-MTok prices ``(input, cache_write_5m, cache_write_1h,
+        cache_hit, output)`` for *model*.
+
+        Returns all zeros for unknown models.
+        """
+        entry = self._find_entry(model)
+        if entry is None:
+            return _ZERO_PRICING
+        p = entry.get("pricing")
+        if p is None:
+            return _ZERO_PRICING
+        return (
+            p.get("input", 0.0),
+            p.get("cache_write_5m", 0.0),
+            p.get("cache_write_1h", 0.0),
+            p.get("cache_hit", 0.0),
+            p.get("output", 0.0),
+        )
+
+    def get_context_window(self, model: str) -> int:
+        """Return the context window size for *model*."""
+        entry = self._find_entry(model)
+        if entry is not None:
+            return entry.get("context_window", self._default_context_window)
+        return self._default_context_window
+
+
+# Lazy singleton — avoids file I/O at import time.
+_catalog: ModelCatalog | None = None
+
+
+def _get_catalog() -> ModelCatalog:
+    global _catalog
+    if _catalog is None:
+        _catalog = ModelCatalog()
+    return _catalog
 
 
 def context_window_for_model(model: str) -> int:
     """Return the context window size for *model*."""
-    if model in _MODEL_CONTEXT_WINDOW:
-        return _MODEL_CONTEXT_WINDOW[model]
-    for key, size in _MODEL_CONTEXT_WINDOW.items():
-        if model.startswith(key):
-            return size
-    return _DEFAULT_CONTEXT_WINDOW
-
-
-# Pricing per 1M tokens:
-#   (base_input, cache_write_5m, cache_write_1h, cache_hit, output)
-_MODEL_PRICING: dict[str, tuple[float, float, float, float, float]] = {
-    "gpt-5.3-codex": (1.75, 1.75, 1.75, 0.175, 14.00),
-    "gpt-5.4-2026-03-05": (2.5, 2.5, 2.5, 0.25, 15.00),
-    "claude-opus-4-6": (5.00, 6.25, 10.00, 0.50, 25.00),
-    "claude-sonnet-4-6": (3.00, 3.75, 6.00, 0.30, 15.00),
-}
-_DEFAULT_PRICING: tuple[float, float, float, float, float] = (
-    1.75,
-    1.75,
-    1.75,
-    0.175,
-    14.00,
-)
+    return _get_catalog().get_context_window(model)
 
 
 def _pricing_for_model(model: str) -> tuple[float, float, float, float, float]:
@@ -47,13 +102,16 @@ def _pricing_for_model(model: str) -> tuple[float, float, float, float, float]:
 
     Returns ``(base_input, cache_write_5m, cache_write_1h, cache_hit, output)``.
     """
-    if model in _MODEL_PRICING:
-        return _MODEL_PRICING[model]
-    # Fuzzy match: check if any known key is a prefix of the model string.
-    for key, prices in _MODEL_PRICING.items():
-        if model.startswith(key):
-            return prices
-    return _DEFAULT_PRICING
+    return _get_catalog().get_pricing(model)
+
+
+def _service_tier_multiplier(service_tier: str) -> float:
+    """Return the pricing multiplier for an OpenAI service tier."""
+    if service_tier == "flex":
+        return 0.5
+    if service_tier == "priority":
+        return 2.0
+    return 1.0
 
 
 def _estimated_cost(
@@ -64,19 +122,23 @@ def _estimated_cost(
     cache_write_tokens: int,
     cache_write_1h_tokens: int,
     output_tokens: int,
+    service_tier: str = "",
 ) -> float:
     p_in, p_w5, p_w1h, p_hit, p_out = _pricing_for_model(model)
     non_cached_input_tokens = max(
         input_tokens - cached_input_tokens - cache_write_tokens - cache_write_1h_tokens,
         0,
     )
-    return (
+    cost = (
         (non_cached_input_tokens / 1_000_000.0) * p_in
         + (cache_write_tokens / 1_000_000.0) * p_w5
         + (cache_write_1h_tokens / 1_000_000.0) * p_w1h
         + (cached_input_tokens / 1_000_000.0) * p_hit
         + (output_tokens / 1_000_000.0) * p_out
     )
+    if service_tier:
+        cost *= _service_tier_multiplier(service_tier)
+    return cost
 
 
 @dataclass(slots=True)
@@ -100,6 +162,7 @@ class TokenUsage:
     sub_agent_cost_usd: float = 0.0
     context_tokens: int = 0
     model: str = ""
+    service_tier: str = ""
     _lock: threading.Lock = field(
         default_factory=threading.Lock,
         init=False,
@@ -154,6 +217,7 @@ class TokenUsage:
                 cache_write_tokens=main_cache_write_tokens,
                 cache_write_1h_tokens=main_cache_write_1h_tokens,
                 output_tokens=main_output_tokens,
+                service_tier=self.service_tier,
             )
             + self.sub_agent_cost_usd
         )
@@ -206,6 +270,8 @@ class TokenUsage:
                 self.context_tokens = other_snapshot.context_tokens
             if not self.model and other_snapshot.model:
                 self.model = other_snapshot.model
+            if not self.service_tier and other_snapshot.service_tier:
+                self.service_tier = other_snapshot.service_tier
 
     def snapshot(self) -> "TokenUsage":
         with self._lock:
@@ -229,6 +295,7 @@ class TokenUsage:
                 sub_agent_cost_usd=self.sub_agent_cost_usd,
                 context_tokens=self.context_tokens,
                 model=self.model,
+                service_tier=self.service_tier,
             )
 
 
