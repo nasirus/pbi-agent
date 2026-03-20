@@ -857,7 +857,7 @@ def test_google_parse_response_extracts_grounding_sources() -> None:
     assert result.web_search_sources[1].url == "https://example.com/another"
 
 
-def test_google_grounding_sources_deduplicates_by_url() -> None:
+def test_google_grounding_sources_preserve_duplicate_urls() -> None:
     provider = GoogleProvider(_make_settings())
 
     result = provider._parse_response(
@@ -885,8 +885,9 @@ def test_google_grounding_sources_deduplicates_by_url() -> None:
         }
     )
 
-    assert len(result.web_search_sources) == 1
+    assert len(result.web_search_sources) == 2
     assert result.web_search_sources[0].url == "https://example.com/same"
+    assert result.web_search_sources[1].url == "https://example.com/same"
 
 
 def test_google_parse_response_no_grounding_metadata() -> None:

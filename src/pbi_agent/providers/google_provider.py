@@ -414,7 +414,6 @@ def _extract_grounding_sources(
     chunks = metadata.get("groundingChunks", [])
     if not isinstance(chunks, list):
         return []
-    seen: set[str] = set()
     sources: list[WebSearchSource] = []
     for chunk in chunks:
         if not isinstance(chunk, dict):
@@ -423,9 +422,8 @@ def _extract_grounding_sources(
         if not isinstance(web, dict):
             continue
         url = str(web.get("uri", ""))
-        if not url or url in seen:
+        if not url:
             continue
-        seen.add(url)
         sources.append(
             WebSearchSource(
                 title=str(web.get("title", "")),

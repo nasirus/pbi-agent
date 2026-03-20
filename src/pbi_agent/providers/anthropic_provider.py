@@ -82,7 +82,7 @@ class AnthropicProvider(Provider):
         self._settings = settings
         self._tools = get_anthropic_tool_definitions(excluded_names=excluded_tools)
         if settings.web_search:
-            self._tools.append({"type": "web_search", "name": "web_search_20250305"})
+            self._tools.append({"type": "web_search", "name": "web_search_20260209"})
         self._system_prompt = system_prompt or get_system_prompt()
         # Client-side conversation history — full messages list.
         self._messages: list[dict[str, Any]] = []
@@ -496,24 +496,13 @@ class AnthropicProvider(Provider):
                 "thinking_parts": thinking_parts,
                 "has_redacted_thinking": has_redacted_thinking,
             },
-            web_search_sources=_deduplicate_sources(web_search_sources),
+            web_search_sources=web_search_sources,
         )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _deduplicate_sources(sources: list[WebSearchSource]) -> list[WebSearchSource]:
-    """Remove duplicate web search sources by URL."""
-    seen: set[str] = set()
-    unique: list[WebSearchSource] = []
-    for source in sources:
-        if source.url and source.url not in seen:
-            seen.add(source.url)
-            unique.append(source)
-    return unique
 
 
 def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:

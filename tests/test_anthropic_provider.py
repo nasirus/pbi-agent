@@ -608,7 +608,7 @@ def test_anthropic_execute_tool_calls_serializes_image_attachments(
 
 def test_anthropic_web_search_tool_included_when_enabled() -> None:
     provider = AnthropicProvider(_make_settings(web_search=True))
-    web_tool = {"type": "web_search", "name": "web_search_20250305"}
+    web_tool = {"type": "web_search", "name": "web_search_20260209"}
     assert web_tool in provider._tools
 
 
@@ -664,6 +664,45 @@ def test_anthropic_parse_response_extracts_web_search_sources() -> None:
     assert result.web_search_sources[0].url == "https://example.com/page"
     assert result.web_search_sources[0].snippet == "A snippet from the page."
     assert result.web_search_sources[1].title == "Another Page"
+
+
+def test_anthropic_web_search_sources_preserve_duplicate_urls() -> None:
+    provider = AnthropicProvider(_make_settings())
+
+    result = provider._parse_response(
+        {
+            "id": "msg_ws_dup",
+            "content": [
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtoolu_1",
+                    "content": [
+                        {
+                            "type": "web_search_result",
+                            "title": "Same Page",
+                            "url": "https://example.com/same",
+                            "page_snippet": "First snippet.",
+                        },
+                        {
+                            "type": "web_search_result",
+                            "title": "Same Page Again",
+                            "url": "https://example.com/same",
+                            "page_snippet": "Second snippet.",
+                        },
+                    ],
+                },
+                {"type": "text", "text": "Answer."},
+            ],
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+            },
+        }
+    )
+
+    assert len(result.web_search_sources) == 2
+    assert result.web_search_sources[0].url == "https://example.com/same"
+    assert result.web_search_sources[1].url == "https://example.com/same"
 
 
 def test_anthropic_server_tool_use_not_in_function_calls() -> None:

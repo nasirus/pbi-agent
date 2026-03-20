@@ -662,6 +662,51 @@ def test_xai_parse_response_extracts_web_search_sources() -> None:
     assert result.web_search_sources[1].title == "Another Source"
 
 
+def test_xai_web_search_sources_preserve_duplicate_urls() -> None:
+    provider = XAIProvider(_make_settings())
+
+    result = provider._parse_response(
+        {
+            "id": "resp_dup",
+            "model": DEFAULT_XAI_MODEL,
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 5,
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Answer.",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "title": "Same Page",
+                                    "url": "https://example.com/same",
+                                },
+                                {
+                                    "type": "url_citation",
+                                    "title": "Same Page Again",
+                                    "url": "https://example.com/same",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    assert len(result.web_search_sources) == 2
+    assert result.web_search_sources[0].url == "https://example.com/same"
+    assert result.web_search_sources[1].url == "https://example.com/same"
+
+
 def test_xai_web_search_call_not_in_function_calls() -> None:
     provider = XAIProvider(_make_settings())
 

@@ -426,20 +426,8 @@ class XAIProvider(Provider):
                 "encrypted_reasoning_content": encrypted_reasoning_parts,
                 "reasoning": response_json.get("reasoning"),
             },
-            web_search_sources=_deduplicate_sources(web_search_sources),
+            web_search_sources=web_search_sources,
         )
-
-
-def _deduplicate_sources(sources: list[WebSearchSource]) -> list[WebSearchSource]:
-    """Remove duplicate web search sources by URL."""
-    seen: set[str] = set()
-    unique: list[WebSearchSource] = []
-    for source in sources:
-        if source.url and source.url not in seen:
-            seen.add(source.url)
-            unique.append(source)
-    return unique
-
 
 def _build_user_input_item(prompt: str) -> dict[str, Any]:
     return {"role": "user", "content": prompt}

@@ -58,7 +58,7 @@ class OpenAIProvider(Provider):
         self._settings = settings
         self._tools = get_openai_tool_definitions(excluded_names=excluded_tools)
         if settings.web_search:
-            self._tools.append({"type": "web_search_preview"})
+            self._tools.append({"type": "web_search"})
         self._instructions = system_prompt or get_system_prompt()
         self._previous_response_id: str | None = None
 
@@ -435,7 +435,7 @@ class OpenAIProvider(Provider):
             reasoning_summary=reasoning_summary,
             reasoning_content=reasoning_content,
             provider_data={"reasoning": response_json.get("reasoning")},
-            web_search_sources=_deduplicate_sources(web_search_sources),
+            web_search_sources=web_search_sources,
         )
 
 
@@ -451,6 +451,7 @@ def _build_user_input_item(user_input: UserTurnInput) -> dict[str, Any]:
             {
                 "type": "input_image",
                 "image_url": data_url_for_image(image),
+                "detail": "original",
             }
         )
     return {"role": "user", "content": content}
@@ -621,17 +622,6 @@ def _waiting_message_for_input_items(input_items: list[dict[str, Any]]) -> str:
         return "integrating tool results..."
 
     return "processing..."
-
-
-def _deduplicate_sources(sources: list[WebSearchSource]) -> list[WebSearchSource]:
-    """Remove duplicate web search sources by URL."""
-    seen: set[str] = set()
-    unique: list[WebSearchSource] = []
-    for source in sources:
-        if source.url and source.url not in seen:
-            seen.add(source.url)
-            unique.append(source)
-    return unique
 
 
 def _reasoning_body_text(reasoning_text: str, summary_text: str) -> str | None:

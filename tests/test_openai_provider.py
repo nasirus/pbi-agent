@@ -853,7 +853,11 @@ def test_openai_request_turn_serializes_user_input_images(monkeypatch) -> None:
     )
     assert user_item["content"] == [
         {"type": "input_text", "text": "Describe this image."},
-        {"type": "input_image", "image_url": "data:image/png;base64,QUJDRA=="},
+        {
+            "type": "input_image",
+            "image_url": "data:image/png;base64,QUJDRA==",
+            "detail": "original",
+        },
     ]
 
 
@@ -922,12 +926,12 @@ def test_openai_execute_tool_calls_serializes_image_attachments(
 
 def test_openai_web_search_tool_included_when_enabled() -> None:
     provider = OpenAIProvider(_make_settings(web_search=True))
-    assert {"type": "web_search_preview"} in provider._tools
+    assert {"type": "web_search"} in provider._tools
 
 
 def test_openai_web_search_tool_excluded_when_disabled() -> None:
     provider = OpenAIProvider(_make_settings(web_search=False))
-    assert {"type": "web_search_preview"} not in provider._tools
+    assert {"type": "web_search"} not in provider._tools
 
 
 def test_openai_parse_response_extracts_web_search_sources() -> None:
@@ -1017,7 +1021,7 @@ def test_openai_web_search_call_not_in_function_calls() -> None:
     assert not result.has_tool_calls
 
 
-def test_openai_web_search_sources_deduplicates_by_url() -> None:
+def test_openai_web_search_sources_preserve_duplicate_urls() -> None:
     provider = OpenAIProvider(_make_settings())
 
     result = provider._parse_response(
@@ -1057,5 +1061,6 @@ def test_openai_web_search_sources_deduplicates_by_url() -> None:
         }
     )
 
-    assert len(result.web_search_sources) == 1
+    assert len(result.web_search_sources) == 2
     assert result.web_search_sources[0].url == "https://example.com/same"
+    assert result.web_search_sources[1].url == "https://example.com/same"
