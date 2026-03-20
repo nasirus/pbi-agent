@@ -149,6 +149,8 @@ class TestFormatWebSearchSourcesItem:
         )
         assert "queries:" in result
         assert "finance: BTC" in result
+        assert "web search" not in result
+        assert "🔍" not in result
 
     def test_no_sources_still_shows_queries(self) -> None:
         result = format_web_search_sources_item(
@@ -158,6 +160,14 @@ class TestFormatWebSearchSourcesItem:
         )
         assert "no sources" in result
         assert "finance: BTC" in result
+
+    def test_queries_render_before_source_summary(self) -> None:
+        result = format_web_search_sources_item(
+            [{"title": "BTC", "url": "https://example.com/btc", "snippet": ""}],
+            queries=["finance: BTC"],
+            status="[green]done[/green]",
+        )
+        assert result.index("queries:") < result.index("1 source")
 
     def test_compact_sources_use_separate_url_line(self) -> None:
         result = format_web_search_sources_item(

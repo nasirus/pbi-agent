@@ -552,16 +552,12 @@ def format_web_search_sources_item(
                 f"  [dim]\u2026 and {len(normalized_queries) - 3} more[/dim]"
             )
     if not sources:
-        lines = [f"[#10B981]\U0001f50d[/#10B981] [dim]no sources[/dim]  {status}"]
+        lines = [f"[dim]no sources[/dim]  {status}"]
         lines = query_lines + lines
         return "\n".join(lines)
     count = len(sources)
-    header = (
-        f"[#10B981]\U0001f50d[/#10B981] [bold]web search[/bold]"
-        f"  [dim]{count} source{'s' if count != 1 else ''}[/dim]  {status}"
-    )
-    lines = [header]
-    lines.extend(query_lines)
+    header = f"[dim]{count} source{'s' if count != 1 else ''}[/dim]  {status}"
+    lines = query_lines + [header]
     if not verbose:
         for src in sources[:5]:
             title = escape_markup_text(shorten(src.get("title", ""), 60))

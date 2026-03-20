@@ -670,6 +670,7 @@ def test_xai_request_turn_renders_web_search_as_tool_result(
             "success": True,
             "call_id": "",
             "arguments": {
+                "queries": ["bitcoin price"],
                 "sources": [
                     {
                         "title": "BTC",
@@ -740,7 +741,7 @@ def test_xai_request_turn_renders_web_search_block_without_sources(
             "name": "web_search",
             "success": True,
             "call_id": "",
-            "arguments": {"sources": []},
+            "arguments": {"queries": [], "sources": []},
         }
     ]
     assert display_spy.tool_group_end_count == 1
@@ -847,13 +848,13 @@ def test_xai_parse_response_extracts_web_search_action_sources() -> None:
     )
 
     assert len(result.web_search_sources) == 2
-    assert result.web_search_sources[0].title == "https://example.com/btc"
+    assert result.web_search_sources[0].title == "example.com"
     assert result.web_search_sources[0].url == "https://example.com/btc"
-    assert result.web_search_sources[1].title == "https://example.com/chart"
+    assert result.web_search_sources[1].title == "example.com"
     assert result.web_search_sources[1].url == "https://example.com/chart"
 
 
-def test_xai_web_search_sources_preserve_duplicate_urls() -> None:
+def test_xai_web_search_sources_deduplicate_urls_and_prefer_non_numeric_titles() -> None:
     provider = XAIProvider(_make_settings())
 
     result = provider._parse_response(
@@ -868,6 +869,22 @@ def test_xai_web_search_sources_preserve_duplicate_urls() -> None:
             },
             "output": [
                 {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                    "action": {
+                        "type": "search",
+                        "queries": ["bitcoin price"],
+                        "sources": [
+                            {
+                                "type": "url",
+                                "title": "CoinMarketCap",
+                                "url": "https://example.com/same",
+                            }
+                        ],
+                    },
+                },
+                {
                     "type": "message",
                     "role": "assistant",
                     "content": [
@@ -877,12 +894,12 @@ def test_xai_web_search_sources_preserve_duplicate_urls() -> None:
                             "annotations": [
                                 {
                                     "type": "url_citation",
-                                    "title": "Same Page",
+                                    "title": "1",
                                     "url": "https://example.com/same",
                                 },
                                 {
                                     "type": "url_citation",
-                                    "title": "Same Page Again",
+                                    "title": "2",
                                     "url": "https://example.com/same",
                                 },
                             ],
@@ -893,9 +910,177 @@ def test_xai_web_search_sources_preserve_duplicate_urls() -> None:
         }
     )
 
-    assert len(result.web_search_sources) == 2
+    assert len(result.web_search_sources) == 1
+    assert result.web_search_sources[0].title == "CoinMarketCap"
     assert result.web_search_sources[0].url == "https://example.com/same"
-    assert result.web_search_sources[1].url == "https://example.com/same"
+
+
+def test_xai_request_turn_preserves_web_search_order_from_output(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    events: list[tuple[str, object]] = []
+
+    original_render_markdown = display_spy.render_markdown
+    original_function_result = display_spy.function_result
+
+    def capture_markdown(text: str) -> None:
+        events.append(("message", text))
+        original_render_markdown(text)
+
+    def capture_function_result(
+        *,
+        name: str,
+        success: bool,
+        call_id: str,
+        arguments: object,
+    ) -> None:
+        events.append(("tool", name))
+        original_function_result(
+            name=name,
+            success=success,
+            call_id=call_id,
+            arguments=arguments,
+        )
+
+    display_spy.render_markdown = capture_markdown
+    display_spy.function_result = capture_function_result
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "resp_ws_order",
+                "model": DEFAULT_XAI_MODEL,
+                "usage": {
+                    "input_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 7,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_1",
+                        "status": "completed",
+                        "action": {
+                            "type": "search",
+                            "queries": ["finance: BTC"],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "Done."},
+                        ],
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = XAIProvider(_make_settings())
+    provider.request_turn(
+        user_message="bitcoin price?",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+    )
+
+    assert events == [("tool", "web_search"), ("message", "Done.")]
+
+
+def test_xai_request_turn_coalesces_adjacent_web_search_calls_with_same_query(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "resp_ws_merge",
+                "model": DEFAULT_XAI_MODEL,
+                "usage": {
+                    "input_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 7,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_1",
+                        "status": "completed",
+                        "action": {
+                            "type": "search",
+                            "queries": ["current bitcoin price USD"],
+                        },
+                    },
+                    {
+                        "type": "web_search_call",
+                        "id": "ws_2",
+                        "status": "completed",
+                        "action": {
+                            "type": "search",
+                            "queries": ["current bitcoin price USD"],
+                            "sources": [
+                                {
+                                    "type": "url",
+                                    "url": "https://example.com/btc",
+                                    "title": "BTC",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "Done."},
+                        ],
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = XAIProvider(_make_settings())
+    provider.request_turn(
+        user_message="bitcoin price?",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+    )
+
+    assert display_spy.function_counts == [1]
+    assert display_spy.function_results == [
+        {
+            "name": "web_search",
+            "success": True,
+            "call_id": "",
+            "arguments": {
+                "queries": ["current bitcoin price USD"],
+                "sources": [
+                    {
+                        "title": "BTC",
+                        "url": "https://example.com/btc",
+                        "snippet": "",
+                    }
+                ],
+            },
+        }
+    ]
 
 
 def test_xai_web_search_call_not_in_function_calls() -> None:
