@@ -80,7 +80,7 @@ def test_prefix_matching() -> None:
     assert pricing == (1.75, 1.75, 1.75, 0.175, 14.00)
 
     ctx = context_window_for_model("gpt-5.3-codex-some-variant")
-    assert ctx == 1_047_576
+    assert ctx == 272_000
 
 
 def test_unknown_model_context_window_returns_default() -> None:
