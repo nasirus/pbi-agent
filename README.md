@@ -106,7 +106,44 @@ Run one-off prompts for automation or CI integration:
 ```bash
 pbi-agent run --prompt "List all measures in the semantic model that lack descriptions."
 pbi-agent run --project-dir ./my-report --prompt "Summarize the model and list missing descriptions."
+pbi-agent run --prompt "Read the text in this image verbatim." --image ./general_ocr_002.png
 ```
+
+### 5. Image input
+
+You can attach local workspace images to the model context in three ways:
+
+1. `run` mode with repeatable `--image` flags:
+
+```bash
+pbi-agent run --prompt "Describe this screenshot." --image ./screen.png
+pbi-agent run --prompt "Compare these two charts." --image ./before.png --image ./after.png
+```
+
+2. `console` mode with staged image commands:
+
+```text
+/image add ./screen.png
+/image add ./before.png ./after.png
+/image list
+/image clear
+```
+
+After staging, send your normal prompt. The staged images are attached to the next turn and then cleared.
+
+3. Model-driven workspace inspection through the `read_image` tool. When the provider supports multimodal tool results, the agent can call `read_image` on its own to inspect local `.png`, `.jpg`, `.jpeg`, or `.webp` files.
+
+Current provider support in this build:
+
+| Provider | Explicit image attachments | `read_image` tool |
+| --- | --- | --- |
+| OpenAI | yes | yes |
+| Google Gemini | yes | yes |
+| Anthropic | yes | yes |
+| xAI | no | no |
+| Generic / OpenAI-compatible | no | no |
+
+For unsupported providers, image input is rejected with a clear error instead of silently degrading.
 
 ## Prerequisites
 
@@ -195,7 +232,7 @@ pbi-agent
 
 A browser interface opens at `http://localhost:8000`. Start describing what you need.
 
-> **Prefer a terminal?** Use `pbi-agent console` for an interactive terminal session, or `pbi-agent run --prompt "..."` for single-turn execution.
+> **Prefer a terminal?** Use `pbi-agent console` for an interactive terminal session, or `pbi-agent run --prompt "..."` for single-turn execution. Both support image input as described below.
 
 ## Commands
 
@@ -246,6 +283,15 @@ If you already have a provider-specific API key in your environment, `pbi-agent`
 ### CLI flags
 
 All environment variables have corresponding CLI flags. Run `pbi-agent --help` for the full list.
+
+Image-related options:
+
+| Mode | Option | Description |
+| --- | --- | --- |
+| `run` | `--image PATH` | Attach a local workspace image to that single prompt. Repeatable. |
+| `console` / `web` | `/image add <path> [more]` | Stage one or more images for the next turn. |
+| `console` / `web` | `/image list` | Show currently staged images. |
+| `console` / `web` | `/image clear` | Remove staged images before sending. |
 
 By default, `pbi-agent` uses the **OpenAI** provider with **GPT-5.4** -- no flags needed:
 

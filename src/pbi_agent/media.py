@@ -13,6 +13,7 @@ SUPPORTED_IMAGE_MIME_TYPES = (
     "image/png",
     "image/webp",
 )
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB
 _MIME_LABELS = {
     "image/jpeg": "JPEG",
     "image/png": "PNG",
@@ -31,10 +32,18 @@ def load_workspace_image(root: Path, raw_path: Any) -> ImageAttachment:
         raise ValueError(f"path is not a file: {target_path}")
 
     raw_bytes = target_path.read_bytes()
+    if len(raw_bytes) > _MAX_IMAGE_BYTES:
+        size_mb = len(raw_bytes) / (1024 * 1024)
+        raise ValueError(
+            f"image too large: {target_path.name} is {size_mb:.1f} MB "
+            f"(limit: {_MAX_IMAGE_BYTES // (1024 * 1024)} MB)"
+        )
     mime_type = detect_image_mime_type(raw_bytes)
     if mime_type is None:
         allowed = ", ".join(_MIME_LABELS[mime] for mime in SUPPORTED_IMAGE_MIME_TYPES)
-        raise ValueError(f"unsupported image format: {target_path.name} (allowed: {allowed})")
+        raise ValueError(
+            f"unsupported image format: {target_path.name} (allowed: {allowed})"
+        )
 
     return ImageAttachment(
         path=relative_workspace_path(root, target_path),
@@ -49,11 +58,7 @@ def detect_image_mime_type(raw_bytes: bytes) -> str | None:
         return "image/png"
     if raw_bytes.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
-    if (
-        len(raw_bytes) >= 12
-        and raw_bytes[:4] == b"RIFF"
-        and raw_bytes[8:12] == b"WEBP"
-    ):
+    if len(raw_bytes) >= 12 and raw_bytes[:4] == b"RIFF" and raw_bytes[8:12] == b"WEBP":
         return "image/webp"
     return None
 

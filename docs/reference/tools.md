@@ -7,7 +7,7 @@ outline: [2, 3]
 
 # Built-in Tools
 
-All providers expose the same built-in tools through the shared tool registry.
+Most built-in tools are exposed through the shared tool registry across providers. `read_image` is only enabled on providers that support multimodal image input in this build.
 
 | Tool | Destructive | Purpose |
 | --- | --- | --- |
@@ -19,6 +19,7 @@ All providers expose the same built-in tools through the shared tool registry.
 | `list_files` | no | List files and directories in the workspace, with optional glob and type filtering. |
 | `search_files` | no | Search text file contents for a string or regex pattern. |
 | `read_file` | no | Read text files with optional line ranges, summarize tabular files, and extract text from PDF and DOCX files. |
+| `read_image` | no | Read a local image file and attach it to the model context in native multimodal format. |
 | `read_web_url` | no | Fetch a public web page through markdown.new and return Markdown. |
 
 ## `shell`
@@ -145,6 +146,28 @@ List directory contents for general workspace discovery, or narrow results by gl
   "max_entries": 50
 }
 ```
+
+## `read_image`
+
+Read a local image file and attach it to the model context while returning a compact metadata summary.
+
+| Parameter | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `path` | `string` | yes | Image path relative to the workspace root, or an absolute path that still resolves within the workspace. |
+
+```json
+{
+  "path": "general_ocr_002.png"
+}
+```
+
+Supported image formats are `.png`, `.jpg`, `.jpeg`, and `.webp`.
+
+`read_image` returns a concise JSON summary to the transcript and keeps the base64 image payload in provider-native multimodal content blocks instead of embedding it into plain text.
+
+::: warning
+`read_image` is currently only registered for OpenAI, Google, and Anthropic. It is intentionally hidden for xAI and Generic in this build.
+:::
 
 ## `read_web_url`
 

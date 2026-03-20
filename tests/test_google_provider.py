@@ -16,7 +16,13 @@ from pbi_agent.config import (
     Settings,
     resolve_settings,
 )
-from pbi_agent.models.messages import CompletedResponse, TokenUsage, ToolCall
+from pbi_agent.models.messages import (
+    CompletedResponse,
+    ImageAttachment,
+    TokenUsage,
+    ToolCall,
+    UserTurnInput,
+)
 from pbi_agent.providers.google_provider import GoogleProvider
 from pbi_agent.tools.types import ToolResult
 
@@ -672,3 +678,122 @@ class _DisplayStub:
 
     def tool_group_end(self) -> None:
         self.tool_group_closed = True
+
+
+def test_google_request_turn_serializes_user_input_images(monkeypatch) -> None:
+    requests: list[dict[str, object]] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        payload = request.data.decode("utf-8") if request.data else "{}"
+        requests.append(json.loads(payload))
+        return _FakeHTTPResponse(
+            {
+                "id": "int_1",
+                "model": DEFAULT_GOOGLE_MODEL,
+                "status": "completed",
+                "usage": {
+                    "total_input_tokens": 10,
+                    "total_cached_tokens": 0,
+                    "total_output_tokens": 3,
+                    "total_thought_tokens": 0,
+                },
+                "outputs": [{"type": "text", "text": "done"}],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = GoogleProvider(_make_settings())
+    provider.request_turn(
+        user_input=UserTurnInput(
+            text="Describe this image.",
+            images=[
+                ImageAttachment(
+                    path="chart.png",
+                    mime_type="image/png",
+                    data_base64="QUJDRA==",
+                )
+            ],
+        ),
+        display=_DisplayStub(),
+        session_usage=TokenUsage(model=DEFAULT_GOOGLE_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_GOOGLE_MODEL),
+    )
+
+    assert requests[0]["input"] == [
+        {"type": "text", "text": "Describe this image."},
+        {
+            "type": "image",
+            "mime_type": "image/png",
+            "data": "QUJDRA==",
+        },
+    ]
+
+
+def test_google_execute_tool_calls_serializes_image_attachments(
+    monkeypatch,
+    display_spy,
+) -> None:
+    provider = GoogleProvider(_make_settings())
+    response = CompletedResponse(
+        response_id="int_1",
+        text="",
+        function_calls=[
+            ToolCall(
+                call_id="call_1", name="read_image", arguments={"path": "chart.png"}
+            )
+        ],
+    )
+    batch = ToolExecutionBatch(
+        results=[
+            ToolResult(
+                call_id="call_1",
+                output_json='{"ok": true, "result": {"path": "chart.png"}}',
+                attachments=[
+                    ImageAttachment(
+                        path="chart.png",
+                        mime_type="image/png",
+                        data_base64="QUJDRA==",
+                    )
+                ],
+            )
+        ],
+        had_errors=False,
+    )
+
+    monkeypatch.setattr(
+        "pbi_agent.providers.google_provider._execute_tool_calls",
+        lambda calls, max_workers, context=None: batch,
+    )
+
+    tool_result_items, had_errors = provider.execute_tool_calls(
+        response,
+        max_workers=1,
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_GOOGLE_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_GOOGLE_MODEL),
+    )
+
+    assert had_errors is False
+    assert tool_result_items == [
+        {
+            "type": "function_result",
+            "name": "read_image",
+            "call_id": "call_1",
+            "result": [
+                {
+                    "type": "text",
+                    "text": '{"ok": true, "result": {"path": "chart.png"}}',
+                },
+                {
+                    "type": "image",
+                    "mime_type": "image/png",
+                    "data": "QUJDRA==",
+                },
+            ],
+        }
+    ]

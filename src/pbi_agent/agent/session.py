@@ -602,15 +602,8 @@ def _request_user_turn(
     session_usage: TokenUsage,
     turn_usage: TokenUsage,
 ) -> CompletedResponse:
-    if user_input.images:
-        return provider.request_turn(
-            user_input=user_input,
-            display=display,
-            session_usage=session_usage,
-            turn_usage=turn_usage,
-        )
     return provider.request_turn(
-        user_message=user_input.text,
+        user_input=user_input,
         display=display,
         session_usage=session_usage,
         turn_usage=turn_usage,
@@ -688,7 +681,11 @@ def _handle_image_command(
     root = Path.cwd().resolve()
     added_paths: list[str] = []
     for path in parts[2:]:
-        image = load_workspace_image(root, path)
+        try:
+            image = load_workspace_image(root, path)
+        except ValueError as exc:
+            display.error(str(exc))
+            return True
         if image.path not in pending_image_paths:
             pending_image_paths.append(image.path)
             added_paths.append(image.path)

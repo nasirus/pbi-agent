@@ -842,7 +842,10 @@ def test_openai_request_turn_serializes_user_input_images(monkeypatch) -> None:
         turn_usage=TokenUsage(model=DEFAULT_MODEL),
     )
 
-    assert requests[0]["input"][0]["content"] == [
+    user_item = next(
+        item for item in requests[0]["input"] if item.get("role") == "user"
+    )
+    assert user_item["content"] == [
         {"type": "input_text", "text": "Describe this image."},
         {"type": "input_image", "image_url": "data:image/png;base64,QUJDRA=="},
     ]
@@ -857,7 +860,9 @@ def test_openai_execute_tool_calls_serializes_image_attachments(
         response_id="resp_1",
         text="",
         function_calls=[
-            ToolCall(call_id="call_1", name="read_image", arguments={"path": "chart.png"})
+            ToolCall(
+                call_id="call_1", name="read_image", arguments={"path": "chart.png"}
+            )
         ],
     )
     batch = ToolExecutionBatch(

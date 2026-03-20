@@ -29,7 +29,9 @@ SPEC = ToolSpec(
 )
 
 
-def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any] | ToolOutput:
+def handle(
+    arguments: dict[str, Any], context: ToolContext
+) -> dict[str, Any] | ToolOutput:
     del context
     path_value = arguments.get("path", "")
     if not isinstance(path_value, str) or not path_value.strip():
@@ -42,6 +44,8 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any] | 
         return {"error": str(exc)}
 
     summary = {
-        "success": True,
+        "path": image.path,
+        "mime_type": image.mime_type,
+        "byte_count": image.byte_count,
     }
     return ToolOutput(result=summary, attachments=[image])

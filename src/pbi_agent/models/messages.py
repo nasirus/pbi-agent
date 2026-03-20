@@ -319,10 +319,6 @@ class UserTurnInput:
     text: str = ""
     images: list[ImageAttachment] = field(default_factory=list)
 
-    @property
-    def has_content(self) -> bool:
-        return bool(self.text.strip() or self.images)
-
 
 @dataclass(slots=True)
 class CompletedResponse:

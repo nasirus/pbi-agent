@@ -15,13 +15,15 @@ For provider-scoped settings such as API key, model, retry limits, and token lim
 
 ## Provider Matrix
 
-| Provider | API Shape | Default Endpoint | Default Model | Env Var for Key |
-| --- | --- | --- | --- | --- |
-| OpenAI | Responses API | `https://api.openai.com/v1/responses` | `gpt-5.4-2026-03-05` | `OPENAI_API_KEY` |
-| xAI | Responses API | `https://api.x.ai/v1/responses` | `grok-4-1-fast-reasoning` | `XAI_API_KEY` |
-| Google | Interactions API | `https://generativelanguage.googleapis.com/v1beta/interactions` | `gemini-3.1-flash-lite-preview` | `GEMINI_API_KEY` |
-| Anthropic | Messages API | `https://api.anthropic.com/v1/messages` | `claude-opus-4-6` | `ANTHROPIC_API_KEY` |
-| Generic | Chat Completions API | `https://openrouter.ai/api/v1/chat/completions` | none | `GENERIC_API_KEY` |
+| Provider | API Shape | Default Endpoint | Default Model | Env Var for Key | Image Input |
+| --- | --- | --- | --- | --- | --- |
+| OpenAI | Responses API | `https://api.openai.com/v1/responses` | `gpt-5.4-2026-03-05` | `OPENAI_API_KEY` | yes |
+| xAI | Responses API | `https://api.x.ai/v1/responses` | `grok-4-1-fast-reasoning` | `XAI_API_KEY` | no in this build |
+| Google | Interactions API | `https://generativelanguage.googleapis.com/v1beta/interactions` | `gemini-3.1-flash-lite-preview` | `GEMINI_API_KEY` | yes |
+| Anthropic | Messages API | `https://api.anthropic.com/v1/messages` | `claude-opus-4-6` | `ANTHROPIC_API_KEY` | yes |
+| Generic | Chat Completions API | `https://openrouter.ai/api/v1/chat/completions` | none | `GENERIC_API_KEY` | no in this build |
+
+Image input covers both explicit user attachments (`run --image`, `/image add`) and model-initiated local image inspection through the `read_image` tool.
 
 ::: warning
 `--responses-url` is only used by the OpenAI, xAI, and Google backends. Anthropic is hard-wired to `https://api.anthropic.com/v1/messages` in the current implementation, and Generic uses `--generic-api-url` instead.
@@ -41,6 +43,7 @@ The CLI also accepts provider-specific hidden aliases that map to `--api-key`: `
 | Default model | `gpt-5.4-2026-03-05` |
 | Model override | `--model` or `PBI_AGENT_MODEL` |
 | History mode | Server-side via `previous_response_id` |
+| Image input | Supported |
 
 ```bash
 export OPENAI_API_KEY="sk-..."
@@ -57,6 +60,7 @@ uv run pbi-agent --provider openai console
 | Default model | `grok-4-1-fast-reasoning` |
 | Model override | `--model` or `PBI_AGENT_MODEL` |
 | History mode | Server-side via `previous_response_id` |
+| Image input | Not enabled in this build |
 
 ```bash
 export XAI_API_KEY="xai-..."
@@ -73,6 +77,7 @@ uv run pbi-agent --provider xai run --prompt "List the report pages in this PBIP
 | Default model | `gemini-3.1-flash-lite-preview` |
 | Model override | `--model` or `PBI_AGENT_MODEL` |
 | History mode | Server-side via `previous_interaction_id` |
+| Image input | Supported |
 
 ```bash
 export GEMINI_API_KEY="AIza..."
@@ -89,6 +94,7 @@ uv run pbi-agent --provider google --model gemini-3.1-flash-lite-preview console
 | Default model | `claude-opus-4-6` |
 | Model override | `--model` or `PBI_AGENT_MODEL` |
 | History mode | Client-side full message replay |
+| Image input | Supported in live sessions; resumed sessions replay only persisted text history |
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -105,6 +111,7 @@ uv run pbi-agent --provider anthropic console
 | Default model | none; the request omits `model` when unset |
 | Model override | `--model` or `PBI_AGENT_MODEL` |
 | History mode | Client-side full message replay |
+| Image input | Not enabled in this build |
 
 ```bash
 export GENERIC_API_KEY="or-..."
