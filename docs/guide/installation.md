@@ -21,7 +21,17 @@ outline: [2, 3]
 ## Install from PyPI
 
 ```bash
-pip install pbi-agent
+uv tool install pbi-agent
+```
+
+::: warning
+If this is your first `uv tool install`, reload your shell before running `pbi-agent` or the command may not be on your `PATH` yet.
+:::
+
+To update an existing installation later, run:
+
+```bash
+uv tool upgrade pbi-agent
 ```
 
 ## Install from Source
@@ -38,7 +48,7 @@ uv sync
 uv run pbi-agent --help
 ```
 
-If you installed the package globally with `pip`, use `pbi-agent --help` instead.
+If you installed the package with `uv tool install`, you can also verify it with `pbi-agent --help`.
 
 ## Quick Start
 
