@@ -86,7 +86,8 @@ export default defineConfig({
         { text: 'Introduction', link: '/guide/' },
         { text: 'Installation', link: '/guide/installation' },
         { text: 'Providers', link: '/guide/providers' },
-        { text: 'Audit System', link: '/guide/audit' }
+        { text: 'Audit System', link: '/guide/audit' },
+        { text: 'Customization', link: '/guide/customization' }
       ],
       '/reference/': [
         { text: 'CLI Reference', link: '/reference/cli' },

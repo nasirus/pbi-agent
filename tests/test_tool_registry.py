@@ -35,4 +35,3 @@ def test_registry_exposes_expected_built_in_tools() -> None:
 def test_registry_returns_none_for_unknown_tool() -> None:
     assert registry.get_tool_handler("missing_tool") is None
     assert registry.get_tool_spec("missing_tool") is None
-

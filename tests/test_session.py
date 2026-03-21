@@ -170,7 +170,7 @@ def test_run_single_turn_executes_tool_loop_and_aggregates_usage(monkeypatch) ->
 
     monkeypatch.setattr(
         "pbi_agent.agent.session.create_provider",
-        lambda runtime_settings: provider,
+        lambda runtime_settings, **kw: provider,
     )
     monkeypatch.setattr(
         "pbi_agent.agent.session.time.monotonic",
@@ -293,7 +293,7 @@ def test_run_chat_loop_resets_welcome_and_usage_on_new_chat(monkeypatch) -> None
 
     monkeypatch.setattr(
         "pbi_agent.agent.session.create_provider",
-        lambda runtime_settings: provider,
+        lambda runtime_settings, **kw: provider,
     )
     monkeypatch.setattr(
         "pbi_agent.agent.session.time.monotonic",
@@ -351,7 +351,7 @@ def test_run_chat_loop_does_not_persist_unanswered_user_turn(monkeypatch) -> Non
 
     monkeypatch.setattr(
         "pbi_agent.agent.session.create_provider",
-        lambda runtime_settings: _FailingProvider(),
+        lambda runtime_settings, **kw: _FailingProvider(),
     )
 
     with pytest.raises(RuntimeError, match="boom"):

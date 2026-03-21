@@ -731,7 +731,10 @@ def _should_retry_rate_limit(error_payload: dict[str, Any]) -> bool:
     if not isinstance(error, dict):
         return True
     error_type = error.get("type")
-    if isinstance(error_type, str) and error_type.strip().lower() == "insufficient_quota":
+    if (
+        isinstance(error_type, str)
+        and error_type.strip().lower() == "insufficient_quota"
+    ):
         return False
     return True
 

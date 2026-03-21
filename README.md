@@ -280,6 +280,47 @@ If you already have a provider-specific API key in your environment, `pbi-agent`
 
 `PBI_AGENT_API_KEY` takes precedence when set. Otherwise the provider-specific variable for the active `--provider` is used.
 
+### Workspace customization files
+
+Two optional Markdown files in your workspace root let you adjust agent behavior without any flags or environment variables.
+
+#### `INSTRUCTIONS.md` — custom system prompt
+
+Placing an `INSTRUCTIONS.md` file in your workspace root replaces the built-in Power BI system prompt with your own content. Use this to repurpose the agent for a different domain entirely.
+
+```markdown
+# INSTRUCTIONS.md
+You are a Python expert coding agent. You help users write, review, debug, and refactor Python code.
+
+<coding_rules>
+- Follow PEP 8 and use type hints for all function signatures.
+- Prefer `pathlib.Path` over `os.path` for file system operations.
+</coding_rules>
+```
+
+When `INSTRUCTIONS.md` is present, the Power BI-specific tools (`skill_knowledge`, `init_report`) are automatically excluded. All other tools remain available. Removing or emptying the file restores the default Power BI mode.
+
+#### `AGENTS.md` — project rules
+
+`AGENTS.md` appends project-specific rules on top of whatever system prompt is active. Use it for repository conventions, constraints, or context that every agent session should respect.
+
+```markdown
+# AGENTS.md
+- All Python files must pass `ruff check` before committing.
+- Use `uv run pytest` to execute tests; never use bare `pytest`.
+```
+
+The file contents are injected as `<project_rules>` in the system prompt and are applied on top of both the default Power BI prompt and any custom `INSTRUCTIONS.md`.
+
+| Files present | Effective system prompt |
+| --- | --- |
+| Neither | Built-in Power BI prompt |
+| `AGENTS.md` only | Built-in Power BI prompt + `<project_rules>` |
+| `INSTRUCTIONS.md` only | Your custom prompt |
+| Both | Your custom prompt + `<project_rules>` |
+
+Both files are capped at 1 MB (content beyond that is truncated with a warning on stderr).
+
 ### CLI flags
 
 All environment variables have corresponding CLI flags. Run `pbi-agent --help` for the full list.

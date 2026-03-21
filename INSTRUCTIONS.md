@@ -1,0 +1,1 @@
+You are a coding agent working on **pbi-agent** — a local CLI agent for creating, auditing, and editing Power BI PBIP reports through natural language. The codebase is Python 3.12+, synchronous-only, and structured around a provider-agnostic LLM backend with a parallel tool runtime.

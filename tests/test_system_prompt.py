@@ -1,4 +1,4 @@
-"""Tests for AGENTS.md project-rules loading in system_prompt."""
+"""Tests for INSTRUCTIONS.md / AGENTS.md loading in system_prompt."""
 
 from __future__ import annotations
 
@@ -8,11 +8,12 @@ import stat
 import pytest
 
 from pbi_agent.agent.system_prompt import (
-    SYSTEM_PROMPT,
-    SUB_AGENT_SYSTEM_PROMPT,
-    _MAX_PROJECT_RULES_BYTES,
+    _DEFAULT_SYSTEM_PROMPT,
+    _MAX_FILE_BYTES,
+    get_custom_excluded_tools,
     get_sub_agent_system_prompt,
     get_system_prompt,
+    load_instructions,
     load_project_rules,
 )
 
@@ -48,23 +49,23 @@ def test_returns_none_for_whitespace_only_file(tmp_path):
 
 
 def test_truncates_large_file(tmp_path, capsys):
-    content = "A" * (_MAX_PROJECT_RULES_BYTES + 500)
+    content = "A" * (_MAX_FILE_BYTES + 500)
     (tmp_path / "AGENTS.md").write_text(content, encoding="utf-8")
     result = load_project_rules(cwd=tmp_path)
     assert result is not None
-    assert len(result) <= _MAX_PROJECT_RULES_BYTES
+    assert len(result) <= _MAX_FILE_BYTES
     assert "truncated" in capsys.readouterr().err.lower()
 
 
 def test_truncates_large_multibyte_file_by_bytes(tmp_path, capsys):
     chunk = "🙂"
-    expected_chars = _MAX_PROJECT_RULES_BYTES // len(chunk.encode("utf-8"))
+    expected_chars = _MAX_FILE_BYTES // len(chunk.encode("utf-8"))
     content = chunk * (expected_chars + 10)
     (tmp_path / "AGENTS.md").write_text(content, encoding="utf-8")
     result = load_project_rules(cwd=tmp_path)
     assert result is not None
     assert result == chunk * expected_chars
-    assert len(result.encode("utf-8")) == _MAX_PROJECT_RULES_BYTES
+    assert len(result.encode("utf-8")) == _MAX_FILE_BYTES
     assert "truncated" in capsys.readouterr().err.lower()
 
 
@@ -91,6 +92,36 @@ def test_encoding_errors_replaced(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# load_instructions – unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_instructions_returns_none_when_absent(tmp_path):
+    assert load_instructions(cwd=tmp_path) is None
+
+
+def test_instructions_returns_content_when_present(tmp_path):
+    (tmp_path / "INSTRUCTIONS.md").write_text(
+        "You are a helpful assistant.", encoding="utf-8"
+    )
+    assert load_instructions(cwd=tmp_path) == "You are a helpful assistant."
+
+
+def test_instructions_returns_none_for_empty(tmp_path):
+    (tmp_path / "INSTRUCTIONS.md").write_text("", encoding="utf-8")
+    assert load_instructions(cwd=tmp_path) is None
+
+
+def test_instructions_truncates_large_file(tmp_path, capsys):
+    content = "B" * (_MAX_FILE_BYTES + 100)
+    (tmp_path / "INSTRUCTIONS.md").write_text(content, encoding="utf-8")
+    result = load_instructions(cwd=tmp_path)
+    assert result is not None
+    assert len(result) <= _MAX_FILE_BYTES
+    assert "truncated" in capsys.readouterr().err.lower()
+
+
+# ---------------------------------------------------------------------------
 # get_system_prompt / get_sub_agent_system_prompt integration
 # ---------------------------------------------------------------------------
 
@@ -98,7 +129,7 @@ def test_encoding_errors_replaced(tmp_path):
 def test_get_system_prompt_without_agents_md(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     prompt = get_system_prompt()
-    assert prompt == SYSTEM_PROMPT
+    assert prompt == _DEFAULT_SYSTEM_PROMPT
     assert "<project_rules>" not in prompt
 
 
@@ -106,7 +137,7 @@ def test_get_system_prompt_with_agents_md(tmp_path, monkeypatch):
     (tmp_path / "AGENTS.md").write_text("Always use pytest.", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     prompt = get_system_prompt()
-    assert prompt.startswith(SYSTEM_PROMPT)
+    assert prompt.startswith(_DEFAULT_SYSTEM_PROMPT)
     assert "<project_rules>\nAlways use pytest.\n</project_rules>" in prompt
 
 
@@ -114,12 +145,65 @@ def test_get_sub_agent_system_prompt_with_agents_md(tmp_path, monkeypatch):
     (tmp_path / "AGENTS.md").write_text("Sub-agent rule.", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     prompt = get_sub_agent_system_prompt()
-    assert prompt.startswith(SUB_AGENT_SYSTEM_PROMPT)
     assert "<project_rules>\nSub-agent rule.\n</project_rules>" in prompt
 
 
 def test_get_sub_agent_system_prompt_without_agents_md(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     prompt = get_sub_agent_system_prompt()
-    assert prompt == SUB_AGENT_SYSTEM_PROMPT
     assert "<project_rules>" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# INSTRUCTIONS.md overrides the default system prompt
+# ---------------------------------------------------------------------------
+
+
+def test_get_system_prompt_uses_instructions_md(tmp_path, monkeypatch):
+    (tmp_path / "INSTRUCTIONS.md").write_text(
+        "You are a code review bot.", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    prompt = get_system_prompt()
+    assert prompt == "You are a code review bot."
+    assert "Power BI" not in prompt
+
+
+def test_instructions_md_combined_with_agents_md(tmp_path, monkeypatch):
+    (tmp_path / "INSTRUCTIONS.md").write_text(
+        "You are a code review bot.", encoding="utf-8"
+    )
+    (tmp_path / "AGENTS.md").write_text("Extra rule.", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    prompt = get_system_prompt()
+    assert prompt.startswith("You are a code review bot.")
+    assert "<project_rules>\nExtra rule.\n</project_rules>" in prompt
+    assert "Power BI" not in prompt
+
+
+def test_sub_agent_prompt_uses_instructions_md(tmp_path, monkeypatch):
+    (tmp_path / "INSTRUCTIONS.md").write_text(
+        "You are a code review bot.", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    prompt = get_sub_agent_system_prompt()
+    assert "You are a code review bot." in prompt
+    assert "<persona>" in prompt
+    assert "Power BI" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# get_custom_excluded_tools
+# ---------------------------------------------------------------------------
+
+
+def test_no_excluded_tools_without_instructions(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert get_custom_excluded_tools() == set()
+
+
+def test_skill_knowledge_excluded_with_instructions(tmp_path, monkeypatch):
+    (tmp_path / "INSTRUCTIONS.md").write_text("Custom agent.", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    excluded = get_custom_excluded_tools()
+    assert excluded == {"skill_knowledge", "init_report"}

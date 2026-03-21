@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-SYSTEM_PROMPT = """
+_DEFAULT_SYSTEM_PROMPT = """
 You are pbi-agent, a local CLI agent for creating, auditing, and editing Power BI PBIP projects.
 
 <power_bi_rules>
@@ -22,13 +22,53 @@ _SUB_AGENT_PROMPT = """
 </persona>
 """.strip()
 
-SUB_AGENT_SYSTEM_PROMPT = f"{SYSTEM_PROMPT}\n\n{_SUB_AGENT_PROMPT}"
+# Tools that are specific to the default Power BI mode and should be
+# excluded when a custom INSTRUCTIONS.md replaces the built-in prompt.
+_PBI_ONLY_TOOLS: frozenset[str] = frozenset({"skill_knowledge", "init_report"})
 
-_MAX_PROJECT_RULES_BYTES = 1_000_000  # 1 MB
+_MAX_FILE_BYTES = 1_000_000  # 1 MB
 
 
-def _warn_project_rules(message: str) -> None:
+def _warn(message: str) -> None:
     print(message, file=sys.stderr)
+
+
+def _load_file(name: str, cwd: Path | None = None) -> str | None:
+    """Read an optional Markdown file from *cwd* (default: CWD).
+
+    Returns the file content, or ``None`` when the file is absent, empty,
+    or unreadable.
+    """
+    target = (cwd or Path.cwd()) / name
+
+    try:
+        size = target.stat().st_size
+    except FileNotFoundError:
+        return None
+    except OSError:
+        _warn(f"{name} found but unreadable due to permissions.")
+        return None
+
+    if size > _MAX_FILE_BYTES:
+        _warn(f"{name} exceeds 1 MB; content will be truncated.")
+
+    try:
+        with target.open("rb") as fh:
+            raw_content = fh.read(_MAX_FILE_BYTES)
+    except OSError:
+        _warn(f"{name} found but unreadable due to permissions.")
+        return None
+
+    content = raw_content.decode("utf-8", errors="replace").strip()
+    if not content:
+        return None
+
+    return content
+
+
+def load_instructions(cwd: Path | None = None) -> str | None:
+    """Read an optional ``INSTRUCTIONS.md`` from *cwd* (default: CWD)."""
+    return _load_file("INSTRUCTIONS.md", cwd)
 
 
 def load_project_rules(cwd: Path | None = None) -> str | None:
@@ -37,31 +77,15 @@ def load_project_rules(cwd: Path | None = None) -> str | None:
     Returns the file content, or ``None`` when the file is absent, empty,
     or unreadable.
     """
-    target = (cwd or Path.cwd()) / "AGENTS.md"
+    return _load_file("AGENTS.md", cwd)
 
-    try:
-        size = target.stat().st_size
-    except FileNotFoundError:
-        return None
-    except OSError:
-        _warn_project_rules("AGENTS.md found but unreadable due to permissions.")
-        return None
 
-    if size > _MAX_PROJECT_RULES_BYTES:
-        _warn_project_rules("AGENTS.md exceeds 1 MB; content will be truncated.")
-
-    try:
-        with target.open("rb") as fh:
-            raw_content = fh.read(_MAX_PROJECT_RULES_BYTES)
-    except OSError:
-        _warn_project_rules("AGENTS.md found but unreadable due to permissions.")
-        return None
-
-    content = raw_content.decode("utf-8", errors="replace").strip()
-    if not content:
-        return None
-
-    return content
+def _resolve_base_prompt() -> str:
+    """Return the base system prompt — custom instructions or the built-in default."""
+    custom = load_instructions()
+    if custom is not None:
+        return custom
+    return _DEFAULT_SYSTEM_PROMPT
 
 
 def _append_project_rules(base_prompt: str) -> str:
@@ -73,8 +97,16 @@ def _append_project_rules(base_prompt: str) -> str:
 
 
 def get_system_prompt() -> str:
-    return _append_project_rules(SYSTEM_PROMPT)
+    return _append_project_rules(_resolve_base_prompt())
 
 
 def get_sub_agent_system_prompt() -> str:
-    return _append_project_rules(SUB_AGENT_SYSTEM_PROMPT)
+    base = _resolve_base_prompt()
+    return _append_project_rules(f"{base}\n\n{_SUB_AGENT_PROMPT}")
+
+
+def get_custom_excluded_tools() -> set[str]:
+    """Return tool names to exclude when custom instructions are active."""
+    if load_instructions() is not None:
+        return set(_PBI_ONLY_TOOLS)
+    return set()

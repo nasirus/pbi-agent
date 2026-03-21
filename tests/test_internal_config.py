@@ -134,7 +134,11 @@ def test_resolve_settings_uses_saved_anthropic_model(
     ],
 )
 def test_resolve_settings_uses_provider_specific_default_sub_agent_model(
-    monkeypatch, tmp_path: Path, provider: str, model: str, expected_sub_agent_model: str | None
+    monkeypatch,
+    tmp_path: Path,
+    provider: str,
+    model: str,
+    expected_sub_agent_model: str | None,
 ) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
     internal_config = tmp_path / "internal-config.json"

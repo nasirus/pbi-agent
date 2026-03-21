@@ -8,7 +8,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pbi_agent.agent.system_prompt import get_sub_agent_system_prompt
+from pbi_agent.agent.system_prompt import (
+    get_custom_excluded_tools,
+    get_sub_agent_system_prompt,
+)
 from pbi_agent.config import Settings
 from pbi_agent.media import load_workspace_image
 from pbi_agent.models.messages import (
@@ -84,7 +87,7 @@ def run_single_turn(
         title=_session_title_for_user_turn(user_input),
     )
 
-    provider = create_provider(settings)
+    provider = create_provider(settings, excluded_tools=get_custom_excluded_tools())
     _resume_session(
         provider=provider,
         store=store,
@@ -152,7 +155,7 @@ def run_chat_loop(
     had_tool_errors = False
     pending_image_paths: list[str] = []
 
-    provider = create_provider(settings)
+    provider = create_provider(settings, excluded_tools=get_custom_excluded_tools())
     _resume_session(
         provider=provider,
         store=store,
@@ -296,7 +299,7 @@ def run_sub_agent_task(
         provider = create_provider(
             child_settings,
             system_prompt=get_sub_agent_system_prompt(),
-            excluded_tools=SUB_AGENT_DISABLED_TOOLS,
+            excluded_tools=SUB_AGENT_DISABLED_TOOLS | get_custom_excluded_tools(),
         )
         with provider:
             _raise_if_sub_agent_timed_out(started_at)
