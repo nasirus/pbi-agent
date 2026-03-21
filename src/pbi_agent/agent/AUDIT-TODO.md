@@ -11,7 +11,7 @@
 
 - [ ] Scan project folder structure recursively
 - [ ] Identify all `.tmdl` files (tables, relationships, expressions, roles, cultures)
-- [ ] Identify report manifests (`.pbip`, `.pbir`, `.pbism`)
+- [ ] Identify report manifests (`.PBI`)
 - [ ] Identify theme JSON files, images, and custom visuals
 - [ ] Record model storage mode (Import / DirectQuery / Composite)
 - [ ] Record compatibility level from `database.tmdl`

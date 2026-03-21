@@ -52,7 +52,7 @@ TOOL_BORDER_STYLES: dict[str, str] = {
     "read-web-url": "#06B6D4",
     "python-exec": "#A855F7",
     "sub-agent": "#F59E0B",
-    "web-search": "#10B981",
+    "web-search": "#0EA5E9",
     "mixed": "#8B5CF6",
     "generic": "blue",
 }

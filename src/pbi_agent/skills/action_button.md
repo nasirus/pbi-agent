@@ -2,7 +2,7 @@
 
 Use this for implementing buttons that trigger navigation, drillthrough, bookmarks, or other linked actions.
 
-## Minimal PBIR Skeleton
+## Minimal Skeleton
 
 ```json
 {

@@ -102,7 +102,7 @@ Scan the project folder recursively. Identify and catalogue:
 - definition/roles/*.tmdl ................ RLS / OLS roles
 - definition/perspectives/*.tmdl ......... perspectives
 - definition/cultures/*.tmdl ............. translations
-- *.pbir / *.pbip ........................ report and project manifests
+- *.PBI  ................................. report and project manifests
 - Report theme JSON files, images, custom visuals
 
 Summarize what is present and what is missing.

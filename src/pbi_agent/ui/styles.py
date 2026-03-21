@@ -107,7 +107,7 @@ ToolGroup.tool-group-sub-agent {
     border-left: thick #14B8A6;
 }
 ToolGroup.tool-group-web-search {
-    border-left: thick #10B981;
+    border-left: thick #0EA5E9;
 }
 ToolGroup > CollapsibleTitle {
     padding: 1 2;
@@ -156,7 +156,7 @@ ToolItem.tool-call-sub-agent {
     background: #14B8A6 14%;
 }
 ToolItem.tool-call-web-search {
-    background: #10B981 14%;
+    background: #0EA5E9 14%;
 }
 
 /* ---- sub-agent block ---- */

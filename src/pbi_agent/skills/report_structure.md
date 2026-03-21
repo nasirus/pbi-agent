@@ -1,6 +1,6 @@
 # Report Structure
 
-Use this to create or refactor PBIR report architecture (`report.json`, `pages/*.json`, visual containers) for any domain.
+Use this to create or refactor report architecture (`report.json`, `pages/*.json`, visual containers) for any domain.
 
 ## Core Layout Pattern
 

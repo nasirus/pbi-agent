@@ -1,11 +1,11 @@
 # Table Visual
 
-Use this when creating or editing PBIR `tableEx` visuals.
+Use this when creating or editing `tableEx` visuals.
 
 ## Required Structure
 
 1. Set `visual.visualType` to `"tableEx"`.
-2. Bind fields in `visual.query.queryState.Values.projections` using exact PBIR casing: `Measure` / `Column` / `Expression` / `SourceRef` / `Property`.
+2. Bind fields in `visual.query.queryState.Values.projections` using exact casing: `Measure` / `Column` / `Expression` / `SourceRef` / `Property`.
 3. Keep `queryRef` equal to the exact semantic-model reference, for example `entityA.Name`.
 4. Give every projection a unique `nativeQueryRef` within the same visual.
 5. When multiple projected fields share the same property name across different entities, never reuse the raw property name for all `nativeQueryRef` values.

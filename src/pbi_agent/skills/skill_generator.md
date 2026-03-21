@@ -47,18 +47,6 @@ Fenced code block with language tag. Inline comments where the mistake occurred.
 <Hard constraints that must never be violated.>
 ```
 
-## Where To Save
-
-Save as `src/pbi_agent/skills/<skill_name>.md`. The loader auto-discovers all `.md` files — no code changes required.
-
-## Verification Checklist
-
-1. File exists at `src/pbi_agent/skills/<skill_name>.md`.
-2. First non-heading line is a clear "Use this when…" brief.
-3. Content is self-contained — a future session with no memory of this conversation can follow it.
-4. References exact property names, paths, or syntax — not abstract guidance.
-5. The correct pattern was verified to work during this conversation.
-
 ## Example Output
 
 For a session where `"lineChart"` was used instead of `"lineClusteredColumnComboChart"` and Y-axis fields were placed under `Values` instead of `Y`:
@@ -66,7 +54,7 @@ For a session where `"lineChart"` was used instead of `"lineClusteredColumnCombo
 ```markdown
 # Line Clustered Column Combo Chart
 
-Use this when creating a combined line and bar chart in PBIR — Power BI uses the combo visual type, not a standalone line chart.
+Use this when creating a combined line and bar chart in Power BI — Power BI uses the combo visual type, not a standalone line chart.
 
 ## Query Role Bindings
 
@@ -94,7 +82,7 @@ Use this when creating a combined line and bar chart in PBIR — Power BI uses t
 
 ## Common Mistakes
 
-- Do NOT use `"lineChart"` — not a valid PBIR visual type for combo scenarios.
+- Do NOT use `"lineChart"` — not a valid PBIP visual type for combo scenarios.
 - Do NOT place line measures under `"Y"` — use `"Y2"` for line series.
 
 ## Constraints
