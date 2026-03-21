@@ -23,6 +23,8 @@ from textual.widgets import (
     TextArea,
 )
 
+from pbi_agent.branding import rich_brand_block
+
 
 def _strip_banner_markup(text: str) -> str:
     cleaned = text
@@ -42,23 +44,7 @@ class WelcomeBanner(Static):
         reasoning_effort: str | None = None,
         single_turn_hint: str | None = None,
     ) -> None:
-        logo_rows = [
-            "              \u2588\u2588\u2588\u2588",
-            "              \u2588\u2588\u2588\u2588",
-            "        \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588",
-            "        \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588",
-            "  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588",
-            "  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588",
-        ]
-        lines = [f"[bold #F2C811]{row}[/bold #F2C811]" for row in logo_rows]
-        lines.extend(
-            [
-                "",
-                "[bold #F2C811]PBI AGENT[/bold #F2C811]",
-                "[bold]Transform data into decisions.[/bold]",
-                "",
-            ]
-        )
+        lines = [*rich_brand_block().splitlines(), ""]
 
         if interactive:
             lines.append(

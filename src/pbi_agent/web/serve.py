@@ -17,13 +17,15 @@ from pathlib import Path
 from aiohttp import web
 from textual_serve.server import Server
 
+from pbi_agent.branding import rich_brand_block
+
 _WEB_DIR = Path(__file__).resolve().parent
 _TEMPLATES_DIR = str(_WEB_DIR / "templates")
 _FAVICON_PATH = _WEB_DIR / "static" / "favicon.png"
 
 
 class _FaviconServer(Server):
-    """A ``textual-serve`` server with a custom template and favicon."""
+    """A ``textual-serve`` server with custom branding, template, and favicon."""
 
     def __init__(
         self,
@@ -48,10 +50,16 @@ class _FaviconServer(Server):
         app.router.add_get("/favicon.ico", self._handle_favicon)
         return app
 
+    async def on_startup(self, app: web.Application) -> None:
+        del app
+        self.console.print(rich_brand_block(), highlight=False)
+        self.console.print(f"Serving {self.command!r} on {self.public_url}")
+        self.console.print("\n[cyan]Press Ctrl+C to quit")
+
     async def _handle_favicon(self, _request: web.Request) -> web.FileResponse:
         return web.FileResponse(
             _FAVICON_PATH,
-            headers={"Content-Type": "image/svg+xml"},
+            headers={"Content-Type": "image/png"},
         )
 
 
