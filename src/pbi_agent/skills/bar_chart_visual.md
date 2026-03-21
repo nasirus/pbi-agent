@@ -1,6 +1,6 @@
 # Bar Chart Visual
 
-Use PBIR bar-chart patterns with `Category` + `Y` roles, selector-scoped colors, and consistent container styling.
+Use bar-chart patterns with `Category` + `Y` roles, selector-scoped colors, and consistent container styling.
 
 ## Supported Visual Types
 
@@ -52,7 +52,7 @@ Use PBIR bar-chart patterns with `Category` + `Y` roles, selector-scoped colors,
 - Hide legends when a chart has one obvious measure and label directly on bars.
 - Reuse the same border radius/width used by cards and tables on the same page.
 
-## Minimal PBIR Skeleton
+## Minimal Skeleton
 
 ```json
 {
@@ -336,7 +336,7 @@ Use PBIR bar-chart patterns with `Category` + `Y` roles, selector-scoped colors,
 
 ## Constraints
 
-- Keep PBIR field node casing exact (`Measure`, `Column`, `Expression`, `SourceRef`, `Property`).
+- Keep field node casing exact (`Measure`, `Column`, `Expression`, `SourceRef`, `Property`).
 - Keep `queryRef` aligned with projected fields.
 - In stacked/100% stacked charts, use consistent series ordering across related pages.
 - Prefer selector-scoped formatting over global formatting when multiple measures are shown.

@@ -1,6 +1,6 @@
 # Card Visual
 
-Use PBIR card patterns (`cardVisual` and `card`) with query-correct bindings and deliberate visual styling.
+Use card patterns (`cardVisual` and `card`) with query-correct bindings and deliberate visual styling.
 
 ## Visual Type Choice
 
@@ -61,7 +61,7 @@ Use PBIR card patterns (`cardVisual` and `card`) with query-correct bindings and
   - Same rounding, same border logic, same meaning per color.
 - If a card is purely a status indicator, hide value/label intentionally and rely on fill + tooltip.
 - Enable either title or categoryLabels, but not both, to avoid redundant text (prefer categoryLabels by default).
-## Minimal PBIR Skeleton
+## Minimal Skeleton
 
 ```json
 {
