@@ -37,8 +37,6 @@ features:
   ></iframe>
 </div>
 
-[Watch on YouTube](https://youtu.be/vw3RVwbILbE?si=9pbH_4ETPPIRLUqa)
-
 ## Start Here
 
 ::: tip
