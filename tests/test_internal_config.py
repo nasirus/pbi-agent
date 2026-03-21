@@ -53,6 +53,7 @@ def test_resolve_settings_uses_saved_provider_when_none_specified(
     assert settings.max_tool_workers == 6
     assert settings.max_retries == 5
     assert settings.compact_threshold == 123456
+    assert settings.sub_agent_model == "grok-4-1-fast"
 
 
 def test_resolve_settings_uses_saved_generic_api_url(
@@ -120,6 +121,55 @@ def test_resolve_settings_uses_saved_anthropic_model(
 
     assert settings.provider == "anthropic"
     assert settings.model == "claude-sonnet-4-5"
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected_sub_agent_model"),
+    [
+        ("openai", "custom-openai-main", "gpt-5.4-mini"),
+        ("xai", "custom-xai-main", "grok-4-1-fast"),
+        ("google", "custom-google-main", "gemini-3-flash-preview"),
+        ("anthropic", "custom-anthropic-main", "claude-sonnet-4-6"),
+        ("generic", "custom-generic-main", None),
+    ],
+)
+def test_resolve_settings_uses_provider_specific_default_sub_agent_model(
+    monkeypatch, tmp_path: Path, provider: str, model: str, expected_sub_agent_model: str | None
+) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    internal_config = tmp_path / "internal-config.json"
+    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
+    for name in (
+        "PBI_AGENT_PROVIDER",
+        "PBI_AGENT_API_KEY",
+        "OPENAI_API_KEY",
+        "XAI_API_KEY",
+        "GEMINI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GENERIC_API_KEY",
+        "PBI_AGENT_MODEL",
+        "PBI_AGENT_SUB_AGENT_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    save_internal_config(
+        Settings(
+            api_key=f"{provider}-saved-key",
+            provider=provider,
+            responses_url=DEFAULT_RESPONSES_URL,
+            model=model,
+            reasoning_effort="high",
+        )
+    )
+
+    parser = build_parser()
+    args = parser.parse_args(["console"])
+
+    settings = resolve_settings(args)
+
+    assert settings.provider == provider
+    assert settings.model == model
+    assert settings.sub_agent_model == expected_sub_agent_model
 
 
 def test_resolve_settings_uses_saved_sub_agent_model(

@@ -6,7 +6,7 @@ from typing import Any
 
 from pbi_agent.tools.types import ToolContext, ToolSpec
 
-_REASONING_EFFORT_VALUES = ("low", "medium", "high", "xhigh")
+_REASONING_EFFORT_VALUES = ("low", "medium", "high")
 
 SPEC = ToolSpec(
     name="sub_agent",

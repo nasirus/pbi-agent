@@ -114,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     model_group.add_argument(
         "--sub-agent-model",
         dest="sub_agent_model",
-        help="Override the sub_agent model; defaults to --model.",
+        help="Override the sub_agent model; defaults to the provider-specific sub-agent model.",
     )
     model_group.add_argument(
         "--max-tokens",

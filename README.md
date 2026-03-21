@@ -256,8 +256,8 @@ A browser interface opens at `http://localhost:8000`. Start describing what you 
 | --- | --- | --- |
 | `PBI_AGENT_API_KEY` | API key for the selected provider | -- |
 | `PBI_AGENT_PROVIDER` | LLM provider (`openai`, `xai`, `google`, `anthropic`, or `generic`) | `openai` |
-| `PBI_AGENT_MODEL` | Model override | `gpt-5.4-2026-03-05` for OpenAI, `grok-4-1-fast-reasoning` for xAI, `gemini-3.1-flash-lite-preview` for Google, `claude-opus-4-6` for Anthropic, provider default for generic |
-| `PBI_AGENT_SUB_AGENT_MODEL` | Optional model override for `sub_agent`; falls back to `PBI_AGENT_MODEL` when unset | Same as the active main model |
+| `PBI_AGENT_MODEL` | Model override | `gpt-5.4-2026-03-05` for OpenAI, `grok-4-1-fast-reasoning` for xAI, `gemini-3.1-pro-preview` for Google, `claude-opus-4-6` for Anthropic, provider default for generic |
+| `PBI_AGENT_SUB_AGENT_MODEL` | Optional model override for `sub_agent`; falls back to the provider-specific sub-agent default when unset | `gpt-5.4-mini` for OpenAI, `grok-4-1-fast` for xAI, `gemini-3-flash-preview` for Google, `claude-sonnet-4-6` for Anthropic, same as the active main model for generic |
 | `PBI_AGENT_MAX_TOKENS` | Max output tokens | `16384` |
 | `PBI_AGENT_REASONING_EFFORT` | Reasoning effort (`low`, `medium`, `high`, `xhigh`) | `xhigh` |
 | `PBI_AGENT_MAX_TOOL_WORKERS` | Parallel tool execution threads | `4` |

@@ -15,10 +15,14 @@ DEFAULT_GOOGLE_INTERACTIONS_URL = (
     "https://generativelanguage.googleapis.com/v1beta/interactions"
 )
 DEFAULT_GENERIC_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "gpt-5.4-2026-03-05"
-DEFAULT_XAI_MODEL = "grok-4-1-fast-reasoning"
-DEFAULT_GOOGLE_MODEL = "gemini-3.1-flash-lite-preview"
+DEFAULT_MODEL = "gpt-5.4"
+DEFAULT_XAI_MODEL = "grok-4.20"
+DEFAULT_GOOGLE_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-6"
+DEFAULT_SUB_AGENT_MODEL = "gpt-5.4-mini"
+DEFAULT_XAI_SUB_AGENT_MODEL = "grok-4-1-fast"
+DEFAULT_GOOGLE_SUB_AGENT_MODEL = "gemini-3-flash-preview"
+DEFAULT_ANTHROPIC_SUB_AGENT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TOKENS = 16384
 OPENAI_SERVICE_TIERS = ("auto", "default", "flex", "priority")
 PROVIDER_API_KEY_ENVS = {
@@ -144,6 +148,18 @@ def _default_model(provider: str) -> str:
     return DEFAULT_MODEL
 
 
+def _default_sub_agent_model(provider: str) -> str | None:
+    if provider == "generic":
+        return None
+    if provider == "xai":
+        return DEFAULT_XAI_SUB_AGENT_MODEL
+    if provider == "google":
+        return DEFAULT_GOOGLE_SUB_AGENT_MODEL
+    if provider == "anthropic":
+        return DEFAULT_ANTHROPIC_SUB_AGENT_MODEL
+    return DEFAULT_SUB_AGENT_MODEL
+
+
 def resolve_settings(args: argparse.Namespace) -> Settings:
     load_dotenv()
 
@@ -187,6 +203,7 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         getattr(args, "sub_agent_model", None)
         or os.getenv("PBI_AGENT_SUB_AGENT_MODEL")
         or _config_string(provider_config, "sub_agent_model")
+        or _default_sub_agent_model(provider)
     )
     max_tool_workers = args.max_tool_workers
     if max_tool_workers is None:
