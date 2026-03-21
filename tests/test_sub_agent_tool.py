@@ -245,7 +245,11 @@ def test_run_sub_agent_task_uses_child_prompt_and_aggregates_usage(
     assert parent_session_usage.sub_agent_total_tokens == 6
     assert parent_turn_usage.total_tokens == 6
     assert parent_turn_usage.sub_agent_total_tokens == 6
-    assert captured["excluded_tools"] == {"sub_agent"}
+    assert captured["excluded_tools"] == {
+        "sub_agent",
+        "skill_knowledge",
+        "init_report",
+    }
     assert "delegated sub-agent" in str(captured["system_prompt"])
     assert isinstance(captured["settings"], Settings)
     assert captured["settings"].model == expected_model
