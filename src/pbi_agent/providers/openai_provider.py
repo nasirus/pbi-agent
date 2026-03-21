@@ -33,6 +33,7 @@ from pbi_agent.tools.types import ToolContext
 from pbi_agent.ui.display_protocol import DisplayProtocol
 
 _REQUEST_TIMEOUT_SECS = 3600.0
+_RATE_LIMIT_MAX_RETRIES = 10
 _HTTP_ERROR_TYPES = {
     429: "rate_limit_error",
     500: "server_error",
@@ -216,12 +217,14 @@ class OpenAIProvider(Provider):
         }
 
         max_retries = self._settings.max_retries
+        rate_limit_max_retries = max(max_retries, _RATE_LIMIT_MAX_RETRIES)
+        retry_notice_max_retries = max_retries
         last_error: Exception | None = None
         last_error_message: str | None = None
 
-        for attempt in range(max_retries + 1):
+        for attempt in range(rate_limit_max_retries + 1):
             if attempt > 0:
-                display.retry_notice(attempt, max_retries)
+                display.retry_notice(attempt, retry_notice_max_retries)
 
             try:
                 req = urllib.request.Request(
@@ -243,19 +246,29 @@ class OpenAIProvider(Provider):
 
                 # Rate limiting
                 if exc.code == 429:
-                    if attempt >= max_retries:
+                    if not _should_retry_rate_limit(error_payload):
                         display.wait_stop()
                         raise RuntimeError(
                             _format_error_message(
-                                f"OpenAI rate limit exceeded after {max_retries + 1} attempts",
+                                "OpenAI Responses API error",
+                                error_payload,
+                            )
+                        ) from exc
+                    if attempt >= rate_limit_max_retries:
+                        display.wait_stop()
+                        raise RuntimeError(
+                            _format_error_message(
+                                "OpenAI rate limit exceeded after "
+                                f"{rate_limit_max_retries + 1} attempts",
                                 error_payload,
                             )
                         ) from exc
                     wait = _extract_retry_after(exc, attempt)
+                    retry_notice_max_retries = rate_limit_max_retries
                     display.rate_limit_notice(
                         wait_seconds=wait,
                         attempt=attempt + 1,
-                        max_retries=max_retries,
+                        max_retries=rate_limit_max_retries,
                     )
                     time.sleep(wait)
                     continue
@@ -271,6 +284,7 @@ class OpenAIProvider(Provider):
                             )
                         ) from exc
                     wait = _extract_retry_after(exc, attempt)
+                    retry_notice_max_retries = max_retries
                     display.overload_notice(
                         wait_seconds=wait,
                         attempt=attempt + 1,
@@ -286,6 +300,9 @@ class OpenAIProvider(Provider):
                         "OpenAI Responses API error",
                         error_payload,
                     )
+                    if attempt >= max_retries:
+                        break
+                    retry_notice_max_retries = max_retries
                     continue
 
                 # Client errors (4xx) -- don't retry
@@ -295,6 +312,9 @@ class OpenAIProvider(Provider):
                 ) from exc
             except urllib.error.URLError as exc:
                 last_error = exc
+                if attempt >= max_retries:
+                    break
+                retry_notice_max_retries = max_retries
                 continue
 
         display.wait_stop()
@@ -706,14 +726,24 @@ def _format_error_message(prefix: str, error_payload: dict[str, Any]) -> str:
     return f"{prefix}: {json.dumps(error_payload, sort_keys=True)}"
 
 
+def _should_retry_rate_limit(error_payload: dict[str, Any]) -> bool:
+    error = error_payload.get("error")
+    if not isinstance(error, dict):
+        return True
+    error_type = error.get("type")
+    if isinstance(error_type, str) and error_type.strip().lower() == "insufficient_quota":
+        return False
+    return True
+
+
 def _extract_retry_after(exc: urllib.error.HTTPError, attempt: int) -> float:
     try:
         retry_after = exc.headers.get("Retry-After") if exc.headers else None
         if retry_after:
-            return max(0.1, min(float(retry_after), 60.0)) + 1.0
+            return max(0.1, min(float(retry_after), 60.0))
     except (TypeError, ValueError):
         pass
-    return min(2.0 * (2**attempt), 30.0) + 1.0
+    return min(2.0 * (2**attempt), 30.0)
 
 
 def _waiting_message_for_input_items(input_items: list[dict[str, Any]]) -> str:

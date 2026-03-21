@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import urllib.request
 
+import pytest
+
 from pbi_agent.cli import build_parser
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import ToolExecutionBatch
@@ -21,7 +23,7 @@ from pbi_agent.models.messages import (
     UserTurnInput,
     WebSearchSource,
 )
-from pbi_agent.providers.openai_provider import OpenAIProvider
+from pbi_agent.providers.openai_provider import OpenAIProvider, _extract_retry_after
 from pbi_agent.tools.types import ToolResult
 
 
@@ -621,10 +623,10 @@ def test_openai_request_turn_retries_after_rate_limit_and_renders_reasoning(
 
     assert response.text == "Recovered."
     assert len(requests) == 2
-    assert waits == [1.25]
+    assert waits == [0.25]
     assert display_spy.wait_messages == ["analyzing your request..."]
-    assert display_spy.retry_notices == [(1, 1)]
-    assert display_spy.rate_limit_notices == [(1.25, 1, 1)]
+    assert display_spy.retry_notices == [(1, 10)]
+    assert display_spy.rate_limit_notices == [(0.25, 1, 10)]
     assert display_spy.thinking_calls == [
         {
             "text": "Checked the request before answering.",
@@ -637,6 +639,71 @@ def test_openai_request_turn_retries_after_rate_limit_and_renders_reasoning(
     assert display_spy.session_usage_snapshots[-1].input_tokens == 6
     assert display_spy.session_usage_snapshots[-1].cached_input_tokens == 1
     assert display_spy.session_usage_snapshots[-1].output_tokens == 4
+
+
+def test_openai_request_turn_retries_rate_limits_up_to_ten_times(
+    monkeypatch,
+    display_spy,
+    make_http_error,
+    make_http_response,
+) -> None:
+    requests: list[dict[str, object]] = []
+    waits: list[float] = []
+    response_payload = {
+        "id": "resp_retry_10",
+        "model": DEFAULT_MODEL,
+        "usage": {
+            "input_tokens": 6,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens": 4,
+            "output_tokens_details": {"reasoning_tokens": 0},
+        },
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Recovered."}],
+            },
+        ],
+    }
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        payload = request.data.decode("utf-8") if request.data else "{}"
+        requests.append(json.loads(payload))
+        if len(requests) <= 10:
+            raise make_http_error(
+                url=DEFAULT_RESPONSES_URL,
+                code=429,
+                body='{"error":{"type":"rate_limit_error","message":"slow down"}}',
+                headers={"Retry-After": "0.1"},
+            )
+        return make_http_response(response_payload)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "pbi_agent.providers.openai_provider.time.sleep",
+        lambda seconds: waits.append(seconds),
+    )
+
+    provider = OpenAIProvider(_make_settings(max_retries=0))
+    response = provider.request_turn(
+        user_message="hello",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    assert response.text == "Recovered."
+    assert len(requests) == 11
+    assert waits == [0.1] * 10
+    assert display_spy.retry_notices == [(attempt, 10) for attempt in range(1, 11)]
+    assert display_spy.rate_limit_notices == [
+        (0.1, attempt, 10) for attempt in range(1, 11)
+    ]
 
 
 def test_openai_request_turn_retries_when_api_is_overloaded(
@@ -698,11 +765,73 @@ def test_openai_request_turn_retries_when_api_is_overloaded(
 
     assert response.text == "Recovered."
     assert len(requests) == 2
-    assert waits == [1.25]
-    assert display_spy.overload_notices == [(1.25, 1, 1)]
+    assert waits == [0.25]
+    assert display_spy.overload_notices == [(0.25, 1, 1)]
     assert display_spy.rate_limit_notices == []
     assert display_spy.retry_notices == [(1, 1)]
     assert display_spy.markdown_calls == ["Recovered."]
+
+
+def test_openai_request_turn_does_not_retry_insufficient_quota(
+    monkeypatch,
+    display_spy,
+    make_http_error,
+) -> None:
+    waits: list[float] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        raise make_http_error(
+            url=DEFAULT_RESPONSES_URL,
+            code=429,
+            body=(
+                '{"error":{"type":"insufficient_quota","message":"You exceeded your '
+                'current quota, please check your plan and billing details."},'
+                '"request_id":"req_quota","status":429,"type":"error"}'
+            ),
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "pbi_agent.providers.openai_provider.time.sleep",
+        lambda seconds: waits.append(seconds),
+    )
+
+    provider = OpenAIProvider(_make_settings(max_retries=10))
+    with pytest.raises(RuntimeError, match="insufficient_quota"):
+        provider.request_turn(
+            user_message="hello",
+            display=display_spy,
+            session_usage=TokenUsage(model=DEFAULT_MODEL),
+            turn_usage=TokenUsage(model=DEFAULT_MODEL),
+        )
+
+    assert waits == []
+    assert display_spy.retry_notices == []
+    assert display_spy.rate_limit_notices == []
+    assert display_spy.wait_stop_calls == 1
+
+
+def test_extract_retry_after_uses_header_or_exponential_backoff(
+    make_http_error,
+) -> None:
+    header_error = make_http_error(
+        url=DEFAULT_RESPONSES_URL,
+        code=429,
+        headers={"Retry-After": "0.25"},
+    )
+    fallback_error = make_http_error(
+        url=DEFAULT_RESPONSES_URL,
+        code=429,
+    )
+
+    assert _extract_retry_after(header_error, 0) == 0.25
+    assert _extract_retry_after(fallback_error, 0) == 2.0
+    assert _extract_retry_after(fallback_error, 1) == 4.0
+    assert _extract_retry_after(fallback_error, 4) == 30.0
 
 
 def test_openai_request_turn_renders_intermediate_assistant_messages(
