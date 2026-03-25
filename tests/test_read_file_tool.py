@@ -147,6 +147,51 @@ def test_read_file_bounds_tabular_schema_and_preview(
     assert result["preview_truncated"] is True
 
 
+def test_read_file_samples_large_csv_summaries(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(read_file_tool, "TABULAR_SAMPLE_ROWS", 1)
+    (tmp_path / "dataset.csv").write_text(
+        "city,sales,ordered_at\nSeattle,10,2025-01-01\nPortland,20,2025-01-02\n",
+        encoding="utf-8",
+    )
+
+    result = read_file_tool.handle({"path": "dataset.csv"}, ToolContext())
+
+    assert result["shape"] == {"rows": 2, "columns": 3}
+    assert result["sampled"] is True
+    assert result["sample_rows"] == 1
+    assert "schema/stats sampled from first 1 rows" in result["summary"]
+    assert "missing values in sample" in result["summary"]
+
+
+def test_read_file_samples_large_excel_summaries(tmp_path: Path, monkeypatch) -> None:
+    pd = pytest.importorskip("pandas")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(read_file_tool, "TABULAR_SAMPLE_ROWS", 1)
+    (tmp_path / "workbook.xlsx").write_bytes(b"placeholder")
+
+    monkeypatch.setattr(
+        read_file_tool,
+        "_read_excel_sheet_metadata",
+        lambda path: [{"name": "Orders", "rows": 2, "columns": 2}],
+    )
+    monkeypatch.setattr(
+        read_file_tool,
+        "_read_excel_sheet",
+        lambda path, *, sheet_name, nrows: pd.DataFrame(
+            {"city": ["Seattle"], "sales": [10]}
+        ),
+    )
+
+    result = read_file_tool.handle({"path": "workbook.xlsx"}, ToolContext())
+
+    assert result["sheet_count"] == 1
+    assert result["sheets"][0]["shape"] == {"rows": 2, "columns": 2}
+    assert result["sheets"][0]["sampled"] is True
+    assert result["sheets"][0]["sample_rows"] == 1
+    assert "schema/stats sampled from first 1 rows" in result["sheets"][0]["summary"]
+
+
 def test_read_file_summarizes_pdf_content_and_metadata(
     tmp_path: Path, monkeypatch
 ) -> None:

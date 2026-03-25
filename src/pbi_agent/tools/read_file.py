@@ -4,10 +4,13 @@ import csv
 import io
 import math
 import numbers
+import re
+import zipfile
 from zipfile import BadZipFile
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 from pbi_agent.tools.output import bound_output
 from pbi_agent.tools.types import ToolContext, ToolSpec
@@ -21,6 +24,7 @@ MAX_READ_FILE_OUTPUT_CHARS = 12_000
 DATAFRAME_PREVIEW_ROWS = 3
 MAX_TABULAR_SCHEMA_CHARS = 8_000
 MAX_TABULAR_PREVIEW_CHARS = 2_500
+TABULAR_SAMPLE_ROWS = 5_000
 
 _TABULAR_EXTENSIONS = {
     ".csv",
@@ -148,6 +152,24 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
 
 
 def _handle_tabular_file(root: Path, target_path: Path, suffix: str) -> dict[str, Any]:
+    if suffix in {".csv", ".tsv"}:
+        separator = "," if suffix == ".csv" else "\t"
+        raw_bytes = target_path.read_bytes()
+        row_count = _count_delimited_rows(raw_bytes)
+        if row_count > TABULAR_SAMPLE_ROWS:
+            dataframe = _read_delimited_dataframe_from_bytes(
+                raw_bytes,
+                separator=separator,
+                nrows=TABULAR_SAMPLE_ROWS,
+            )
+            result = _summarize_dataframe(
+                dataframe,
+                actual_rows=row_count,
+                sampled_rows=len(dataframe),
+            )
+            result["path"] = relative_workspace_path(root, target_path)
+            return result
+
     dataframe = _read_tabular_dataframe(target_path, suffix)
     result = _summarize_dataframe(dataframe)
     result["path"] = relative_workspace_path(root, target_path)
@@ -155,6 +177,35 @@ def _handle_tabular_file(root: Path, target_path: Path, suffix: str) -> dict[str
 
 
 def _handle_excel_workbook(root: Path, target_path: Path) -> dict[str, Any]:
+    sheet_metadata = _read_excel_sheet_metadata(target_path)
+    if sheet_metadata and any(
+        meta["rows"] > TABULAR_SAMPLE_ROWS for meta in sheet_metadata
+    ):
+        sheets: list[dict[str, Any]] = []
+        for meta in sheet_metadata:
+            sample_rows = (
+                TABULAR_SAMPLE_ROWS if meta["rows"] > TABULAR_SAMPLE_ROWS else None
+            )
+            dataframe = _read_excel_sheet(
+                target_path,
+                sheet_name=meta["name"],
+                nrows=sample_rows,
+            )
+            sheet_result = _summarize_dataframe(
+                dataframe,
+                actual_rows=meta["rows"],
+                actual_columns=meta["columns"],
+                sampled_rows=len(dataframe) if sample_rows is not None else None,
+            )
+            sheet_result["name"] = meta["name"]
+            sheets.append(sheet_result)
+
+        return {
+            "path": relative_workspace_path(root, target_path),
+            "sheet_count": len(sheets),
+            "sheets": sheets,
+        }
+
     workbook = _read_excel_workbook(target_path)
     sheets: list[dict[str, Any]] = []
 
@@ -215,12 +266,20 @@ def _extract_docx_text(path: Path) -> str:
     return "\n".join(parts)
 
 
-def _summarize_dataframe(dataframe: Any) -> dict[str, Any]:
+def _summarize_dataframe(
+    dataframe: Any,
+    *,
+    actual_rows: int | None = None,
+    actual_columns: int | None = None,
+    sampled_rows: int | None = None,
+) -> dict[str, Any]:
     schema = {
         column_name: _display_dtype(dataframe[column_name])
         for column_name in dataframe.columns
     }
     rows, columns = dataframe.shape
+    reported_rows = rows if actual_rows is None else actual_rows
+    reported_columns = columns if actual_columns is None else actual_columns
     null_counts = {
         column_name: int(dataframe[column_name].isna().sum())
         for column_name in dataframe.columns
@@ -252,18 +311,22 @@ def _summarize_dataframe(dataframe: Any) -> dict[str, Any]:
 
     result: dict[str, Any] = {
         "shape": {
-            "rows": rows,
-            "columns": columns,
+            "rows": reported_rows,
+            "columns": reported_columns,
         },
         "summary": _tabular_dataset_summary(
-            rows=rows,
-            columns=columns,
+            rows=reported_rows,
+            columns=reported_columns,
             kind_by_column=kind_by_column,
             null_counts=null_counts,
+            sampled_rows=sampled_rows,
         ),
         "schema": schema_text,
         "preview": preview_text,
     }
+    if sampled_rows is not None and sampled_rows < reported_rows:
+        result["sampled"] = True
+        result["sample_rows"] = sampled_rows
     if schema_truncated:
         result["schema_truncated"] = True
     if preview_truncated:
@@ -305,24 +368,122 @@ def _read_excel_workbook(path: Path) -> dict[str, Any]:
     }
 
 
-def _read_delimited_dataframe(path: Path, *, separator: str) -> Any:
+def _read_excel_sheet(path: Path, *, sheet_name: str, nrows: int | None) -> Any:
     import pandas as pd
 
-    raw_bytes = path.read_bytes()
-    if b"\r" in raw_bytes and b"\n" not in raw_bytes:
-        raw_bytes = raw_bytes.replace(b"\r", b"\n")
-        dataframe = pd.read_csv(
-            io.BytesIO(raw_bytes),
-            sep=separator,
-            low_memory=False,
-        )
-    else:
-        dataframe = pd.read_csv(
-            path,
-            sep=separator,
-            low_memory=False,
-        )
+    dataframe = pd.read_excel(path, sheet_name=sheet_name, nrows=nrows)
     return _coerce_temporal_columns(dataframe)
+
+
+def _read_delimited_dataframe(path: Path, *, separator: str) -> Any:
+    raw_bytes = path.read_bytes()
+    return _read_delimited_dataframe_from_bytes(raw_bytes, separator=separator)
+
+
+def _read_delimited_dataframe_from_bytes(
+    raw_bytes: bytes,
+    *,
+    separator: str,
+    nrows: int | None = None,
+) -> Any:
+    import pandas as pd
+
+    normalized_bytes = _normalize_delimited_bytes(raw_bytes)
+    dataframe = pd.read_csv(
+        io.BytesIO(normalized_bytes),
+        sep=separator,
+        low_memory=False,
+        nrows=nrows,
+    )
+    return _coerce_temporal_columns(dataframe)
+
+
+def _normalize_delimited_bytes(raw_bytes: bytes) -> bytes:
+    if b"\r" in raw_bytes and b"\n" not in raw_bytes:
+        return raw_bytes.replace(b"\r", b"\n")
+    return raw_bytes
+
+
+def _count_delimited_rows(raw_bytes: bytes) -> int:
+    line_count = len(_normalize_delimited_bytes(raw_bytes).splitlines())
+    return max(line_count - 1, 0)
+
+
+def _read_excel_sheet_metadata(path: Path) -> list[dict[str, Any]]:
+    if path.suffix.lower() not in {".xlsx", ".xlsm"}:
+        return []
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+            relationships = ElementTree.fromstring(
+                archive.read("xl/_rels/workbook.xml.rels")
+            )
+            relationship_targets = {
+                element.attrib["Id"]: element.attrib["Target"]
+                for element in relationships.findall(
+                    "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
+                )
+            }
+            sheets_root = workbook.find(
+                "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}sheets"
+            )
+            if sheets_root is None:
+                return []
+
+            metadata: list[dict[str, Any]] = []
+            for sheet in sheets_root:
+                relationship_id = sheet.attrib.get(
+                    "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+                )
+                if not relationship_id:
+                    continue
+                target = relationship_targets.get(relationship_id, "")
+                if not target.startswith("worksheets/"):
+                    continue
+
+                rows, columns = _read_xlsx_sheet_dimension(archive, f"xl/{target}")
+                metadata.append(
+                    {
+                        "name": sheet.attrib.get("name", "Sheet1"),
+                        "rows": max(rows - 1, 0),
+                        "columns": columns,
+                    }
+                )
+            return metadata
+    except (BadZipFile, ElementTree.ParseError, KeyError, ValueError):
+        return []
+
+
+def _read_xlsx_sheet_dimension(
+    archive: zipfile.ZipFile, member_name: str
+) -> tuple[int, int]:
+    with archive.open(member_name) as file_handle:
+        for _event, element in ElementTree.iterparse(file_handle, events=("start",)):
+            if element.tag == (
+                "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}dimension"
+            ):
+                return _parse_excel_dimension_ref(element.attrib.get("ref", "A1"))
+            if element.tag == (
+                "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}sheetData"
+            ):
+                break
+    return (0, 0)
+
+
+def _parse_excel_dimension_ref(reference: str) -> tuple[int, int]:
+    target = reference.split(":", 1)[-1]
+    match = re.fullmatch(r"([A-Z]+)(\d+)", target)
+    if match is None:
+        raise ValueError(f"invalid worksheet dimension: {reference}")
+    return int(match.group(2)), _excel_column_letters_to_index(match.group(1))
+
+
+def _excel_column_letters_to_index(letters: str) -> int:
+    index = 0
+    for character in letters:
+        index = index * 26 + (ord(character) - ord("A") + 1)
+    return index
 
 
 def _coerce_temporal_columns(dataframe: Any) -> Any:
@@ -465,6 +626,7 @@ def _tabular_dataset_summary(
     columns: int,
     kind_by_column: dict[str, str],
     null_counts: dict[str, int],
+    sampled_rows: int | None = None,
 ) -> str:
     kind_order = ["numeric", "datetime", "categorical", "text", "boolean", "other"]
     kind_counts = {
@@ -480,9 +642,14 @@ def _tabular_dataset_summary(
     )
 
     parts = [f"{rows} rows x {columns} columns"]
+    if sampled_rows is not None and sampled_rows < rows:
+        parts.append(f"schema/stats sampled from first {sampled_rows} rows")
     if mix_parts:
         parts.append("column mix: " + ", ".join(mix_parts))
-    parts.append(f"missing values: {missing_summary}")
+    if sampled_rows is not None and sampled_rows < rows:
+        parts.append(f"missing values in sample: {missing_summary}")
+    else:
+        parts.append(f"missing values: {missing_summary}")
     return "; ".join(parts) + "."
 
 
