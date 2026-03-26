@@ -276,7 +276,7 @@ NoticeMessage {
 #send-button {
     width: auto;
     min-width: 10;
-    height: 3;
+    height: auto;
     margin: 0 5 0 0;
 }
 #send-button:disabled {

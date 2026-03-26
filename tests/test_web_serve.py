@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import pytest
 from rich.console import Console
 from aiohttp import WSMsgType
 
@@ -75,6 +76,55 @@ def test_favicon_server_process_messages_routes_paste_events() -> None:
     app_service.send_bytes.assert_not_awaited()
 
 
+def test_favicon_server_shutdown_stops_live_app_services() -> None:
+    server = _FaviconServer(command="uv run pbi-agent web")
+    app_service_one = _FakeTrackedAppService()
+    app_service_two = _FakeTrackedAppService()
+    server._app_services = {app_service_one, app_service_two}
+
+    asyncio.run(server.on_shutdown(Mock()))
+
+    app_service_one.stop.assert_awaited_once()
+    app_service_two.stop.assert_awaited_once()
+
+
+def test_pbi_app_service_force_stops_process_when_shutdown_is_cancelled() -> None:
+    async def exercise_stop() -> None:
+        download_manager = SimpleNamespace(cancel_app_downloads=AsyncMock())
+        app_service = _PBIAppService(
+            command="uv run pbi-agent web",
+            write_bytes=AsyncMock(),
+            write_str=AsyncMock(),
+            close=AsyncMock(),
+            download_manager=download_manager,
+        )
+        app_service.send_meta = AsyncMock(return_value=True)
+
+        stop_blocker: asyncio.Future[None] = asyncio.Future()
+        app_service._task = stop_blocker
+        stdin = _FakeStreamWriter()
+        process = _FakeProcess()
+        app_service._stdin = stdin
+        app_service._process = process
+
+        stop_task = asyncio.create_task(app_service.stop())
+        await asyncio.sleep(0)
+        stop_task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await stop_task
+
+        download_manager.cancel_app_downloads.assert_awaited()
+        assert app_service._stdin is None
+        assert app_service._task is None
+        assert app_service._process is None
+        assert stop_blocker.cancelled()
+        assert stdin.closed is True
+        assert process._transport.closed is True
+
+    asyncio.run(exercise_stop())
+
+
 class _FakeMessage:
     def __init__(self, envelope: list[object]) -> None:
         self.type = WSMsgType.TEXT
@@ -97,3 +147,49 @@ class _FakeWebSocket:
             return next(self._messages)
         except StopIteration as exc:
             raise StopAsyncIteration from exc
+
+
+class _FakeStreamWriter:
+    def __init__(self) -> None:
+        self.closed = False
+        self.wait_closed = AsyncMock()
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeProcess:
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self._transport = _FakeTransport(self)
+        self.terminate = Mock(side_effect=self._terminate)
+        self.kill = Mock(side_effect=self._kill)
+        self.wait = AsyncMock(side_effect=self._wait)
+
+    def _terminate(self) -> None:
+        self.returncode = 0
+
+    def _kill(self) -> None:
+        self.returncode = -9
+
+    async def _wait(self) -> int:
+        return 0 if self.returncode is None else self.returncode
+
+
+class _FakeTrackedAppService:
+    def __init__(self) -> None:
+        self.stop = AsyncMock()
+
+
+class _FakeTransport:
+    def __init__(self, process: _FakeProcess) -> None:
+        self._process = process
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+        if self._process.returncode is None:
+            self._process.returncode = 0
+
+    def is_closing(self) -> bool:
+        return self.closed

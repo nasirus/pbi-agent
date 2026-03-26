@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+from contextlib import suppress
 from pathlib import Path
 
 from aiohttp import web
@@ -32,6 +33,79 @@ _FAVICON_PATH = _WEB_DIR / "static" / "favicon.png"
 
 class _PBIAppService(AppService):
     """App service that uses the repo-owned Textual web driver."""
+
+    async def stop(self) -> None:
+        """Stop the app process, forcing cleanup if shutdown is interrupted."""
+        if self._task is None and self._process is None:
+            return
+
+        stop_task = asyncio.create_task(self._graceful_stop())
+        try:
+            await asyncio.shield(stop_task)
+        except asyncio.CancelledError:
+            stop_task.cancel()
+            await self._force_stop()
+            with suppress(asyncio.CancelledError):
+                await stop_task
+            raise
+
+    async def _graceful_stop(self) -> None:
+        if self._task is not None:
+            await self._download_manager.cancel_app_downloads(
+                app_service_id=self.app_service_id
+            )
+            await self.send_meta({"type": "quit"})
+            await self._task
+            self._task = None
+
+        await self._close_stdin()
+        await self._close_process_transport()
+
+    async def _force_stop(self) -> None:
+        await self._download_manager.cancel_app_downloads(
+            app_service_id=self.app_service_id
+        )
+
+        task = self._task
+
+        await self._close_stdin()
+        await self._close_process_transport()
+
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        self._task = None
+        self._process = None
+
+    async def _close_stdin(self) -> None:
+        stdin = self._stdin
+        self._stdin = None
+        if stdin is not None:
+            stdin.close()
+            with suppress(Exception):
+                await stdin.wait_closed()
+
+    async def _close_process_transport(self) -> None:
+        process = self._process
+        if process is None:
+            return
+
+        transport = getattr(process, "_transport", None)
+        if transport is not None and not transport.is_closing():
+            transport.close()
+
+        try:
+            await asyncio.wait_for(process.wait(), timeout=1)
+        except asyncio.TimeoutError:
+            if process.returncode is None:
+                with suppress(ProcessLookupError):
+                    process.kill()
+                with suppress(ProcessLookupError):
+                    await process.wait()
+
+        self._process = None
 
     def _build_environment(self, width: int = 80, height: int = 24) -> dict[str, str]:
         environment = dict(os.environ.copy())
@@ -70,6 +144,7 @@ class _FaviconServer(Server):
             public_url=public_url,
             templates_path=_TEMPLATES_DIR,
         )
+        self._app_services: set[_PBIAppService] = set()
 
     # ------------------------------------------------------------------
     async def _make_app(self) -> web.Application:  # type: ignore[override]
@@ -82,6 +157,13 @@ class _FaviconServer(Server):
         self.console.print(startup_panel(), highlight=False)
         self.console.print(f"  Serving on [bold]{self.public_url}[/bold]")
         self.console.print("[cyan]  Press Ctrl+C to quit[/cyan]")
+
+    async def on_shutdown(self, app: web.Application) -> None:
+        del app
+        await asyncio.gather(
+            *(asyncio.shield(app_service.stop()) for app_service in self._app_services),
+            return_exceptions=True,
+        )
 
     async def _handle_favicon(self, _request: web.Request) -> web.FileResponse:
         return web.FileResponse(
@@ -135,6 +217,7 @@ class _FaviconServer(Server):
                 download_manager=self.download_manager,
                 debug=self.debug,
             )
+            self._app_services.add(app_service)
             await app_service.start(width, height)
             try:
                 await self._process_messages(websocket, app_service)
@@ -149,6 +232,7 @@ class _FaviconServer(Server):
 
         finally:
             if app_service is not None:
+                self._app_services.discard(app_service)
                 await app_service.stop()
 
         return websocket

@@ -547,9 +547,9 @@ class ChatTextArea(TextArea):
 class ChatInput(Vertical):
     """Composite multiline input with autocomplete and chat shortcuts."""
 
-    BASE_HEIGHT = 3
+    BASE_HEIGHT = 1
     MAX_HEIGHT = 20
-    _CHROME_HEIGHT = 2
+    _CHROME_HEIGHT = 0
 
     DEFAULT_CSS = """
     ChatInput {
