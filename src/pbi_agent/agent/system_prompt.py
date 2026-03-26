@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from html import escape
 import sys
 from pathlib import Path
+
+from pbi_agent.agent.skill_discovery import discover_project_skills
 
 _DEFAULT_SYSTEM_PROMPT = """
 You are pbi-agent, a local CLI agent for creating, auditing, and editing Power BI PBIP projects.
@@ -96,13 +99,45 @@ def _append_project_rules(base_prompt: str) -> str:
     return f"{base_prompt}\n\n<project_rules>\n{rules}\n</project_rules>"
 
 
+def _append_available_skills(base_prompt: str) -> str:
+    skills = discover_project_skills()
+    if not skills:
+        return base_prompt
+
+    catalog_lines = ["<available_skills>"]
+    for skill in skills:
+        catalog_lines.extend(
+            [
+                "  <skill>",
+                f"    <name>{escape(skill.name)}</name>",
+                f"    <description>{escape(skill.description)}</description>",
+                f"    <location>{escape(str(skill.location))}</location>",
+                "  </skill>",
+            ]
+        )
+    catalog_lines.append("</available_skills>")
+    catalog = "\n".join(catalog_lines)
+
+    instructions = """
+<skill_loading_rules>
+Project skills are available for specialized tasks.
+- When a task matches a skill description, load that skill's SKILL.md with read_file before proceeding.
+- Resolve relative paths in a skill against the skill directory, which is the parent directory of SKILL.md.
+- Use read_file, list_files, and search_files to inspect referenced project-local resources as needed.
+</skill_loading_rules>
+""".strip()
+
+    return f"{base_prompt}\n\n{instructions}\n{catalog}"
+
+
 def get_system_prompt() -> str:
-    return _append_project_rules(_resolve_base_prompt())
+    return _append_available_skills(_append_project_rules(_resolve_base_prompt()))
 
 
 def get_sub_agent_system_prompt() -> str:
     base = _resolve_base_prompt()
-    return _append_project_rules(f"{base}\n\n{_SUB_AGENT_PROMPT}")
+    prompt = _append_project_rules(f"{base}\n\n{_SUB_AGENT_PROMPT}")
+    return _append_available_skills(prompt)
 
 
 def get_custom_excluded_tools() -> set[str]:
