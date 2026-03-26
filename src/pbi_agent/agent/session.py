@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 import logging
 import os
-import shlex
 import time
 from pathlib import Path
 from typing import Any
@@ -23,7 +22,7 @@ from pbi_agent.models.messages import (
 from pbi_agent.providers import create_provider
 from pbi_agent.providers.capabilities import provider_supports_images
 from pbi_agent.session_store import SessionStore
-from pbi_agent.ui.display_protocol import DisplayProtocol
+from pbi_agent.ui.display_protocol import DisplayProtocol, QueuedInput
 
 _log = logging.getLogger(__name__)
 
@@ -153,8 +152,6 @@ def run_chat_loop(
 
     session_usage = _reset_session()
     had_tool_errors = False
-    pending_image_paths: list[str] = []
-
     provider = create_provider(settings, excluded_tools=get_custom_excluded_tools())
     _resume_session(
         provider=provider,
@@ -166,7 +163,13 @@ def run_chat_loop(
 
     with provider:
         while True:
-            user_input = display.user_prompt().strip()
+            queued_input = display.user_prompt()
+            image_paths: list[str] = []
+            if isinstance(queued_input, QueuedInput):
+                user_input = queued_input.text.strip()
+                image_paths = queued_input.image_paths
+            else:
+                user_input = queued_input.strip()
             if user_input == NEW_CHAT_SENTINEL:
                 provider.reset_conversation()
                 session_usage = _reset_session(clear_display=True)
@@ -192,19 +195,12 @@ def run_chat_loop(
                 continue
             if user_input.lower() in {"exit", "quit"}:
                 break
-            if _handle_image_command(
-                user_input,
-                pending_image_paths=pending_image_paths,
-                settings=settings,
-                display=display,
-            ):
-                continue
-            if not user_input and not pending_image_paths:
+            if not user_input and not image_paths:
                 continue
 
             turn_input = _build_user_turn_input(
                 text=user_input,
-                image_paths=pending_image_paths,
+                image_paths=image_paths,
                 settings=settings,
             )
 
@@ -253,7 +249,6 @@ def run_chat_loop(
                 store, session_id, response.response_id, session_usage
             )
             had_tool_errors = had_tool_errors or loop_had_errors
-            pending_image_paths.clear()
             elapsed = time.monotonic() - turn_start
             display.turn_usage(turn_usage, elapsed)
             display.session_usage(session_usage)
@@ -627,76 +622,3 @@ def _user_turn_history_text(user_input: UserTurnInput) -> str:
 def _session_title_for_user_turn(user_input: UserTurnInput) -> str:
     return _user_turn_history_text(user_input)[:80]
 
-
-def _handle_image_command(
-    raw_input: str,
-    *,
-    pending_image_paths: list[str],
-    settings: Settings,
-    display: DisplayProtocol,
-) -> bool:
-    stripped = raw_input.strip()
-    if not stripped.startswith("/image"):
-        return False
-
-    try:
-        parts = shlex.split(stripped)
-    except ValueError as exc:
-        display.error(f"Invalid /image command: {exc}")
-        return True
-
-    if len(parts) < 2:
-        display.render_markdown(
-            "Image commands: `/image add <path> [more paths]`, `/image list`, `/image clear`."
-        )
-        return True
-
-    action = parts[1].lower()
-    if action == "list":
-        if pending_image_paths:
-            display.render_markdown(
-                "Staged images: "
-                + ", ".join(f"`{path}`" for path in pending_image_paths)
-            )
-        else:
-            display.render_markdown("No staged images.")
-        return True
-
-    if action == "clear":
-        pending_image_paths.clear()
-        display.render_markdown("Cleared staged images.")
-        return True
-
-    if action != "add":
-        display.error("Unsupported /image command. Use add, list, or clear.")
-        return True
-
-    if not provider_supports_images(settings.provider):
-        display.error(
-            f"Provider '{settings.provider}' does not support image inputs in this build."
-        )
-        return True
-
-    if len(parts) < 3:
-        display.error("Usage: /image add <path> [more paths]")
-        return True
-
-    root = Path.cwd().resolve()
-    added_paths: list[str] = []
-    for path in parts[2:]:
-        try:
-            image = load_workspace_image(root, path)
-        except ValueError as exc:
-            display.error(str(exc))
-            return True
-        if image.path not in pending_image_paths:
-            pending_image_paths.append(image.path)
-            added_paths.append(image.path)
-
-    if added_paths:
-        display.render_markdown(
-            "Staged images: " + ", ".join(f"`{path}`" for path in added_paths)
-        )
-    else:
-        display.render_markdown("All requested images were already staged.")
-    return True

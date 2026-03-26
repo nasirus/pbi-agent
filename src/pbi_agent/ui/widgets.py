@@ -768,6 +768,8 @@ class ChatInput(Vertical):
     def watch_disabled(self, disabled: bool) -> None:
         if self._text_area is not None:
             self._text_area.disabled = disabled
+            if not disabled and self._file_controller is not None:
+                self._file_controller.refresh_cache()
             if disabled and self._completion_manager is not None:
                 self._completion_manager.reset()
 

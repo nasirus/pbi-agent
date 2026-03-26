@@ -32,11 +32,6 @@ COMMANDS: tuple[SlashCommand, ...] = (
         hidden_keywords="exit close",
         local_only=True,
     ),
-    SlashCommand(
-        name="/image",
-        description="Manage staged images (/image add|list|clear)",
-        hidden_keywords="attachments pictures",
-    ),
 )
 
 

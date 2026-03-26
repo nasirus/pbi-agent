@@ -16,10 +16,11 @@ from textual.widgets import Footer
 
 from pbi_agent.models.messages import TokenUsage
 from pbi_agent.agent.error_formatting import format_user_facing_error
+from pbi_agent.providers.capabilities import provider_supports_images
 from pbi_agent.ui.display import Display
 from pbi_agent.ui.command_registry import LOCAL_COMMANDS, normalize_command_name
 from pbi_agent.ui.formatting import format_session_subtitle_parts
-from pbi_agent.ui.input_mentions import expand_file_mentions
+from pbi_agent.ui.input_mentions import expand_input_mentions
 from pbi_agent.ui.styles import CHAT_APP_CSS
 from pbi_agent.ui.widgets import (
     AssistantMarkdown,
@@ -354,15 +355,21 @@ class ChatApp(App):
         self.disable_input()
         self.add_user_message(value)
         submitted_value = value
+        image_paths: list[str] = []
         if not value.startswith("/"):
-            submitted_value, warnings = expand_file_mentions(
+            submitted_value, image_paths, warnings = expand_input_mentions(
                 value,
                 root=Path.cwd().resolve(),
             )
+            if image_paths and not provider_supports_images(self._settings.provider):
+                warnings.append(
+                    "Image mentions are not supported by the current provider."
+                )
+                image_paths = []
             for warning in warnings:
                 self.notify(warning, severity="warning", timeout=4)
         if self._bridge is not None:
-            self._bridge.submit_input(submitted_value)
+            self._bridge.submit_input(submitted_value, image_paths=image_paths or None)
 
     @on(ChatInput.Submitted, "#user-input")
     async def handle_input_submitted(self, event: ChatInput.Submitted) -> None:
@@ -396,8 +403,7 @@ class ChatApp(App):
             "### Commands\n"
             "- `/help` Show this help\n"
             "- `/clear` Clear chat and start a new session\n"
-            "- `/quit` Quit the app\n"
-            "- `/image add|list|clear` Manage staged image inputs\n\n"
+            "- `/quit` Quit the app\n\n"
             "### Shortcuts\n"
             "- `Enter` send message\n"
             "- `Ctrl+Enter`, `Alt+Enter`, `Shift+Enter` insert newline\n"
@@ -406,7 +412,7 @@ class ChatApp(App):
             "- `Ctrl+B` toggle sessions sidebar\n"
             "- `Ctrl+Q` quit\n\n"
             "### Input Features\n"
-            "- Type `@` to autocomplete workspace files and attach their content to the prompt\n"
+            "- Type `@` to autocomplete workspace files; text files are inlined and supported image files are attached\n"
             "- Type `/` to autocomplete local slash commands"
         )
 

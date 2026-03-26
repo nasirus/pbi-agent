@@ -75,7 +75,13 @@ class SlashCommandController:
 
     @staticmethod
     def can_handle(text: str, cursor_index: int) -> bool:
-        return cursor_index > 0 and text.startswith("/")
+        if cursor_index <= 0 or cursor_index > len(text) or not text.startswith("/"):
+            return False
+        command_end = next(
+            (index for index, char in enumerate(text) if char.isspace()),
+            len(text),
+        )
+        return cursor_index <= command_end
 
     def update_commands(self, commands: list[tuple[str, str, str]]) -> None:
         self._commands = commands
@@ -258,7 +264,8 @@ class FuzzyFileController:
         for path in matches:
             suffix = Path(path).suffix.lower()
             type_hint = suffix[1:] if suffix else "file"
-            suggestions.append((f"@{path}", type_hint))
+            escaped_path = path.replace(" ", "\\ ")
+            suggestions.append((f"@{escaped_path}", type_hint))
         return suggestions
 
     def on_key(

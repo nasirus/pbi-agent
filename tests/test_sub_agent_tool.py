@@ -81,8 +81,10 @@ class _ChildDisplay:
     def request_shutdown(self) -> None:
         return None
 
-    def submit_input(self, value: str) -> None:
-        del value
+    def submit_input(
+        self, value: str, *, image_paths: list[str] | None = None
+    ) -> None:
+        del value, image_paths
 
     def request_new_chat(self) -> None:
         return None

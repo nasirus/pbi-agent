@@ -15,15 +15,22 @@ class ChatInputApp(App[None]):
 
     submitted_values: list[str]
 
-    def __init__(self, *, workspace_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        workspace_root: Path | None = None,
+        slash_commands: list[tuple[str, str, str]] | None = None,
+    ) -> None:
         super().__init__()
         self.submitted_values = []
         self.workspace_root = workspace_root
+        self.slash_commands = slash_commands
 
     def compose(self) -> ComposeResult:
         yield ChatInput(
             id="ci",
             workspace_root=str(self.workspace_root) if self.workspace_root else None,
+            slash_commands=self.slash_commands,
         )
 
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
@@ -80,6 +87,26 @@ async def test_slash_command_enter_accepts_completion_and_submits() -> None:
 
 
 @pytest.mark.asyncio
+async def test_multi_word_slash_command_submits_without_overwriting_args() -> None:
+    app = ChatInputApp(
+        slash_commands=[
+            ("/deploy", "Deploy the current artifact", "release ship"),
+        ]
+    )
+    async with app.run_test() as pilot:
+        ci = app.query_one("#ci", ChatInput)
+        ci.insert("/deploy run foo")
+        await pilot.pause()
+
+        assert ci._current_suggestions == []
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.submitted_values == ["/deploy run foo"]
+
+
+@pytest.mark.asyncio
 async def test_file_mention_tab_completes_without_submit(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("print('hello')\n", encoding="utf-8")
     (tmp_path / "notes.md").write_text("# Notes\n", encoding="utf-8")
@@ -97,3 +124,50 @@ async def test_file_mention_tab_completes_without_submit(tmp_path: Path) -> None
 
         assert ci.text == "@main.py "
         assert app.submitted_values == []
+
+
+@pytest.mark.asyncio
+async def test_file_mention_tab_escapes_spaces(tmp_path: Path) -> None:
+    (tmp_path / "my notes.txt").write_text("hello\n", encoding="utf-8")
+
+    app = ChatInputApp(workspace_root=tmp_path)
+    async with app.run_test() as pilot:
+        ci = app.query_one("#ci", ChatInput)
+        ci.insert("@my")
+        await pilot.pause()
+
+        assert any(
+            label == r"@my\ notes.txt" for label, _ in ci._current_suggestions
+        )
+
+        await pilot.press("tab")
+        await pilot.pause()
+
+        assert ci.text == r"@my\ notes.txt "
+
+
+@pytest.mark.asyncio
+async def test_file_completion_cache_refreshes_when_input_reenabled(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "main.py").write_text("print('hello')\n", encoding="utf-8")
+
+    app = ChatInputApp(workspace_root=tmp_path)
+    async with app.run_test() as pilot:
+        ci = app.query_one("#ci", ChatInput)
+        ci.insert("@ma")
+        await pilot.pause()
+
+        assert any(label == "@main.py" for label, _ in ci._current_suggestions)
+
+        (tmp_path / "later.py").write_text("print('later')\n", encoding="utf-8")
+        ci.disabled = True
+        await pilot.pause()
+        ci.disabled = False
+        await pilot.pause()
+
+        ci.clear()
+        ci.insert("@la")
+        await pilot.pause()
+
+        assert any(label == "@later.py" for label, _ in ci._current_suggestions)

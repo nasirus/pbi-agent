@@ -61,6 +61,30 @@ async def test_submit_expands_file_mentions_before_bridge_submit(
 
         bridge.submit_input.assert_called_once()
         submitted = bridge.submit_input.call_args.args[0]
-        assert "Check @notes.txt" in submitted
+        assert "@notes.txt" not in submitted
+        assert submitted.startswith("Check")
         assert "## Referenced Files" in submitted
         assert "hello from file" in submitted
+
+
+@pytest.mark.asyncio
+async def test_submit_auto_stages_image_mentions_before_bridge_submit(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ChatApp, "_run_session", lambda self: None)
+    app = ChatApp(settings=Settings(api_key="test-key", model="gpt-5.4-2026-03-05"))
+    target = tmp_path / "chart.png"
+    target.write_bytes(b"fake-png")
+
+    async with app.run_test() as pilot:
+        bridge = MagicMock()
+        app._bridge = bridge
+
+        monkeypatch.setattr("pbi_agent.ui.app.Path.cwd", lambda: tmp_path)
+        await app._submit_user_message("Check @chart.png extract text")
+        await pilot.pause()
+
+        bridge.submit_input.assert_called_once_with(
+            "Check extract text",
+            image_paths=["chart.png"],
+        )
