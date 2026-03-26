@@ -332,7 +332,7 @@ class CompletionPopup(VerticalScroll):
         display: none;
         height: auto;
         max-height: 8;
-        border: tall $primary;
+        border: round $primary;
         background: $surface;
         margin: 0 0 1 0;
     }
@@ -556,7 +556,7 @@ class ChatInput(Vertical):
         height: auto;
         min-height: 3;
         max-height: 20;
-        border: tall $primary;
+        border: round $primary;
         background: $surface;
     }
 

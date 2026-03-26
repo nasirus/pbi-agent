@@ -12,7 +12,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Button, Footer
+from textual.widgets import Footer
 
 from pbi_agent.models.messages import TokenUsage
 from pbi_agent.agent.error_formatting import format_user_facing_error
@@ -94,18 +94,14 @@ class ChatApp(App):
             ),
             id="chat-body",
         )
-        yield Horizontal(
-            ChatInput(
-                workspace_root=str(Path.cwd().resolve()),
-                placeholder=(
-                    "Type your message\u2026  "
-                    "(Enter: send, Ctrl/Alt/Shift+Enter: newline, Ctrl+Q: quit)"
-                ),
-                id="user-input",
-                disabled=True,
+        yield ChatInput(
+            workspace_root=str(Path.cwd().resolve()),
+            placeholder=(
+                "Type your message\u2026  "
+                "(Enter: send, Ctrl/Alt/Shift+Enter: newline, Ctrl+Q: quit)"
             ),
-            Button("Send", id="send-button", variant="primary", disabled=True),
-            id="input-row",
+            id="user-input",
+            disabled=True,
         )
         yield Footer()
 
@@ -127,9 +123,6 @@ class ChatApp(App):
     def _chat_input(self) -> ChatInput:
         return self.query_one("#user-input", ChatInput)
 
-    def _send_button(self) -> Button:
-        return self.query_one("#send-button", Button)
-
     def _scroll_chat_end(self) -> None:
         self._chat_log().scroll_end(animate=False)
 
@@ -141,9 +134,7 @@ class ChatApp(App):
 
     def _set_input_enabled(self, enabled: bool) -> None:
         inp = self._chat_input()
-        send_btn = self._send_button()
         inp.disabled = not enabled
-        send_btn.disabled = not enabled
         if enabled:
             inp.focus_input()
 
@@ -376,10 +367,6 @@ class ChatApp(App):
     @on(ChatInput.Submitted, "#user-input")
     async def handle_input_submitted(self, event: ChatInput.Submitted) -> None:
         await self._submit_user_message(event.value)
-
-    @on(Button.Pressed, "#send-button")
-    async def handle_send_button_pressed(self, _: Button.Pressed) -> None:
-        await self._submit_user_message(self._chat_input().text)
 
     async def _handle_local_command(self, value: str) -> bool:
         command = normalize_command_name(value)

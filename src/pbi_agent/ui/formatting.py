@@ -60,12 +60,32 @@ TOOL_BORDER_STYLES: dict[str, str] = {
 REDACTED_THINKING_NOTICE = "[dim]Some thinking was encrypted for safety reasons.[/dim]"
 _MARKDOWN_DECORATION_RE = re.compile(r"[*_`~]+")
 _ELLIPSIS_ONLY_RE = re.compile(r"^[.\u2026\s]+$")
+_PATH_SEPARATOR_RE = re.compile(r"[\\/]+")
 
 
 def shorten(text: str, limit: int = 80) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1] + "\u2026"
+
+
+def format_informal_path(path: str | Path, *, levels: int = 2) -> str:
+    """Return a compact path label using the last ``levels`` segments."""
+    raw = str(path).strip()
+    if not raw:
+        return "."
+    if raw in {".", "./", ".\\"}:
+        return "."
+    if raw in {"/", "\\"}:
+        return "/"
+
+    normalized = raw.replace("\\", "/")
+    parts = [part for part in _PATH_SEPARATOR_RE.split(normalized) if part and part != "."]
+    if not parts:
+        return "/" if normalized.startswith("/") else "."
+    if len(parts) == 1 and parts[0].endswith(":") and normalized.endswith("/"):
+        return f"{parts[0]}/"
+    return "/".join(parts[-levels:])
 
 
 def compact_json(value: Any) -> str:
@@ -221,7 +241,7 @@ def format_session_subtitle_parts(
     elif reasoning_effort:
         parts.append(reasoning_effort)
     parts.append(f"v{__version__}")
-    parts.append(cwd.name or str(cwd))
+    parts.append(format_informal_path(cwd))
     tokens = usage.total_tokens
     cost = usage.estimated_cost_usd
     if usage.sub_agent_total_tokens:
@@ -329,7 +349,7 @@ def format_shell_tool_item(
         first_line = f"[dim]$[/dim] {cmd_text}  {status}"
     lines = [
         first_line,
-        f"[dim]wd:[/dim] {escape_markup_text(str(working_directory))}  "
+        f"[dim]wd:[/dim] {escape_markup_text(format_informal_path(working_directory))}  "
         f"[dim]timeout_ms:[/dim] {escape_markup_text(str(timeout_ms))}",
     ]
     _append_verbose_call_id(lines, call_id, verbose)
@@ -347,7 +367,9 @@ def format_patch_tool_item(
     diff: str = "",
     shorten_path: bool = False,
 ) -> str:
-    display_path = shorten(path, 96) if shorten_path else path
+    display_path = format_informal_path(path)
+    if shorten_path:
+        display_path = shorten(display_path, 96)
     lines = [
         f"{escape_markup_text(operation)} "
         f"[bold]{escape_markup_text(display_path)}[/bold]  {status}",
@@ -388,7 +410,7 @@ def format_init_report_item(
     call_id: str = "",
     force: bool = False,
 ) -> str:
-    lines = [f"[bold]{escape_markup_text(dest)}[/bold]  {status}"]
+    lines = [f"[bold]{escape_markup_text(format_informal_path(dest))}[/bold]  {status}"]
     if force:
         lines.append("[dim]force:[/dim] true")
     _append_verbose_call_id(lines, call_id, verbose)
@@ -409,7 +431,7 @@ def format_python_exec_item(
         (line.strip() for line in code.splitlines() if line.strip()), "<empty>"
     )
     flags: list[str] = [
-        f"[dim]wd:[/dim] {escape_markup_text(str(working_directory))}",
+        f"[dim]wd:[/dim] {escape_markup_text(format_informal_path(working_directory))}",
         f"[dim]timeout:[/dim] {escape_markup_text(str(timeout_seconds))}s",
     ]
     if capture_result:
@@ -468,7 +490,7 @@ def format_list_files_item(
     flags.append(f"max={max_entries}")
     flag_str = "  ".join(f"[dim]{f}[/dim]" for f in flags)
     lines = [
-        f"[#818CF8]\u2630[/#818CF8] [bold]{escape_markup_text(shorten(path, 96))}[/bold]  {status}",
+        f"[#818CF8]\u2630[/#818CF8] [bold]{escape_markup_text(shorten(format_informal_path(path), 96))}[/bold]  {status}",
         flag_str,
     ]
     _append_verbose_call_id(lines, call_id, verbose)
@@ -489,7 +511,7 @@ def format_search_files_item(
     mode = "[dim]regex[/dim]" if regex else "[dim]literal[/dim]"
     lines = [
         f"[#EC4899]\u2315[/#EC4899] [bold]{escape_markup_text(shorten(pattern, 80))}[/bold]  {mode}  {status}",
-        f"[dim]path:[/dim] {escape_markup_text(shorten(path, 60))}  [dim]max:[/dim] {max_matches}",
+        f"[dim]path:[/dim] {escape_markup_text(shorten(format_informal_path(path), 60))}  [dim]max:[/dim] {max_matches}",
     ]
     if glob_pattern:
         lines.append(
@@ -512,7 +534,7 @@ def format_read_file_item(
     normalized_start = _safe_positive_int(start_line, default=1)
     normalized_max = _safe_positive_int(max_lines, default=200)
     lines = [
-        f"[#EAB308]\u2610[/#EAB308] [bold]{escape_markup_text(shorten(path, 96))}[/bold]  {status}",
+        f"[#EAB308]\u2610[/#EAB308] [bold]{escape_markup_text(shorten(format_informal_path(path), 96))}[/bold]  {status}",
         f"[dim]lines:[/dim] {normalized_start}\u2013{normalized_start + normalized_max - 1}"
         f"  [dim]encoding:[/dim] {escape_markup_text(encoding)}",
     ]

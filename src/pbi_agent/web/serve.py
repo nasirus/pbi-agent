@@ -150,6 +150,7 @@ class _FaviconServer(Server):
     async def _make_app(self) -> web.Application:  # type: ignore[override]
         app = await super()._make_app()
         app.router.add_get("/favicon.ico", self._handle_favicon)
+        app.router.add_get("/logo.png", self._handle_logo)
         return app
 
     async def on_startup(self, app: web.Application) -> None:
@@ -169,6 +170,12 @@ class _FaviconServer(Server):
         return web.FileResponse(
             _FAVICON_PATH,
             headers={"Content-Type": "image/png"},
+        )
+
+    async def _handle_logo(self, _request: web.Request) -> web.FileResponse:
+        return web.FileResponse(
+            _FAVICON_PATH,
+            headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"},
         )
 
     async def _process_messages(
