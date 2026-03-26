@@ -131,6 +131,7 @@ def test_get_system_prompt_without_agents_md(tmp_path, monkeypatch):
     prompt = get_system_prompt()
     assert prompt == _DEFAULT_SYSTEM_PROMPT
     assert "<project_rules>" not in prompt
+    assert "<available_skills>" not in prompt
 
 
 def test_get_system_prompt_with_agents_md(tmp_path, monkeypatch):
@@ -152,6 +153,52 @@ def test_get_sub_agent_system_prompt_without_agents_md(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     prompt = get_sub_agent_system_prompt()
     assert "<project_rules>" not in prompt
+    assert "<available_skills>" not in prompt
+
+
+def test_get_system_prompt_with_project_skills(tmp_path, monkeypatch):
+    skill_dir = tmp_path / ".agents" / "skills" / "code-review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: code-review\n"
+        "description: Review code changes before implementation.\n"
+        "---\n\n# Code Review\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    prompt = get_system_prompt()
+
+    assert prompt.startswith(_DEFAULT_SYSTEM_PROMPT)
+    assert "<available_skills>" in prompt
+    assert "<name>code-review</name>" in prompt
+    assert (
+        "<description>Review code changes before implementation.</description>"
+        in prompt
+    )
+    assert f"<location>{skill_dir.joinpath('SKILL.md').resolve()}</location>" in prompt
+    assert "load that skill's SKILL.md with read_file" in prompt
+
+
+def test_get_sub_agent_system_prompt_with_project_skills(tmp_path, monkeypatch):
+    skill_dir = tmp_path / ".agents" / "skills" / "report-audit"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: report-audit\n"
+        "description: Audit report structure and conventions.\n"
+        "---\n\n# Report Audit\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    prompt = get_sub_agent_system_prompt()
+
+    assert "<persona>" in prompt
+    assert "<available_skills>" in prompt
+    assert "<name>report-audit</name>" in prompt
+    assert "read_file, list_files, and search_files" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +225,29 @@ def test_instructions_md_combined_with_agents_md(tmp_path, monkeypatch):
     prompt = get_system_prompt()
     assert prompt.startswith("You are a code review bot.")
     assert "<project_rules>\nExtra rule.\n</project_rules>" in prompt
+    assert "Power BI" not in prompt
+
+
+def test_instructions_md_still_gets_skill_catalog(tmp_path, monkeypatch):
+    (tmp_path / "INSTRUCTIONS.md").write_text(
+        "You are a code review bot.", encoding="utf-8"
+    )
+    skill_dir = tmp_path / ".agents" / "skills" / "repo-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: repo-skill\n"
+        "description: Handle repository-specific workflows.\n"
+        "---\n\n# Repo Skill\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    prompt = get_system_prompt()
+
+    assert prompt.startswith("You are a code review bot.")
+    assert "<available_skills>" in prompt
+    assert "<name>repo-skill</name>" in prompt
     assert "Power BI" not in prompt
 
 

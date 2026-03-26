@@ -147,6 +147,27 @@ List directory contents for general workspace discovery, or narrow results by gl
 }
 ```
 
+## `read_file`
+
+Read workspace files safely, with line-range support for text files, compact summaries for tabular files, and extraction for formats such as PDF and DOCX.
+
+`read_file` is also the activation path for project-local `SKILL.md` files discovered from `.agents/skills/`. When the prompt catalog lists a skill, the model should load that `SKILL.md` with `read_file` first, then inspect any referenced project-local resources with `read_file`, `list_files`, or `search_files`.
+
+| Parameter | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `path` | `string` | yes | File path relative to the workspace root, or absolute path that still resolves within the workspace. |
+| `start_line` | `integer` | no | 1-based starting line for text files. Defaults to `1`. |
+| `max_lines` | `integer` | no | Maximum text lines to return. Defaults to `200`. |
+| `encoding` | `string` | no | Text encoding override. Defaults to automatic detection. |
+
+```json
+{
+  "path": ".agents/skills/repo-skill/SKILL.md",
+  "start_line": 1,
+  "max_lines": 200
+}
+```
+
 ## `read_image`
 
 Read a local image file and attach it to the model context while returning a compact metadata summary.

@@ -79,6 +79,27 @@ The file contents are wrapped in `<project_rules>` tags and appended to the syst
 `AGENTS.md` is checked into version control alongside your project. It is the right place for team conventions that every contributor and every agent session should follow.
 :::
 
+## Project skill files
+
+`pbi-agent` also discovers project-local Agent Skills and advertises them to the model through the system prompt. This is separate from the built-in Power BI `skill_knowledge` tool.
+
+Supported roots:
+
+- `.agents/skills/<skill-name>/SKILL.md`
+
+Each `SKILL.md` must include YAML frontmatter with at least:
+
+```yaml
+---
+name: repo-skill
+description: Use this skill when the task matches this repository-specific workflow.
+---
+```
+
+At runtime, discovered skills are appended to the active system prompt as an `<available_skills>` catalog with the absolute `SKILL.md` path. The model is expected to load a relevant skill itself with `read_file` before proceeding, then use `read_file`, `list_files`, and `search_files` to inspect referenced project-local resources as needed.
+
+This v1 implementation is project-only. User-level skill directories are intentionally not scanned, and any files referenced by a project skill must remain inside the workspace so the existing file tools can access them safely.
+
 ## Using both files together
 
 The two files compose cleanly:
@@ -89,6 +110,8 @@ The two files compose cleanly:
 | `AGENTS.md` only | Built-in Power BI prompt + `<project_rules>` |
 | `INSTRUCTIONS.md` only | Your custom prompt |
 | Both | Your custom prompt + `<project_rules>` |
+
+If project skill files are present, their catalog is appended after the active prompt content in all of the cases above, including custom `INSTRUCTIONS.md`.
 
 ## File constraints
 
