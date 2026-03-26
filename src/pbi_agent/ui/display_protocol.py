@@ -17,6 +17,12 @@ class PendingToolGroupItem:
 
 
 @dataclass(slots=True)
+class QueuedInput:
+    text: str
+    image_paths: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class PendingToolGroup:
     label: str = ""
     classes: str = ""
@@ -60,7 +66,9 @@ class DisplayProtocol(Protocol):
 
     def request_shutdown(self) -> None: ...
 
-    def submit_input(self, value: str) -> None: ...
+    def submit_input(
+        self, value: str, *, image_paths: list[str] | None = None
+    ) -> None: ...
 
     def request_new_chat(self) -> None: ...
 
@@ -85,7 +93,7 @@ class DisplayProtocol(Protocol):
         single_turn_hint: str | None = None,
     ) -> None: ...
 
-    def user_prompt(self) -> str: ...
+    def user_prompt(self) -> str | QueuedInput: ...
 
     def assistant_start(self) -> None: ...
 
@@ -177,4 +185,9 @@ class DisplayProtocol(Protocol):
     def replay_history(self, messages: list[MessageRecord]) -> None: ...
 
 
-__all__ = ["DisplayProtocol", "PendingToolGroup", "PendingToolGroupItem"]
+__all__ = [
+    "DisplayProtocol",
+    "PendingToolGroup",
+    "PendingToolGroupItem",
+    "QueuedInput",
+]

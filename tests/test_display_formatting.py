@@ -9,6 +9,7 @@ from pbi_agent.agent.session import NEW_CHAT_SENTINEL
 from pbi_agent.models.messages import TokenUsage
 from pbi_agent.ui.display import Display
 from pbi_agent.ui.formatting import (
+    format_informal_path,
     format_generic_function_item,
     format_init_report_item,
     format_skill_knowledge_item,
@@ -75,6 +76,7 @@ class TestFormatInitReportItem:
         result = format_init_report_item(
             "/tmp/report", status="[green]done[/green]", force=True
         )
+        assert "tmp/report" in result
         assert "force" in result
         assert "true" in result
 
@@ -82,6 +84,7 @@ class TestFormatInitReportItem:
         result = format_init_report_item(
             "/tmp/report", status="[green]done[/green]", force=False
         )
+        assert "tmp/report" in result
         assert "force" not in result
 
     def test_verbose_includes_call_id(self) -> None:
@@ -89,6 +92,19 @@ class TestFormatInitReportItem:
             ".", verbose=True, status="[green]done[/green]", call_id="call_7"
         )
         assert "call_7" in result
+
+
+class TestFormatInformalPath:
+    def test_returns_last_two_segments_for_absolute_path(self) -> None:
+        assert format_informal_path("/mnt/c/Users/nbensaid/workspace/oai-ws") == (
+            "workspace/oai-ws"
+        )
+
+    def test_returns_single_segment_for_shallow_path(self) -> None:
+        assert format_informal_path("/workspace") == "workspace"
+
+    def test_normalizes_windows_separators(self) -> None:
+        assert format_informal_path(r"C:\Users\me\report") == "me/report"
 
 
 # -- format_generic_function_item -------------------------------------------
@@ -278,7 +294,7 @@ class TestFunctionResultRouting:
         )
         assert len(d._tool_group.items) == 1
         text = d._tool_group.items[0].text
-        assert "/my/report" in text
+        assert "my/report" in text
         assert "force" in text
 
     def test_generic_function_routed(self) -> None:
@@ -319,7 +335,7 @@ class TestFunctionResultRouting:
         )
         assert len(d._tool_group.items) == 1
         text = d._tool_group.items[0].text
-        assert "/tmp/file.txt" in text
+        assert "tmp/file.txt" in text
         assert "create" in text
 
 

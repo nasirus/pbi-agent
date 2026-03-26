@@ -74,7 +74,8 @@ def test_tool_group_end_prints_tool_summary_lines() -> None:
     output = stdout.getvalue()
     assert "Tool calls (2)" in output
     assert "pwd" in output
-    assert "/tmp/report" in output
+    assert "tmp/report" in output
+    assert "/tmp/report" not in output
     assert "report.md" in output
     assert "FAILED" in output
 

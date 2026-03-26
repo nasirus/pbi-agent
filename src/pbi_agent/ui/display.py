@@ -13,7 +13,7 @@ from textual.widgets import Static
 
 from pbi_agent.models.messages import TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageRecord
-from pbi_agent.ui.display_protocol import DisplayProtocol, PendingToolGroup
+from pbi_agent.ui.display_protocol import DisplayProtocol, PendingToolGroup, QueuedInput
 from pbi_agent.ui.formatting import (
     REDACTED_THINKING_NOTICE,
     escape_markup_text,
@@ -72,7 +72,7 @@ class Display(DisplayProtocol):
         self._msg_counter = 0
         self._tool_group = PendingToolGroup()
         self._input_event = threading.Event()
-        self._input_queue: queue.Queue[str] = queue.Queue()
+        self._input_queue: queue.Queue[str | QueuedInput] = queue.Queue()
         self._shutdown = threading.Event()
         self._turn_usage_widgets: dict[int, _TurnUsageWidget] = {}
         self._turn_usage_lock = threading.Lock()
@@ -128,8 +128,13 @@ class Display(DisplayProtocol):
         self._shutdown.set()
         self._input_event.set()
 
-    def submit_input(self, value: str) -> None:
-        self._input_queue.put(value)
+    def submit_input(
+        self, value: str, *, image_paths: list[str] | None = None
+    ) -> None:
+        queued: str | QueuedInput = value
+        if image_paths:
+            queued = QueuedInput(text=value, image_paths=list(image_paths))
+        self._input_queue.put(queued)
         self._input_event.set()
 
     def request_new_chat(self) -> None:
@@ -189,7 +194,7 @@ class Display(DisplayProtocol):
             ),
         )
 
-    def user_prompt(self) -> str:
+    def user_prompt(self) -> str | QueuedInput:
         while True:
             if self._shutdown.is_set():
                 return "exit"

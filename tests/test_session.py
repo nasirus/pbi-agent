@@ -8,11 +8,13 @@ from pbi_agent.agent.session import NEW_CHAT_SENTINEL, run_chat_loop, run_single
 from pbi_agent.config import DEFAULT_MODEL, Settings
 from pbi_agent.models.messages import (
     CompletedResponse,
+    ImageAttachment,
     TokenUsage,
     ToolCall,
     UserTurnInput,
 )
 from pbi_agent.session_store import SessionStore
+from pbi_agent.ui.display_protocol import QueuedInput
 
 
 class _DisplaySpy:
@@ -231,13 +233,13 @@ def test_run_single_turn_executes_tool_loop_and_aggregates_usage(monkeypatch) ->
 
 
 class _ChatDisplaySpy(_DisplaySpy):
-    def __init__(self, prompts: list[str]) -> None:
+    def __init__(self, prompts: list[str | QueuedInput]) -> None:
         super().__init__()
         self.prompts = prompts
         self.prompt_calls = 0
         self.assistant_start_calls = 0
 
-    def user_prompt(self) -> str:
+    def user_prompt(self) -> str | QueuedInput:
         value = self.prompts[self.prompt_calls]
         self.prompt_calls += 1
         return value
@@ -249,6 +251,7 @@ class _ChatDisplaySpy(_DisplaySpy):
 class _ChatProviderStub:
     def __init__(self) -> None:
         self.request_messages: list[str | None] = []
+        self.request_inputs: list[UserTurnInput] = []
         self.reset_calls = 0
 
     def __enter__(self) -> _ChatProviderStub:
@@ -272,6 +275,8 @@ class _ChatProviderStub:
         turn_usage: TokenUsage,
     ) -> CompletedResponse:
         del display, instructions, tool_result_items
+        if user_input is not None:
+            self.request_inputs.append(user_input)
         if user_input is not None and user_message is None:
             user_message = user_input.text
         self.request_messages.append(user_message)
@@ -311,6 +316,40 @@ def test_run_chat_loop_resets_welcome_and_usage_on_new_chat(monkeypatch) -> None
     assert [usage.total_tokens for usage in display.session_usage_calls] == [0, 3, 0, 3]
     assert display.reset_chat_calls == 1
     assert display.assistant_start_calls == 2
+
+
+def test_run_chat_loop_passes_queued_image_paths_to_provider(monkeypatch) -> None:
+    provider = _ChatProviderStub()
+    display = _ChatDisplaySpy(
+        [QueuedInput(text="describe this", image_paths=["chart.png"]), "quit"]
+    )
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+    monotonic_values = iter([5.0, 6.5])
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.create_provider",
+        lambda runtime_settings, **kw: provider,
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.load_workspace_image",
+        lambda root, path: ImageAttachment(
+            path=path,
+            mime_type="image/png",
+            data_base64="abcd",
+            byte_count=4,
+        ),
+    )
+
+    exit_code = run_chat_loop(settings, display)
+
+    assert exit_code == 0
+    assert provider.request_messages == ["describe this"]
+    assert len(provider.request_inputs) == 1
+    assert provider.request_inputs[0].images[0].path == "chart.png"
 
 
 def test_run_chat_loop_does_not_persist_unanswered_user_turn(monkeypatch) -> None:

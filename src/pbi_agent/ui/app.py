@@ -12,12 +12,15 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Button, Footer
+from textual.widgets import Footer
 
 from pbi_agent.models.messages import TokenUsage
 from pbi_agent.agent.error_formatting import format_user_facing_error
+from pbi_agent.providers.capabilities import provider_supports_images
 from pbi_agent.ui.display import Display
+from pbi_agent.ui.command_registry import LOCAL_COMMANDS, normalize_command_name
 from pbi_agent.ui.formatting import format_session_subtitle_parts
+from pbi_agent.ui.input_mentions import expand_input_mentions
 from pbi_agent.ui.styles import CHAT_APP_CSS
 from pbi_agent.ui.widgets import (
     AssistantMarkdown,
@@ -92,17 +95,14 @@ class ChatApp(App):
             ),
             id="chat-body",
         )
-        yield Horizontal(
-            ChatInput(
-                placeholder=(
-                    "Type your message\u2026  "
-                    "(Enter: newline, Ctrl+S: send, Ctrl+Q: quit)"
-                ),
-                id="user-input",
-                disabled=True,
+        yield ChatInput(
+            workspace_root=str(Path.cwd().resolve()),
+            placeholder=(
+                "Type your message\u2026  "
+                "(Enter: send, Ctrl/Alt/Shift+Enter: newline, Ctrl+Q: quit)"
             ),
-            Button("Send", id="send-button", variant="primary", disabled=True),
-            id="input-row",
+            id="user-input",
+            disabled=True,
         )
         yield Footer()
 
@@ -124,9 +124,6 @@ class ChatApp(App):
     def _chat_input(self) -> ChatInput:
         return self.query_one("#user-input", ChatInput)
 
-    def _send_button(self) -> Button:
-        return self.query_one("#send-button", Button)
-
     def _scroll_chat_end(self) -> None:
         self._chat_log().scroll_end(animate=False)
 
@@ -138,11 +135,9 @@ class ChatApp(App):
 
     def _set_input_enabled(self, enabled: bool) -> None:
         inp = self._chat_input()
-        send_btn = self._send_button()
         inp.disabled = not enabled
-        send_btn.disabled = not enabled
         if enabled:
-            inp.focus()
+            inp.focus_input()
 
     def _run_single_turn_mode(self, display: Display) -> int:
         from pbi_agent.agent.session import run_single_turn
@@ -346,25 +341,80 @@ class ChatApp(App):
         inp.clear()
         inp.reset_height()
 
-    def _submit_user_message(self, raw_text: str) -> None:
+    async def _submit_user_message(self, raw_text: str) -> None:
         value = raw_text.strip()
         if not value:
             return
         inp = self._chat_input()
         inp.clear()
         inp.reset_height()
+        if await self._handle_local_command(value):
+            inp.focus_input()
+            return
+
         self.disable_input()
         self.add_user_message(value)
+        submitted_value = value
+        image_paths: list[str] = []
+        if not value.startswith("/"):
+            submitted_value, image_paths, warnings = expand_input_mentions(
+                value,
+                root=Path.cwd().resolve(),
+            )
+            if image_paths and not provider_supports_images(self._settings.provider):
+                warnings.append(
+                    "Image mentions are not supported by the current provider."
+                )
+                image_paths = []
+            for warning in warnings:
+                self.notify(warning, severity="warning", timeout=4)
         if self._bridge is not None:
-            self._bridge.submit_input(value)
+            self._bridge.submit_input(submitted_value, image_paths=image_paths or None)
 
     @on(ChatInput.Submitted, "#user-input")
-    def handle_input_submitted(self, event: ChatInput.Submitted) -> None:
-        self._submit_user_message(event.value)
+    async def handle_input_submitted(self, event: ChatInput.Submitted) -> None:
+        await self._submit_user_message(event.value)
 
-    @on(Button.Pressed, "#send-button")
-    def handle_send_button_pressed(self, _: Button.Pressed) -> None:
-        self._submit_user_message(self._chat_input().text)
+    async def _handle_local_command(self, value: str) -> bool:
+        command = normalize_command_name(value)
+        if command not in LOCAL_COMMANDS:
+            return False
+
+        if command == "/help":
+            self.add_user_message(value)
+            await self.mount_widget(AssistantMarkdown(self._help_markdown()))
+            return True
+
+        if command == "/clear":
+            self.disable_input()
+            if self._bridge is not None:
+                self._bridge.request_new_chat()
+            return True
+
+        if command == "/quit":
+            await self.action_quit()
+            return True
+
+        return False
+
+    @staticmethod
+    def _help_markdown() -> str:
+        return (
+            "### Commands\n"
+            "- `/help` Show this help\n"
+            "- `/clear` Clear chat and start a new session\n"
+            "- `/quit` Quit the app\n\n"
+            "### Shortcuts\n"
+            "- `Enter` send message\n"
+            "- `Ctrl+Enter`, `Alt+Enter`, `Shift+Enter` insert newline\n"
+            "- `Ctrl+S` send message\n"
+            "- `Ctrl+R` start a new chat\n"
+            "- `Ctrl+B` toggle sessions sidebar\n"
+            "- `Ctrl+Q` quit\n\n"
+            "### Input Features\n"
+            "- Type `@` to autocomplete workspace files; text files are inlined and supported image files are attached\n"
+            "- Type `/` to autocomplete local slash commands"
+        )
 
     async def action_new_chat(self) -> None:
         if self._bridge is not None:

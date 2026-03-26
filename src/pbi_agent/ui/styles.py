@@ -30,7 +30,7 @@ WelcomeBanner {
     text-align: center;
     padding: 1 2;
     margin: 1 6;
-    border: tall #F2C811;
+    border: round #F2C811;
     background: $boost;
 }
 
@@ -241,7 +241,7 @@ NoticeMessage {
     width: 30;
     height: 1fr;
     background: $boost;
-    border-right: thick $primary;
+    border-right: round $primary;
     display: none;
     overflow-y: auto;
 }
@@ -259,27 +259,13 @@ NoticeMessage {
 }
 
 /* ---- input ---- */
-#input-row {
-    dock: bottom;
-    margin: 1 2 1 2;
-    height: auto;
-    align-vertical: middle;
-}
 #user-input {
-    width: 1fr;
-    min-width: 0;
-    height: 3;
+    dock: bottom;
+    margin: 1 4 1 4;
+    height: auto;
+    max-width: 100%;
 }
 #user-input:disabled {
-    opacity: 0.5;
-}
-#send-button {
-    width: auto;
-    min-width: 10;
-    height: 3;
-    margin: 0 5 0 0;
-}
-#send-button:disabled {
     opacity: 0.5;
 }
 """

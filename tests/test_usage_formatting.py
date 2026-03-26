@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -215,3 +216,14 @@ def test_format_session_subtitle_parts_extracts_context_label() -> None:
     assert "11 tok" in subtitle
     assert "ctx" not in subtitle
     assert context_label == "ctx 37%"
+
+
+def test_format_session_subtitle_parts_uses_informal_workspace_path(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "pbi_agent.ui.formatting.Path.cwd",
+        lambda: Path("/mnt/c/Users/nbensaid/workspace/oai-ws"),
+    )
+
+    subtitle, _ = format_session_subtitle_parts(TokenUsage(model="gpt-5.3-codex"))
+
+    assert "workspace/oai-ws" in subtitle
