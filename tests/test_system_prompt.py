@@ -201,6 +201,37 @@ def test_get_sub_agent_system_prompt_with_project_skills(tmp_path, monkeypatch):
     assert "read_file, list_files, and search_files" in prompt
 
 
+def test_get_system_prompt_with_project_sub_agents(tmp_path, monkeypatch):
+    (tmp_path / ".agents").mkdir(parents=True)
+    (tmp_path / ".agents" / "code-reviewer.md").write_text(
+        "---\n"
+        "name: code-reviewer\n"
+        "description: Review code changes before merging.\n"
+        "---\n\n"
+        "You are a code reviewer.\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    prompt = get_system_prompt()
+
+    assert "<available_sub_agents>" in prompt
+    assert "<name>code-reviewer</name>" in prompt
+    assert "<description>Review code changes before merging.</description>" in prompt
+    assert "<tool_name>code-reviewer-subagent</tool_name>" in prompt
+    assert "call `sub_agent` with `agent_type`" in prompt
+
+
+def test_get_sub_agent_system_prompt_uses_agent_override(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    prompt = get_sub_agent_system_prompt(agent_prompt_override="You are custom.")
+
+    assert "You are custom." in prompt
+    assert "<persona>" in prompt
+    assert _DEFAULT_SYSTEM_PROMPT not in prompt
+
+
 # ---------------------------------------------------------------------------
 # INSTRUCTIONS.md overrides the default system prompt
 # ---------------------------------------------------------------------------

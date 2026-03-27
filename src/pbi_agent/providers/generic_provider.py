@@ -67,6 +67,9 @@ class GenericProvider(Provider):
     def reset_conversation(self) -> None:
         self._messages.clear()
 
+    def set_system_prompt(self, system_prompt: str) -> None:
+        self._system_prompt = system_prompt
+
     def restore_messages(self, messages: list[MessageRecord]) -> None:
         self._messages = [
             {"role": message.role, "content": message.content}

@@ -24,6 +24,13 @@ SPEC = ToolSpec(
                 "default": "low",
                 "description": "Reasoning effort for the child agent. Defaults to low.",
             },
+            "agent_type": {
+                "type": "string",
+                "description": (
+                    "Optional project sub-agent name from `.agents/*.md`. "
+                    "When omitted, the default generalist sub-agent is used."
+                ),
+            },
         },
         "required": ["task_instruction"],
         "additionalProperties": False,
@@ -48,6 +55,11 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         or reasoning_effort not in _REASONING_EFFORT_VALUES
     ):
         reasoning_effort = "low"
+    agent_type = arguments.get("agent_type")
+    if not isinstance(agent_type, str) or not agent_type.strip():
+        agent_type = None
+    else:
+        agent_type = agent_type.strip()
 
     settings = context.settings
     display = context.display
@@ -85,4 +97,5 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         parent_turn_usage=turn_usage,
         sub_agent_depth=sub_agent_depth,
         tool_catalog=tool_catalog,
+        agent_type=agent_type,
     )

@@ -11,6 +11,11 @@ from typing import TYPE_CHECKING, Any
 from pbi_agent.agent.system_prompt import (
     get_custom_excluded_tools,
     get_sub_agent_system_prompt,
+    get_system_prompt,
+)
+from pbi_agent.agent.sub_agent_discovery import (
+    format_project_sub_agents_markdown,
+    get_project_sub_agent_by_name,
 )
 from pbi_agent.agent.skill_discovery import format_project_skills_markdown
 from pbi_agent.config import Settings
@@ -39,6 +44,8 @@ SUB_AGENT_MAX_ELAPSED_SECONDS = 300.0
 SUB_AGENT_DISABLED_TOOLS = {"sub_agent"}
 SKILLS_COMMAND = "/skills"
 MCP_COMMAND = "/mcp"
+AGENTS_COMMAND = "/agents"
+AGENTS_RELOAD_COMMAND = "/agents reload"
 
 
 class SubAgentRunError(RuntimeError):
@@ -205,11 +212,21 @@ def run_chat_loop(
                 continue
             if user_input.lower() in {"exit", "quit"}:
                 break
-            if user_input.strip().lower() == SKILLS_COMMAND:
+            normalized_command = _normalize_user_command(user_input)
+            if normalized_command == SKILLS_COMMAND:
                 display.render_markdown(format_project_skills_markdown())
                 continue
-            if user_input.strip().lower() == MCP_COMMAND:
+            if normalized_command == MCP_COMMAND:
                 display.render_markdown(format_project_mcp_servers_markdown())
+                continue
+            if normalized_command == AGENTS_COMMAND:
+                display.render_markdown(format_project_sub_agents_markdown())
+                continue
+            if normalized_command == AGENTS_RELOAD_COMMAND:
+                _reload_provider_sub_agents(provider)
+                display.render_markdown(
+                    format_project_sub_agents_markdown(reloaded=True)
+                )
                 continue
             if not user_input and not image_paths:
                 continue
@@ -283,7 +300,20 @@ def run_sub_agent_task(
     parent_turn_usage: TokenUsage,
     sub_agent_depth: int = 0,
     tool_catalog: "ToolCatalog | None" = None,
+    agent_type: str | None = None,
 ) -> dict[str, Any]:
+    agent_definition = None
+    if agent_type is not None:
+        agent_definition = get_project_sub_agent_by_name(agent_type)
+        if agent_definition is None:
+            return {
+                "status": "failed",
+                "error": {
+                    "type": "unknown_agent_type",
+                    "message": f"No project sub-agent named '{agent_type}' is loaded.",
+                },
+            }
+
     child_settings = replace(
         settings,
         model=_selected_sub_agent_model(settings),
@@ -291,10 +321,13 @@ def run_sub_agent_task(
     )
     from pbi_agent.ui.names import pick_deity_name
 
+    child_name = (
+        agent_definition.name if agent_definition is not None else pick_deity_name()
+    )
     child_display = display.begin_sub_agent(
         task_instruction=task_instruction,
         reasoning_effort=reasoning_effort,
-        name=pick_deity_name(),
+        name=child_name,
     )
     _child_tier = child_settings.service_tier or ""
     child_session_usage = TokenUsage(
@@ -310,7 +343,13 @@ def run_sub_agent_task(
     try:
         with _open_runtime_provider(
             child_settings,
-            system_prompt=get_sub_agent_system_prompt(),
+            system_prompt=get_sub_agent_system_prompt(
+                agent_prompt_override=(
+                    agent_definition.system_prompt
+                    if agent_definition is not None
+                    else None
+                )
+            ),
             excluded_tools=SUB_AGENT_DISABLED_TOOLS | get_custom_excluded_tools(),
             tool_catalog=tool_catalog,
         ) as provider:
@@ -638,6 +677,16 @@ def _build_user_turn_input(
         root = Path.cwd().resolve()
         images = [load_workspace_image(root, path) for path in image_paths]
     return UserTurnInput(text=text, images=images)
+
+
+def _normalize_user_command(value: str) -> str:
+    return " ".join(value.strip().lower().split())
+
+
+def _reload_provider_sub_agents(provider: Any) -> None:
+    set_system_prompt = getattr(provider, "set_system_prompt", None)
+    if callable(set_system_prompt):
+        set_system_prompt(get_system_prompt())
 
 
 def _request_user_turn(

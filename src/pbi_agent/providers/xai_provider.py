@@ -105,6 +105,9 @@ class XAIProvider(Provider):
     def reset_conversation(self) -> None:
         self._previous_response_id = None
 
+    def set_system_prompt(self, system_prompt: str) -> None:
+        self._instructions = system_prompt
+
     def request_turn(
         self,
         *,

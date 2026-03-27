@@ -6,6 +6,8 @@ import os
 import pytest
 
 from pbi_agent.agent.session import (
+    AGENTS_COMMAND,
+    AGENTS_RELOAD_COMMAND,
     MCP_COMMAND,
     NEW_CHAT_SENTINEL,
     SKILLS_COMMAND,
@@ -273,6 +275,7 @@ class _ChatProviderStub:
         self.request_messages: list[str | None] = []
         self.request_inputs: list[UserTurnInput] = []
         self.reset_calls = 0
+        self.system_prompts: list[str] = []
 
     def __enter__(self) -> _ChatProviderStub:
         return self
@@ -282,6 +285,9 @@ class _ChatProviderStub:
 
     def reset_conversation(self) -> None:
         self.reset_calls += 1
+
+    def set_system_prompt(self, system_prompt: str) -> None:
+        self.system_prompts.append(system_prompt)
 
     def request_turn(
         self,
@@ -381,6 +387,57 @@ def test_run_chat_loop_handles_mcp_command_locally(monkeypatch) -> None:
     assert exit_code == 0
     assert provider.request_messages == []
     assert display.markdown_calls == ["### MCP Servers\n\n- `echo`: `uv run server.py`"]
+    assert display.assistant_start_calls == 0
+
+
+def test_run_chat_loop_handles_agents_command_locally(monkeypatch) -> None:
+    provider = _ChatProviderStub()
+    display = _ChatDisplaySpy([AGENTS_COMMAND, "quit"])
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.format_project_sub_agents_markdown",
+        lambda reloaded=False: "### Sub-Agents\n\n- `reviewer`: Reviews code",
+    )
+
+    exit_code = run_chat_loop(settings, display)
+
+    assert exit_code == 0
+    assert provider.request_messages == []
+    assert display.markdown_calls == ["### Sub-Agents\n\n- `reviewer`: Reviews code"]
+    assert display.assistant_start_calls == 0
+
+
+def test_run_chat_loop_handles_agents_reload_command_locally(monkeypatch) -> None:
+    provider = _ChatProviderStub()
+    display = _ChatDisplaySpy([AGENTS_RELOAD_COMMAND, "quit"])
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.get_system_prompt",
+        lambda: "updated prompt",
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.format_project_sub_agents_markdown",
+        lambda reloaded=False: (
+            "### Sub-Agents\n\nReloaded" if reloaded else "### Sub-Agents\n\nInitial"
+        ),
+    )
+
+    exit_code = run_chat_loop(settings, display)
+
+    assert exit_code == 0
+    assert provider.request_messages == []
+    assert provider.system_prompts == ["updated prompt"]
+    assert display.markdown_calls == ["### Sub-Agents\n\nReloaded"]
     assert display.assistant_start_calls == 0
 
 
