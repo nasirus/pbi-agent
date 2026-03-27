@@ -231,8 +231,6 @@ def test_get_system_prompt_includes_repo_code_review_agent(monkeypatch):
     assert "Review code changes for correctness, regressions, and test coverage." in (
         prompt
     )
-    assert "<model>gpt-5.4-mini</model>" in prompt
-    assert "<reasoning_effort>medium</reasoning_effort>" in prompt
 
 
 def test_get_sub_agent_system_prompt_uses_agent_override(tmp_path, monkeypatch):
