@@ -37,6 +37,11 @@ COMMANDS: tuple[SlashCommand, ...] = (
         hidden_keywords="mcp server servers tools catalog list",
     ),
     SlashCommand(
+        name="/agents",
+        description="Show discovered project sub-agents",
+        hidden_keywords="sub-agent subagent agent agents reload list",
+    ),
+    SlashCommand(
         name="/quit",
         description="Quit the app",
         hidden_keywords="exit close",
