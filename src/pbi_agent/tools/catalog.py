@@ -36,6 +36,15 @@ class ToolCatalog:
             entries[spec.name] = ToolCatalogEntry(spec=spec, handler=handler)
         return cls(entries)
 
+    def filtered(self, allowed_names: set[str]) -> "ToolCatalog":
+        """Return a new catalog containing only tools whose names are in *allowed_names*."""
+        filtered = {
+            name: entry
+            for name, entry in self._entries.items()
+            if name in allowed_names
+        }
+        return ToolCatalog(filtered)
+
     def merged(self, extra_entries: list[ToolCatalogEntry]) -> "ToolCatalog":
         merged = dict(self._entries)
         for entry in extra_entries:

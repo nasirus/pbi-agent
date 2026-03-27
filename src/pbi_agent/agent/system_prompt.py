@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from pbi_agent.agent.agent_discovery import discover_project_agents
 from pbi_agent.agent.skill_discovery import discover_project_skills
 
 _DEFAULT_SYSTEM_PROMPT = """
@@ -129,12 +130,48 @@ Project skills are available for specialized tasks.
     return f"{base_prompt}\n\n{instructions}\n{catalog}"
 
 
+def _append_available_agents(base_prompt: str) -> str:
+    agents = discover_project_agents()
+    if not agents:
+        return base_prompt
+
+    catalog_lines = ["<available_agents>"]
+    for agent in agents:
+        catalog_lines.extend(
+            [
+                "  <agent>",
+                f"    <name>{agent.name}</name>",
+                f"    <description>{agent.description}</description>",
+                "  </agent>",
+            ]
+        )
+    catalog_lines.append("</available_agents>")
+    catalog = "\n".join(catalog_lines)
+
+    instructions = """
+<agent_delegation_rules>
+Project agents are specialized sub-agents available for delegation.
+- When a task matches an agent description, delegate to it using the sub_agent tool with the agent_type parameter set to that agent's name.
+- Each agent has its own system prompt, and optionally its own model and tool restrictions.
+- Prefer delegating to a matching project agent over using the default sub-agent.
+</agent_delegation_rules>
+""".strip()
+
+    return f"{base_prompt}\n\n{instructions}\n{catalog}"
+
+
 def get_system_prompt() -> str:
-    return _append_available_skills(_append_project_rules(_resolve_base_prompt()))
+    prompt = _append_available_skills(_append_project_rules(_resolve_base_prompt()))
+    return _append_available_agents(prompt)
 
 
-def get_sub_agent_system_prompt() -> str:
-    base = _resolve_base_prompt()
+def get_sub_agent_system_prompt(
+    agent_prompt_override: str | None = None,
+) -> str:
+    if agent_prompt_override is not None:
+        base = agent_prompt_override
+    else:
+        base = _resolve_base_prompt()
     prompt = _append_project_rules(f"{base}\n\n{_SUB_AGENT_PROMPT}")
     return _append_available_skills(prompt)
 

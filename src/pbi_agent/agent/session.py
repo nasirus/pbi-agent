@@ -12,6 +12,7 @@ from pbi_agent.agent.system_prompt import (
     get_custom_excluded_tools,
     get_sub_agent_system_prompt,
 )
+from pbi_agent.agent.agent_discovery import format_project_agents_markdown
 from pbi_agent.agent.skill_discovery import format_project_skills_markdown
 from pbi_agent.config import Settings
 from pbi_agent.media import load_workspace_image
@@ -39,6 +40,7 @@ SUB_AGENT_MAX_ELAPSED_SECONDS = 300.0
 SUB_AGENT_DISABLED_TOOLS = {"sub_agent"}
 SKILLS_COMMAND = "/skills"
 MCP_COMMAND = "/mcp"
+AGENTS_COMMAND = "/agents"
 
 
 class SubAgentRunError(RuntimeError):
@@ -211,6 +213,9 @@ def run_chat_loop(
             if user_input.strip().lower() == MCP_COMMAND:
                 display.render_markdown(format_project_mcp_servers_markdown())
                 continue
+            if user_input.strip().lower() == AGENTS_COMMAND:
+                display.render_markdown(format_project_agents_markdown())
+                continue
             if not user_input and not image_paths:
                 continue
 
@@ -283,18 +288,40 @@ def run_sub_agent_task(
     parent_turn_usage: TokenUsage,
     sub_agent_depth: int = 0,
     tool_catalog: "ToolCatalog | None" = None,
+    agent_type: str | None = None,
 ) -> dict[str, Any]:
+    from pbi_agent.agent.agent_discovery import AgentDefinition, get_agent_by_name
+
+    # Resolve agent definition if agent_type is specified
+    agent_def: AgentDefinition | None = None
+    if agent_type is not None:
+        agent_def = get_agent_by_name(agent_type)
+        if agent_def is None:
+            return {
+                "status": "failed",
+                "error": {
+                    "type": "unknown_agent_type",
+                    "message": f"No agent definition found for '{agent_type}'.",
+                },
+            }
+
+    # Determine child model
+    child_model = _selected_sub_agent_model(settings)
+    if agent_def is not None and agent_def.model is not None:
+        child_model = agent_def.model
+
     child_settings = replace(
         settings,
-        model=_selected_sub_agent_model(settings),
+        model=child_model,
         reasoning_effort=reasoning_effort,
     )
     from pbi_agent.ui.names import pick_deity_name
 
+    agent_display_name = agent_def.name if agent_def else pick_deity_name()
     child_display = display.begin_sub_agent(
         task_instruction=task_instruction,
         reasoning_effort=reasoning_effort,
-        name=pick_deity_name(),
+        name=agent_display_name,
     )
     _child_tier = child_settings.service_tier or ""
     child_session_usage = TokenUsage(
@@ -307,12 +334,44 @@ def run_sub_agent_task(
     started_at = time.monotonic()
     request_count = 0
 
+    # Determine max requests (agent definition maxTurns overrides default)
+    max_requests = SUB_AGENT_MAX_REQUESTS
+    if agent_def is not None and agent_def.max_turns is not None:
+        max_requests = agent_def.max_turns
+
+    # Build excluded tools set
+    excluded_tools = set(SUB_AGENT_DISABLED_TOOLS) | get_custom_excluded_tools()
+    if agent_def is not None:
+        if agent_def.disallowed_tools:
+            excluded_tools |= set(agent_def.disallowed_tools)
+        if agent_def.tools is not None:
+            # When an explicit allowlist is given, exclude everything
+            # not in that list (the catalog will filter accordingly).
+            # We still keep SUB_AGENT_DISABLED_TOOLS excluded.
+            pass  # handled via allowed_tools below
+
+    # Build system prompt
+    agent_prompt_override = agent_def.system_prompt if agent_def else None
+    child_system_prompt = get_sub_agent_system_prompt(
+        agent_prompt_override=agent_prompt_override,
+    )
+
+    # Build allowed tools filter for the catalog
+    allowed_tools: set[str] | None = None
+    if agent_def is not None and agent_def.tools is not None:
+        allowed_tools = set(agent_def.tools) - excluded_tools
+
+    # If we have an allowlist, build a filtered catalog
+    effective_catalog = tool_catalog
+    if allowed_tools is not None and tool_catalog is not None:
+        effective_catalog = tool_catalog.filtered(allowed_tools)
+
     try:
         with _open_runtime_provider(
             child_settings,
-            system_prompt=get_sub_agent_system_prompt(),
-            excluded_tools=SUB_AGENT_DISABLED_TOOLS | get_custom_excluded_tools(),
-            tool_catalog=tool_catalog,
+            system_prompt=child_system_prompt,
+            excluded_tools=excluded_tools,
+            tool_catalog=effective_catalog,
         ) as provider:
             _raise_if_sub_agent_timed_out(started_at)
             response = provider.request_turn(
@@ -330,7 +389,7 @@ def run_sub_agent_task(
                 session_usage=child_session_usage,
                 turn_usage=child_turn_usage,
                 sub_agent_depth=sub_agent_depth + 1,
-                max_requests=SUB_AGENT_MAX_REQUESTS,
+                max_requests=max_requests,
                 request_count=request_count,
                 started_at=started_at,
                 max_elapsed_seconds=SUB_AGENT_MAX_ELAPSED_SECONDS,
