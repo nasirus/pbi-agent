@@ -26,7 +26,7 @@ from pbi_agent.models.messages import (
 )
 from pbi_agent.providers.base import Provider
 from pbi_agent.tools.catalog import ToolCatalog
-from pbi_agent.tools.types import ToolContext
+from pbi_agent.tools.types import ParentContextSnapshot, ToolContext
 from pbi_agent.ui.display_protocol import DisplayProtocol
 
 _REQUEST_TIMEOUT_SECS = 3600.0
@@ -76,6 +76,7 @@ class GoogleProvider(Provider):
         self.refresh_tools()
         self._instructions = system_prompt or get_system_prompt()
         self._previous_interaction_id: str | None = None
+        self._branch_interaction_id: str | None = None
 
     @property
     def settings(self) -> Settings:
@@ -83,6 +84,10 @@ class GoogleProvider(Provider):
 
     def set_previous_response_id(self, response_id: str | None) -> None:
         self._previous_interaction_id = response_id
+        self._branch_interaction_id = response_id
+
+    def get_conversation_checkpoint(self) -> str | None:
+        return self._branch_interaction_id
 
     def connect(self) -> None:
         if not self._settings.api_key:
@@ -93,6 +98,7 @@ class GoogleProvider(Provider):
 
     def reset_conversation(self) -> None:
         self._previous_interaction_id = None
+        self._branch_interaction_id = None
 
     def set_system_prompt(self, system_prompt: str) -> None:
         self._instructions = system_prompt
@@ -132,6 +138,9 @@ class GoogleProvider(Provider):
             display=display,
         )
         self._previous_interaction_id = result.response_id
+        if not result.has_tool_calls:
+            # Only completed assistant responses are safe to branch from.
+            self._branch_interaction_id = result.response_id
         session_usage.add(result.usage)
         turn_usage.add(result.usage)
         display.session_usage(session_usage)
@@ -182,6 +191,7 @@ class GoogleProvider(Provider):
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
         sub_agent_depth: int = 0,
+        parent_context: ParentContextSnapshot | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         if not response.function_calls:
             return [], False
@@ -201,6 +211,7 @@ class GoogleProvider(Provider):
                 turn_usage=turn_usage,
                 sub_agent_depth=sub_agent_depth,
                 tool_catalog=self._tool_catalog,
+                parent_context=parent_context,
             ),
         )
 
