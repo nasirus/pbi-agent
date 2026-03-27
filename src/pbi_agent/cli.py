@@ -239,12 +239,12 @@ def build_parser() -> argparse.ArgumentParser:
     web_parser.add_argument(
         "--dev",
         action="store_true",
-        help="Enable textual web dev mode.",
+        help="Enable web development mode.",
     )
     web_parser.add_argument(
         "--title",
         default=None,
-        help="Optional browser title shown by textual serve.",
+        help="Optional browser title override.",
     )
     web_parser.add_argument(
         "--url",
@@ -715,7 +715,7 @@ def _handle_web_command(args: argparse.Namespace, settings: Settings) -> int:
 
     server = _create_web_server(
         args,
-        _web_chat_command(settings, parent_pid=os.getpid()),
+        settings,
     )
     try:
         with _temporary_env_overrides(_settings_env(settings)):
@@ -831,24 +831,11 @@ def _open_url_in_windows_browser(browser_url: str) -> bool:
     return False
 
 
-def _web_chat_command(settings: Settings, *, parent_pid: int) -> str:
-    chat_command: list[str] = [
-        sys.executable,
-        "-m",
-        "pbi_agent.web.chat_entry",
-        "--parent-pid",
-        str(parent_pid),
-    ]
-    if settings.verbose:
-        chat_command.append("--verbose")
-    return subprocess.list2cmdline(chat_command)
+def _create_web_server(args: argparse.Namespace, settings: Settings) -> object:
+    from pbi_agent.web.serve import PBIWebServer
 
-
-def _create_web_server(args: argparse.Namespace, command: str) -> object:
-    from pbi_agent.web.serve import _FaviconServer
-
-    return _FaviconServer(
-        command=command,
+    return PBIWebServer(
+        settings=settings,
         host=args.host,
         port=args.port,
         title=args.title,

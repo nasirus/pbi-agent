@@ -1,284 +1,398 @@
-"""Custom web server that extends textual-serve with favicon support.
-
-This module subclasses ``textual_serve.server.Server`` to:
-
-1. Use a project-local HTML template (with a ``<link rel="icon">`` tag).
-2. Serve a custom favicon at ``/favicon.ico``.
-
-It is invoked as ``python -m pbi_agent.web.serve <command> [options]`` by
-:func:`pbi_agent.cli._handle_web_command`.
-"""
-
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
-from contextlib import suppress
+import contextlib
+import signal
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
-from aiohttp import web
-from aiohttp import WSMsgType
-from textual_serve.app_service import AppService
-from textual_serve.server import Server, log
-
-from importlib.metadata import version
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from rich.console import Console
+import uvicorn
+import uvicorn.server
 
 from pbi_agent.branding import startup_panel
+from pbi_agent.config import Settings
+from pbi_agent.web.session_manager import APP_EVENT_STREAM_ID, WebSessionManager
 
 _WEB_DIR = Path(__file__).resolve().parent
-_TEMPLATES_DIR = str(_WEB_DIR / "templates")
+_APP_STATIC_DIR = _WEB_DIR / "static" / "app"
 _FAVICON_PATH = _WEB_DIR / "static" / "favicon.png"
 
 
-class _PBIAppService(AppService):
-    """App service that uses the repo-owned Textual web driver."""
+class CreateChatSessionRequest(BaseModel):
+    resume_session_id: str | None = None
+    live_session_id: str | None = None
 
-    async def stop(self) -> None:
-        """Stop the app process, forcing cleanup if shutdown is interrupted."""
-        if self._task is None and self._process is None:
-            return
 
-        stop_task = asyncio.create_task(self._graceful_stop())
+class ChatInputRequest(BaseModel):
+    text: str = ""
+    image_paths: list[str] = Field(default_factory=list)
+
+
+class CreateTaskRequest(BaseModel):
+    title: str
+    prompt: str
+    stage: str = "backlog"
+    project_dir: str = "."
+    session_id: str | None = None
+
+
+class UpdateTaskRequest(BaseModel):
+    title: str | None = None
+    prompt: str | None = None
+    stage: str | None = None
+    position: int | None = None
+    project_dir: str | None = None
+    session_id: str | None = None
+    clear_session_id: bool = False
+
+
+def create_app(
+    settings: Settings,
+    *,
+    debug: bool = False,
+    title: str | None = None,
+    public_url: str | None = None,
+) -> FastAPI:
+    manager = WebSessionManager(settings)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
         try:
-            await asyncio.shield(stop_task)
+            yield
         except asyncio.CancelledError:
-            stop_task.cancel()
-            await self._force_stop()
-            with suppress(asyncio.CancelledError):
-                await stop_task
-            raise
+            pass
+        finally:
+            manager.shutdown()
 
-    async def _graceful_stop(self) -> None:
-        if self._task is not None:
-            await self._download_manager.cancel_app_downloads(
-                app_service_id=self.app_service_id
-            )
-            await self.send_meta({"type": "quit"})
-            await self._task
-            self._task = None
+    app = FastAPI(
+        title=title or "PBI Agent",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        lifespan=lifespan,
+    )
+    app.state.manager = manager
+    app.state.public_url = public_url
+    app.state.debug = debug
 
-        await self._close_stdin()
-        await self._close_process_transport()
-
-    async def _force_stop(self) -> None:
-        await self._download_manager.cancel_app_downloads(
-            app_service_id=self.app_service_id
+    if debug:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[
+                "http://127.0.0.1:5173",
+                "http://localhost:5173",
+                "http://127.0.0.1:4173",
+                "http://localhost:4173",
+            ],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
         )
 
-        task = self._task
+    assets_dir = _APP_STATIC_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-        await self._close_stdin()
-        await self._close_process_transport()
+    @app.get("/favicon.ico")
+    async def favicon() -> FileResponse:
+        return FileResponse(_FAVICON_PATH, media_type="image/png")
 
-        if task is not None:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+    @app.get("/logo.png")
+    async def logo() -> FileResponse:
+        return FileResponse(_FAVICON_PATH, media_type="image/png")
 
-        self._task = None
-        self._process = None
+    @app.get("/api/bootstrap")
+    async def bootstrap() -> dict[str, Any]:
+        return manager.bootstrap()
 
-    async def _close_stdin(self) -> None:
-        stdin = self._stdin
-        self._stdin = None
-        if stdin is not None:
-            stdin.close()
-            with suppress(Exception):
-                await stdin.wait_closed()
+    @app.get("/api/sessions")
+    async def list_sessions(limit: int = 30) -> dict[str, Any]:
+        return {"sessions": manager.list_sessions(limit=limit)}
 
-    async def _close_process_transport(self) -> None:
-        process = self._process
-        if process is None:
+    @app.post("/api/chat/session")
+    async def create_chat_session(
+        request: CreateChatSessionRequest,
+    ) -> dict[str, Any]:
+        try:
+            session = manager.create_live_chat(
+                resume_session_id=request.resume_session_id,
+                live_session_id=request.live_session_id,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session": session}
+
+    @app.post("/api/chat/session/{live_session_id}/input")
+    async def submit_chat_input(
+        live_session_id: str,
+        request: ChatInputRequest,
+    ) -> dict[str, Any]:
+        try:
+            session = manager.submit_chat_input(
+                live_session_id,
+                text=request.text,
+                image_paths=request.image_paths,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail="Live session not found."
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session": session}
+
+    @app.post("/api/chat/session/{live_session_id}/new-chat")
+    async def request_new_chat(live_session_id: str) -> dict[str, Any]:
+        try:
+            session = manager.request_new_chat(live_session_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail="Live session not found."
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session": session}
+
+    @app.get("/api/tasks")
+    async def list_tasks() -> dict[str, Any]:
+        return {"tasks": manager.list_tasks()}
+
+    @app.post("/api/tasks")
+    async def create_task(request: CreateTaskRequest) -> dict[str, Any]:
+        try:
+            task = manager.create_task(
+                title=request.title,
+                prompt=request.prompt,
+                stage=request.stage,
+                project_dir=request.project_dir,
+                session_id=request.session_id,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"task": task}
+
+    @app.patch("/api/tasks/{task_id}")
+    async def update_task(task_id: str, request: UpdateTaskRequest) -> dict[str, Any]:
+        try:
+            task = manager.update_task(
+                task_id,
+                title=request.title,
+                prompt=request.prompt,
+                stage=request.stage,
+                position=request.position,
+                project_dir=request.project_dir,
+                session_id=request.session_id,
+                clear_session_id=request.clear_session_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Task not found.") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"task": task}
+
+    @app.delete("/api/tasks/{task_id}", status_code=204)
+    async def delete_task(task_id: str) -> Response:
+        try:
+            manager.delete_task(task_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Task not found.") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(status_code=204)
+
+    @app.post("/api/tasks/{task_id}/run")
+    async def run_task(task_id: str) -> dict[str, Any]:
+        try:
+            task = manager.run_task(task_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Task not found.") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"task": task}
+
+    @app.websocket("/api/events/{stream_id}")
+    async def stream_events(websocket: WebSocket, stream_id: str) -> None:
+        try:
+            stream = manager.get_event_stream(stream_id)
+        except KeyError:
+            await websocket.close(code=4404)
             return
 
-        transport = getattr(process, "_transport", None)
-        if transport is not None and not transport.is_closing():
-            transport.close()
-
+        await websocket.accept()
+        for event in stream.snapshot():
+            await websocket.send_json(event)
+        subscriber_id, queue = stream.subscribe()
         try:
-            await asyncio.wait_for(process.wait(), timeout=1)
-        except asyncio.TimeoutError:
-            if process.returncode is None:
-                with suppress(ProcessLookupError):
-                    process.kill()
-                with suppress(ProcessLookupError):
-                    await process.wait()
+            while True:
+                event = await queue.get()
+                await websocket.send_json(event)
+        except WebSocketDisconnect:
+            return
+        except asyncio.CancelledError:
+            return
+        finally:
+            stream.unsubscribe(subscriber_id)
 
-        self._process = None
+    @app.get("/", response_class=HTMLResponse)
+    async def index() -> Response:
+        return _spa_index_response(title or "PBI Agent")
 
-    def _build_environment(self, width: int = 80, height: int = 24) -> dict[str, str]:
-        environment = dict(os.environ.copy())
-        environment["TEXTUAL_DRIVER"] = "pbi_agent.web.textual_web_driver:PBIWebDriver"
-        environment["TEXTUAL_FPS"] = "60"
-        environment["TEXTUAL_COLOR_SYSTEM"] = "truecolor"
-        environment["TERM_PROGRAM"] = "textual"
-        environment["TERM_PROGRAM_VERSION"] = version("textual-serve")
-        environment["COLUMNS"] = str(width)
-        environment["ROWS"] = str(height)
-        if self.debug:
-            environment["TEXTUAL"] = "debug,devtools"
-            environment["TEXTUAL_LOG"] = "textual.log"
-        return environment
+    @app.get("/{full_path:path}", response_class=HTMLResponse)
+    async def spa_fallback(full_path: str) -> Response:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found.")
+        if full_path == APP_EVENT_STREAM_ID:
+            raise HTTPException(status_code=404, detail="Not found.")
+        return _spa_index_response(title or "PBI Agent")
 
-    async def paste(self, text: str) -> None:
-        await self.send_meta({"type": "paste", "text": text})
+    return app
 
 
-class _FaviconServer(Server):
-    """A ``textual-serve`` server with custom branding, template, and favicon."""
+def _spa_index_response(title: str) -> Response:
+    index_path = _APP_STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return HTMLResponse(
+        (
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            f"<title>{title}</title>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<style>body{font-family:system-ui,sans-serif;background:#0b1020;"
+            "color:#eef2ff;padding:40px}code{background:#111827;padding:2px 6px;"
+            "border-radius:6px}</style></head><body>"
+            "<h1>PBI Agent Web UI assets are missing.</h1>"
+            "<p>Run <code>npm install</code> then <code>npm run web:build</code> "
+            "to build the bundled frontend.</p></body></html>"
+        )
+    )
 
+
+class PBIWebServer:
     def __init__(
         self,
-        command: str,
-        host: str = "localhost",
+        *,
+        settings: Settings,
+        host: str = "127.0.0.1",
         port: int = 8000,
         title: str | None = None,
         public_url: str | None = None,
     ) -> None:
-        super().__init__(
-            command,
-            host=host,
-            port=port,
-            title=title,
-            public_url=public_url,
-            templates_path=_TEMPLATES_DIR,
+        self._settings = settings
+        self.host = host
+        self.port = port
+        self.title = title
+        self.public_url = public_url
+        self.console = Console(highlight=False)
+
+    def serve(self, debug: bool = False) -> None:
+        app = create_app(
+            self._settings,
+            debug=debug,
+            title=self.title,
+            public_url=self.public_url,
         )
-        self._app_services: set[_PBIAppService] = set()
-
-    # ------------------------------------------------------------------
-    async def _make_app(self) -> web.Application:  # type: ignore[override]
-        app = await super()._make_app()
-        app.router.add_get("/favicon.ico", self._handle_favicon)
-        app.router.add_get("/logo.png", self._handle_logo)
-        return app
-
-    async def on_startup(self, app: web.Application) -> None:
-        del app
+        target = self.public_url or f"http://{self.host}:{self.port}"
         self.console.print(startup_panel(), highlight=False)
-        self.console.print(f"  Serving on [bold]{self.public_url}[/bold]")
+        self.console.print(f"  Serving on [bold]{target}[/bold]")
         self.console.print("[cyan]  Press Ctrl+C to quit[/cyan]")
-
-    async def on_shutdown(self, app: web.Application) -> None:
-        del app
-        await asyncio.gather(
-            *(asyncio.shield(app_service.stop()) for app_service in self._app_services),
-            return_exceptions=True,
-        )
-
-    async def _handle_favicon(self, _request: web.Request) -> web.FileResponse:
-        return web.FileResponse(
-            _FAVICON_PATH,
-            headers={"Content-Type": "image/png"},
-        )
-
-    async def _handle_logo(self, _request: web.Request) -> web.FileResponse:
-        return web.FileResponse(
-            _FAVICON_PATH,
-            headers={
-                "Content-Type": "image/png",
-                "Cache-Control": "public, max-age=86400",
-            },
-        )
-
-    async def _process_messages(
-        self, websocket: web.WebSocketResponse, app_service: _PBIAppService
-    ) -> None:
-        text_type = WSMsgType.TEXT
-
-        async for message in websocket:
-            if message.type != text_type:
-                continue
-            envelope = message.json()
-            assert isinstance(envelope, list)
-            type_ = envelope[0]
-            if type_ == "stdin":
-                data = envelope[1]
-                await app_service.send_bytes(data.encode("utf-8"))
-            elif type_ == "paste":
-                data = envelope[1]
-                if isinstance(data, str):
-                    await app_service.paste(data)
-            elif type_ == "resize":
-                data = envelope[1]
-                await app_service.set_terminal_size(data["width"], data["height"])
-            elif type_ == "ping":
-                data = envelope[1]
-                await websocket.send_json(["pong", data])
-            elif type_ == "blur":
-                await app_service.blur()
-            elif type_ == "focus":
-                await app_service.focus()
-
-    async def handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
-        websocket = web.WebSocketResponse(heartbeat=15)
-
-        width = _to_int(request.query.get("width", "80"), 80)
-        height = _to_int(request.query.get("height", "24"), 24)
-
-        app_service: _PBIAppService | None = None
-        try:
-            await websocket.prepare(request)
-            app_service = _PBIAppService(
-                self.command,
-                write_bytes=websocket.send_bytes,
-                write_str=websocket.send_str,
-                close=websocket.close,
-                download_manager=self.download_manager,
-                debug=self.debug,
+        server = _GracefulUvicornServer(
+            uvicorn.Config(
+                app=app,
+                host=self.host,
+                port=self.port,
+                log_level="info" if debug else "warning",
             )
-            self._app_services.add(app_service)
-            await app_service.start(width, height)
-            try:
-                await self._process_messages(websocket, app_service)
-            finally:
-                await app_service.stop()
+        )
+        try:
+            server.run()
+        except KeyboardInterrupt:
+            return
 
-        except asyncio.CancelledError:
-            await websocket.close()
 
-        except Exception as error:
-            log.exception(error)
+class _GracefulUvicornServer(uvicorn.Server):
+    @contextlib.contextmanager
+    def capture_signals(self):
+        if threading.current_thread() is not threading.main_thread():
+            yield
+            return
 
+        handled_signals = getattr(
+            uvicorn.server,
+            "HANDLED_SIGNALS",
+            (signal.SIGINT, signal.SIGTERM),
+        )
+        original_handlers = {
+            sig: signal.signal(sig, self.handle_exit) for sig in handled_signals
+        }
+        try:
+            yield
         finally:
-            if app_service is not None:
-                self._app_services.discard(app_service)
-                await app_service.stop()
-
-        return websocket
-
-
-def _to_int(value: str, default: int) -> int:
-    try:
-        return int(value)
-    except ValueError:
-        return default
-
-
-# -- CLI entry-point ----------------------------------------------------
+            for sig, handler in original_handlers.items():
+                signal.signal(sig, handler)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="pbi-agent web server")
-    parser.add_argument("command", help="Shell command to run the Textual app")
-    parser.add_argument("--host", default="localhost")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--title", default=None)
     parser.add_argument("--url", default=None, dest="public_url")
     parser.add_argument("--dev", action="store_true", default=False)
+    parser.add_argument("--api-key", required=True)
+    parser.add_argument("--provider", default="openai")
+    parser.add_argument("--model", default="gpt-5.4")
+    parser.add_argument("--sub-agent-model", default="gpt-5.4-mini")
+    parser.add_argument(
+        "--responses-url", default="https://api.openai.com/v1/responses"
+    )
+    parser.add_argument(
+        "--generic-api-url", default="https://openrouter.ai/api/v1/chat/completions"
+    )
+    parser.add_argument("--reasoning-effort", default="xhigh")
+    parser.add_argument("--max-tool-workers", type=int, default=4)
+    parser.add_argument("--max-retries", type=int, default=3)
+    parser.add_argument("--compact-threshold", type=int, default=150000)
+    parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--service-tier", default=None)
+    parser.add_argument("--no-web-search", action="store_true", default=False)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
-    server = _FaviconServer(
-        command=args.command,
+    settings = Settings(
+        api_key=args.api_key,
+        provider=args.provider,
+        model=args.model,
+        sub_agent_model=args.sub_agent_model,
+        responses_url=args.responses_url,
+        generic_api_url=args.generic_api_url,
+        reasoning_effort=args.reasoning_effort,
+        max_tool_workers=args.max_tool_workers,
+        max_retries=args.max_retries,
+        compact_threshold=args.compact_threshold,
+        max_tokens=args.max_tokens,
+        verbose=args.verbose,
+        service_tier=args.service_tier,
+        web_search=not args.no_web_search,
+    )
+    PBIWebServer(
+        settings=settings,
         host=args.host,
         port=args.port,
         title=args.title,
         public_url=args.public_url,
-    )
-    server.serve(debug=args.dev)
+    ).serve(debug=args.dev)
 
 
 if __name__ == "__main__":

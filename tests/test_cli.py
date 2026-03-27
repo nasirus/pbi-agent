@@ -166,13 +166,6 @@ class DefaultWebCommandTests(unittest.TestCase):
 
         self.assertTrue(args.agents)
 
-    def test_web_chat_command_uses_parent_pid_wrapper(self) -> None:
-        command = cli._web_chat_command(self._settings(verbose=True), parent_pid=4321)
-
-        self.assertIn("pbi_agent.web.chat_entry", command)
-        self.assertIn("--parent-pid 4321", command)
-        self.assertIn("--verbose", command)
-
     def test_handle_web_command_serves_in_process(self) -> None:
         parser = cli.build_parser()
         args = parser.parse_args(["web", "--port", "9001"])
@@ -193,8 +186,7 @@ class DefaultWebCommandTests(unittest.TestCase):
             9001,
             "http://127.0.0.1:9001",
         )
-        mock_server.assert_called_once()
-        self.assertIn("pbi_agent.web.chat_entry", mock_server.call_args.args[1])
+        mock_server.assert_called_once_with(args, settings)
         server.serve.assert_called_once_with(debug=False)
 
     def test_handle_web_command_sets_and_restores_settings_env(self) -> None:
