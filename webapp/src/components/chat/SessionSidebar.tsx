@@ -8,6 +8,8 @@ export function SessionSidebar({
   workspaceRoot,
   onNewSession,
   onResumeSession,
+  onToggle,
+  isOpen,
 }: {
   sessions: SessionRecord[];
   isLoading: boolean;
@@ -15,14 +17,49 @@ export function SessionSidebar({
   workspaceRoot: string | undefined;
   onNewSession: () => void;
   onResumeSession: (sessionId: string) => void;
+  onToggle: () => void;
+  isOpen: boolean;
 }): JSX.Element {
+  if (!isOpen) {
+    return (
+      <div className="sidebar__collapsed">
+        <button
+          type="button"
+          className="sidebar__toggle"
+          onClick={onToggle}
+          title="Show sessions"
+        >
+          &#9654;
+        </button>
+        <button
+          type="button"
+          className="btn btn--primary btn--icon"
+          onClick={onNewSession}
+          title="New session"
+        >
+          +
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <aside className="sidebar">
+    <>
       <div className="sidebar__header">
         <span className="sidebar__title">Sessions</span>
-        <button type="button" className="btn btn--primary btn--sm" onClick={onNewSession}>
-          + New
-        </button>
+        <div style={{ display: "flex", gap: "var(--sp-2)" }}>
+          <button type="button" className="btn btn--primary btn--sm" onClick={onNewSession}>
+            + New
+          </button>
+          <button
+            type="button"
+            className="sidebar__toggle"
+            onClick={onToggle}
+            title="Hide sessions"
+          >
+            &#9664;
+          </button>
+        </div>
       </div>
 
       {workspaceRoot ? (
@@ -64,6 +101,6 @@ export function SessionSidebar({
           ))
         )}
       </div>
-    </aside>
+    </>
   );
 }

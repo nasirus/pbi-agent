@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   createChatSession,
@@ -19,6 +19,8 @@ export function ChatPage({
 }: {
   workspaceRoot: string | undefined;
 }): JSX.Element {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const liveSessionId = useChatStore((s) => s.liveSessionId);
   const switchLiveSession = useChatStore((s) => s.switchLiveSession);
   const clearTimeline = useChatStore((s) => s.clearTimeline);
@@ -74,17 +76,21 @@ export function ChatPage({
   };
 
   return (
-    <section className="chat-layout">
-      <SessionSidebar
-        sessions={sessionsQuery.data ?? []}
-        isLoading={sessionsQuery.isLoading}
-        activeSessionId={null}
-        workspaceRoot={workspaceRoot}
-        onNewSession={() => createSessionMutation.mutate({})}
-        onResumeSession={(sessionId) =>
-          createSessionMutation.mutate({ resume_session_id: sessionId })
-        }
-      />
+    <section className={`chat-layout ${sidebarOpen ? "chat-layout--sidebar-open" : ""}`}>
+      <div className={`sidebar ${sidebarOpen ? "sidebar--open" : ""}`}>
+        <SessionSidebar
+          sessions={sessionsQuery.data ?? []}
+          isLoading={sessionsQuery.isLoading}
+          activeSessionId={null}
+          workspaceRoot={workspaceRoot}
+          onNewSession={() => createSessionMutation.mutate({})}
+          onResumeSession={(sessionId) =>
+            createSessionMutation.mutate({ resume_session_id: sessionId })
+          }
+          onToggle={() => setSidebarOpen((prev) => !prev)}
+          isOpen={sidebarOpen}
+        />
+      </div>
 
       <div className="chat-panel">
         <ConnectionBadge connection={connection} />

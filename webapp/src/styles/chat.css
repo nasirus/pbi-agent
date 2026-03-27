@@ -2,9 +2,14 @@
 
 .chat-layout {
   display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-columns: 44px 1fr;
   height: calc(100vh - var(--topbar-height));
   overflow: hidden;
+  transition: grid-template-columns var(--duration-slow) var(--ease-out);
+}
+
+.chat-layout--sidebar-open {
+  grid-template-columns: var(--sidebar-width) 1fr;
 }
 
 /* ── Session Sidebar ── */
@@ -16,6 +21,33 @@
   overflow: hidden;
   min-height: 0;
   max-height: 100%;
+}
+
+/* Collapsed sidebar strip */
+.sidebar__collapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+}
+
+.sidebar__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.sidebar__toggle:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
 }
 
 .sidebar__header {
