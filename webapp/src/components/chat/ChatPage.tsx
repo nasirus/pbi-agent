@@ -84,7 +84,8 @@ export function ChatPage({
   const mutateRef = useRef(createSessionMutation.mutate);
   mutateRef.current = createSessionMutation.mutate;
 
-  useLiveChatEvents(liveSessionId);
+  // Only open the WebSocket after the server has confirmed the session exists
+  useLiveChatEvents(createSessionMutation.isSuccess ? liveSessionId : null);
 
   useEffect(() => {
     if (startedRef.current) return;
@@ -131,7 +132,10 @@ export function ChatPage({
       </div>
 
       <div className="chat-panel">
-        <ConnectionBadge connection={connection} />
+        <div className="chat-topbar">
+          <ConnectionBadge connection={connection} />
+          <UsageBar sessionUsage={sessionUsage} turnUsage={turnUsage} />
+        </div>
 
         {waitMessage ? <div className="banner banner--wait">{waitMessage}</div> : null}
         {fatalError ? <div className="banner banner--error">{fatalError}</div> : null}
@@ -141,8 +145,6 @@ export function ChatPage({
           subAgents={subAgents}
           connection={connection}
         />
-
-        <UsageBar sessionUsage={sessionUsage} turnUsage={turnUsage} />
 
         <Composer
           ref={composerRef}

@@ -35,6 +35,17 @@
   font-weight: var(--weight-bold);
 }
 
+.topbar__folder {
+  margin-left: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-normal);
+  color: var(--color-text-tertiary);
+  text-transform: none;
+  letter-spacing: normal;
+  opacity: 0.7;
+}
+
 /* ── Navigation tabs ── */
 .topnav {
   display: flex;

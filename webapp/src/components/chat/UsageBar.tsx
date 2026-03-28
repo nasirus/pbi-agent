@@ -12,28 +12,23 @@ export function UsageBar({
   sessionUsage: UsagePayload | null;
   turnUsage: { usage: UsagePayload; elapsedSeconds?: number } | null;
 }) {
+  const tokens = formatTokens(sessionUsage?.total_tokens ?? 0);
+  const cost = `$${(sessionUsage?.estimated_cost_usd ?? 0).toFixed(2)}`;
+  const lastTurn = turnUsage
+    ? `${formatTokens(turnUsage.usage.total_tokens)} / ${turnUsage.elapsedSeconds?.toFixed(1) ?? "0.0"}s`
+    : null;
+
   return (
-    <div className="usage-bar">
-      <div className="usage-bar__item">
-        <span className="usage-bar__value">
-          {formatTokens(sessionUsage?.total_tokens ?? 0)}
-        </span>
-        <span className="usage-bar__label">Session tokens</span>
-      </div>
-      <div className="usage-bar__item">
-        <span className="usage-bar__value">
-          ${(sessionUsage?.estimated_cost_usd ?? 0).toFixed(4)}
-        </span>
-        <span className="usage-bar__label">Cost</span>
-      </div>
-      <div className="usage-bar__item">
-        <span className="usage-bar__value">
-          {turnUsage
-            ? `${formatTokens(turnUsage.usage.total_tokens)} / ${turnUsage.elapsedSeconds?.toFixed(1) ?? "0.0"}s`
-            : "\u2014"}
-        </span>
-        <span className="usage-bar__label">Last turn</span>
-      </div>
+    <div className="usage-pills">
+      <span className="usage-pills__item" title="Session tokens">{tokens}</span>
+      <span className="usage-pills__sep" />
+      <span className="usage-pills__item" title="Estimated cost">{cost}</span>
+      {lastTurn ? (
+        <>
+          <span className="usage-pills__sep" />
+          <span className="usage-pills__item" title="Last turn">{lastTurn}</span>
+        </>
+      ) : null}
     </div>
   );
 }

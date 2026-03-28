@@ -22,12 +22,18 @@ export function AppShell() {
   });
 
   const bootstrap = bootstrapQuery.data;
+  const folderLabel = bootstrap?.workspace_root
+    ? bootstrap.workspace_root.split(/[/\\]/).filter(Boolean).slice(-2).join("/")
+    : null;
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar__brand">
           <strong>Agent</strong> Control Room
+          {folderLabel ? (
+            <span className="topbar__folder" title={bootstrap?.workspace_root}>{folderLabel}</span>
+          ) : null}
         </div>
         <nav className="topnav">
           <NavLink to="/" end>Chat</NavLink>
