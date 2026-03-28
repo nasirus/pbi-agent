@@ -14,7 +14,7 @@ import { ConnectionBadge } from "./ConnectionBadge";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatTimeline } from "./ChatTimeline";
 import { UsageBar } from "./UsageBar";
-import { Composer } from "./Composer";
+import { Composer, type ComposerHandle } from "./Composer";
 
 export function ChatPage({
   workspaceRoot,
@@ -23,6 +23,7 @@ export function ChatPage({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const composerRef = useRef<ComposerHandle>(null);
 
   const {
     liveSessionId,
@@ -97,6 +98,13 @@ export function ChatPage({
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Focus composer whenever input becomes available
+  useEffect(() => {
+    if (inputEnabled && liveSessionId && !sessionEnded) {
+      composerRef.current?.focus();
+    }
+  }, [inputEnabled, liveSessionId, sessionEnded]);
+
   const handleSubmit = async (text: string, imagePaths: string[]) => {
     await sendInputMutation.mutateAsync({ text, image_paths: imagePaths });
   };
@@ -109,7 +117,11 @@ export function ChatPage({
           isLoading={sessionsQuery.isLoading}
           activeSessionId={null}
           workspaceRoot={workspaceRoot}
-          onNewSession={() => createSessionMutation.mutate({})}
+          onNewSession={() => {
+            createSessionMutation.mutate({});
+            setSidebarOpen(false);
+            setTimeout(() => composerRef.current?.focus(), 100);
+          }}
           onResumeSession={(sessionId) =>
             createSessionMutation.mutate({ resume_session_id: sessionId })
           }
@@ -133,6 +145,7 @@ export function ChatPage({
         <UsageBar sessionUsage={sessionUsage} turnUsage={turnUsage} />
 
         <Composer
+          ref={composerRef}
           inputEnabled={inputEnabled}
           sessionEnded={sessionEnded}
           liveSessionId={liveSessionId}

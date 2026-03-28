@@ -1,20 +1,30 @@
-import { useCallback, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
-export function Composer({
-  inputEnabled,
-  sessionEnded,
-  liveSessionId,
-  onSubmit,
-}: {
+export interface ComposerHandle {
+  focus: () => void;
+}
+
+interface ComposerProps {
   inputEnabled: boolean;
   sessionEnded: boolean;
   liveSessionId: string | null;
   onSubmit: (text: string, imagePaths: string[]) => Promise<void>;
-}) {
+}
+
+export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer({
+  inputEnabled,
+  sessionEnded,
+  liveSessionId,
+  onSubmit,
+}, ref) {
   const [input, setInput] = useState("");
   const [imagePaths, setImagePaths] = useState("");
   const [showImages, setShowImages] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => textareaRef.current?.focus(),
+  }));
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
@@ -113,4 +123,4 @@ export function Composer({
       ) : null}
     </form>
   );
-}
+});
