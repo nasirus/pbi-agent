@@ -61,6 +61,16 @@ export function TaskCard({
         >
           Run
         </button>
+        {task.session_id ? (
+          <a
+            className="btn btn--ghost btn--sm"
+            href={`/?session=${encodeURIComponent(task.session_id)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Chat
+          </a>
+        ) : null}
         <button type="button" className="btn btn--danger btn--sm" onClick={onDelete}>
           Delete
         </button>

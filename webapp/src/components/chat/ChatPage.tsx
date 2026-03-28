@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -20,6 +21,7 @@ export function ChatPage({
 }: {
   workspaceRoot: string | undefined;
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const {
@@ -86,7 +88,13 @@ export function ChatPage({
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    mutateRef.current(liveSessionId ? { live_session_id: liveSessionId } : {});
+    const resumeId = searchParams.get("session");
+    if (resumeId) {
+      mutateRef.current({ resume_session_id: resumeId });
+      setSearchParams({}, { replace: true });
+    } else {
+      mutateRef.current(liveSessionId ? { live_session_id: liveSessionId } : {});
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = async (text: string, imagePaths: string[]) => {
