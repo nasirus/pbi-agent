@@ -64,37 +64,6 @@ export function TaskModal({
             />
           </div>
 
-          <div className="task-form__field">
-            <label className="task-form__label">Stage</label>
-            <select
-              className="task-form__select"
-              value={task.stage}
-              onChange={(e) => onChange({ stage: e.target.value as EditableTask["stage"] })}
-            >
-              <option value="backlog">Backlog</option>
-              <option value="plan">Plan</option>
-              <option value="review">Review</option>
-            </select>
-          </div>
-
-          <div className="task-form__field">
-            <label className="task-form__label">Project Directory</label>
-            <input
-              className="task-form__input"
-              value={task.projectDir}
-              onChange={(e) => onChange({ projectDir: e.target.value })}
-            />
-          </div>
-
-          <div className="task-form__field">
-            <label className="task-form__label">Session ID</label>
-            <input
-              className="task-form__input"
-              value={task.sessionId}
-              onChange={(e) => onChange({ sessionId: e.target.value })}
-              placeholder="Optional"
-            />
-          </div>
 
           <button
             type="submit"
