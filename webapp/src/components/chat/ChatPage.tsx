@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import {
   createChatSession,
+  expandChatInput,
   fetchSessions,
   requestNewChat,
   submitChatInput,
@@ -23,6 +24,7 @@ export function ChatPage({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [inputWarnings, setInputWarnings] = useState<string[]>([]);
   const composerRef = useRef<ComposerHandle>(null);
 
   const {
@@ -106,8 +108,26 @@ export function ChatPage({
     }
   }, [inputEnabled, liveSessionId, sessionEnded]);
 
+  useEffect(() => {
+    if (inputWarnings.length === 0) return undefined;
+    const timeoutId = window.setTimeout(() => setInputWarnings([]), 5000);
+    return () => window.clearTimeout(timeoutId);
+  }, [inputWarnings]);
+
   const handleSubmit = async (text: string, imagePaths: string[]) => {
-    await sendInputMutation.mutateAsync({ text, image_paths: imagePaths });
+    setInputWarnings([]);
+    const expanded = await expandChatInput(text);
+    if (expanded.warnings.length > 0) {
+      setInputWarnings(expanded.warnings);
+    }
+
+    const mergedImagePaths = Array.from(
+      new Set([...expanded.image_paths, ...imagePaths]),
+    );
+    await sendInputMutation.mutateAsync({
+      text: expanded.text,
+      image_paths: mergedImagePaths,
+    });
   };
 
   return (
@@ -138,6 +158,9 @@ export function ChatPage({
         </div>
 
         {waitMessage ? <div className="banner banner--wait">{waitMessage}</div> : null}
+        {inputWarnings.length > 0 ? (
+          <div className="banner banner--notice">{inputWarnings.join(" ")}</div>
+        ) : null}
         {fatalError ? <div className="banner banner--error">{fatalError}</div> : null}
 
         <ChatTimeline

@@ -1,5 +1,7 @@
 import type {
   BootstrapPayload,
+  ExpandedChatInput,
+  FileMentionItem,
   LiveSession,
   SessionRecord,
   TaskRecord,
@@ -39,6 +41,20 @@ export async function fetchSessions(): Promise<SessionRecord[]> {
   return result.sessions;
 }
 
+export async function searchFileMentions(
+  query: string,
+  limit = 8,
+): Promise<FileMentionItem[]> {
+  const params = new URLSearchParams({
+    q: query,
+    limit: String(limit),
+  });
+  const result = await requestJson<{ items: FileMentionItem[] }>(
+    `/api/files/search?${params.toString()}`,
+  );
+  return result.items;
+}
+
 export async function createChatSession(
   payload: Partial<{
     live_session_id: string;
@@ -64,6 +80,13 @@ export async function submitChatInput(
     },
   );
   return result.session;
+}
+
+export async function expandChatInput(text: string): Promise<ExpandedChatInput> {
+  return requestJson<ExpandedChatInput>("/api/chat/expand-input", {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
 }
 
 export async function requestNewChat(liveSessionId: string): Promise<LiveSession> {

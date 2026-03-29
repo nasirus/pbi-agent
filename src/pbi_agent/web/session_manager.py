@@ -21,6 +21,7 @@ from pbi_agent.session_store import (
 )
 from pbi_agent.task_runner import run_single_turn_in_directory
 from pbi_agent.ui.formatting import shorten
+from pbi_agent.ui.input_mentions import MentionSearchResult, WorkspaceFileIndex
 from pbi_agent.web.display import KanbanTaskDisplay, WebDisplay
 
 
@@ -128,6 +129,7 @@ class WebSessionManager:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._workspace_root = Path.cwd().resolve()
+        self._mention_index = WorkspaceFileIndex(self._workspace_root)
         self._directory_key = str(self._workspace_root)
         self._app_stream = EventStream()
         self._chat_sessions: dict[str, LiveChatSession] = {}
@@ -139,6 +141,21 @@ class WebSessionManager:
     @property
     def workspace_root(self) -> Path:
         return self._workspace_root
+
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
+    def warm_file_mentions_cache(self) -> None:
+        self._mention_index.warm_cache()
+
+    def search_file_mentions(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+    ) -> list[MentionSearchResult]:
+        return self._mention_index.search(query, limit=limit)
 
     def bootstrap(self) -> dict[str, Any]:
         return {

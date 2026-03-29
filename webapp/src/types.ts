@@ -64,6 +64,17 @@ export type LiveSession = {
   ended_at: string | null;
 };
 
+export type FileMentionItem = {
+  path: string;
+  kind: "file" | "image";
+};
+
+export type ExpandedChatInput = {
+  text: string;
+  image_paths: string[];
+  warnings: string[];
+};
+
 export type BootstrapPayload = {
   workspace_root: string;
   provider: string;

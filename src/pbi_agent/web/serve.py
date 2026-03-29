@@ -32,6 +32,8 @@ import uvicorn.server
 from pbi_agent.config import ConfigError
 from pbi_agent.branding import startup_panel
 from pbi_agent.config import Settings, resolve_settings
+from pbi_agent.providers.capabilities import provider_supports_images
+from pbi_agent.ui.input_mentions import expand_input_mentions
 from pbi_agent.web.session_manager import APP_EVENT_STREAM_ID, WebSessionManager
 
 _WEB_DIR = Path(__file__).resolve().parent
@@ -43,6 +45,8 @@ RunStatus = Literal["idle", "running", "completed", "failed"]
 SessionStatus = Literal["starting", "running", "ended"]
 NonEmptyString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 LimitQuery = Annotated[int, Query(ge=1, le=200)]
+MentionQuery = Annotated[str, Query(max_length=200)]
+MentionLimitQuery = Annotated[int, Query(ge=1, le=50)]
 LiveSessionIdPath = Annotated[
     str,
     FastAPIPath(min_length=1, description="The live chat session identifier."),
@@ -65,6 +69,25 @@ class CreateChatSessionRequest(BaseModel):
 class ChatInputRequest(BaseModel):
     text: str = ""
     image_paths: list[str] = Field(default_factory=list)
+
+
+class ExpandInputRequest(BaseModel):
+    text: str = ""
+
+
+class FileMentionItemModel(BaseModel):
+    path: str
+    kind: Literal["file", "image"]
+
+
+class FileMentionSearchResponse(BaseModel):
+    items: list[FileMentionItemModel]
+
+
+class ExpandInputResponse(BaseModel):
+    text: str
+    image_paths: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CreateTaskRequest(BaseModel):
@@ -197,6 +220,23 @@ def list_sessions(
     )
 
 
+@system_router.get("/files/search", response_model=FileMentionSearchResponse)
+def search_workspace_files(
+    manager: SessionManagerDep,
+    q: MentionQuery = "",
+    limit: MentionLimitQuery = 8,
+) -> FileMentionSearchResponse:
+    return FileMentionSearchResponse(
+        items=[
+            FileMentionItemModel(path=item.path, kind=item.kind)
+            for item in manager.search_file_mentions(
+                q,
+                limit=limit,
+            )
+        ]
+    )
+
+
 @chat_router.post("/session", response_model=ChatSessionResponse)
 def create_chat_session(
     request: CreateChatSessionRequest,
@@ -234,6 +274,28 @@ def submit_chat_input(
         raise _bad_request(str(exc)) from exc
     return ChatSessionResponse(
         session=_model_from_payload(LiveSessionModel, session),
+    )
+
+
+@chat_router.post("/expand-input", response_model=ExpandInputResponse)
+def expand_chat_input(
+    request: ExpandInputRequest,
+    manager: SessionManagerDep,
+) -> ExpandInputResponse:
+    expanded_text, image_paths, warnings = expand_input_mentions(
+        request.text,
+        root=manager.workspace_root,
+    )
+    if image_paths and not provider_supports_images(manager.settings.provider):
+        warnings = [
+            *warnings,
+            "Image mentions are not supported by the current provider.",
+        ]
+        image_paths = []
+    return ExpandInputResponse(
+        text=expanded_text,
+        image_paths=image_paths,
+        warnings=warnings,
     )
 
 
@@ -371,6 +433,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        threading.Thread(
+            target=manager.warm_file_mentions_cache,
+            daemon=True,
+            name="pbi-agent-web-mention-cache",
+        ).start()
         try:
             yield
         except asyncio.CancelledError:

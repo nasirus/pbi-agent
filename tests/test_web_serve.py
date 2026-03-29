@@ -45,6 +45,71 @@ def test_bootstrap_endpoint_returns_workspace_metadata() -> None:
     assert payload["board_stages"] == ["backlog", "plan", "processing", "review"]
 
 
+def test_file_search_endpoint_returns_workspace_matches(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "main.py").write_text("print('hi')\n", encoding="utf-8")
+    (tmp_path / "docs" / "maintainer.md").write_text("owner\n", encoding="utf-8")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "main.js").write_text("ignored\n", encoding="utf-8")
+
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.get("/api/files/search", params={"q": "ma", "limit": 10})
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {"path": "main.py", "kind": "file"},
+        {"path": "docs/maintainer.md", "kind": "file"},
+    ]
+
+
+def test_expand_input_endpoint_expands_mentions_and_extracts_images(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "notes.md").write_text("hello notes\n", encoding="utf-8")
+    (tmp_path / "mockup.png").write_bytes(b"png")
+
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/chat/expand-input",
+            json={"text": "Review @notes.md and @mockup.png carefully"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["text"].startswith("Review and carefully")
+    assert "## Referenced Files" in payload["text"]
+    assert payload["image_paths"] == ["mockup.png"]
+    assert payload["warnings"] == []
+
+
+def test_expand_input_endpoint_warns_when_image_mentions_are_unsupported(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mockup.png").write_bytes(b"png")
+    app = create_app(Settings(api_key="test-key", provider="xai", model="grok-4"))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/chat/expand-input",
+            json={"text": "Review @mockup.png carefully"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["text"] == "Review carefully"
+    assert payload["image_paths"] == []
+    assert payload["warnings"] == [
+        "Image mentions are not supported by the current provider."
+    ]
+
+
 def test_sessions_endpoint_rejects_invalid_limit() -> None:
     app = create_app(_settings())
 

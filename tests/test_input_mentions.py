@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pbi_agent.ui.input_mentions import expand_file_mentions, expand_input_mentions
+import pbi_agent.ui.input_mentions as input_mentions
+from pbi_agent.ui.input_mentions import (
+    WorkspaceFileIndex,
+    expand_file_mentions,
+    expand_input_mentions,
+    search_input_mentions,
+)
 
 
 def test_expand_file_mentions_appends_workspace_file_content(tmp_path: Path) -> None:
@@ -99,3 +105,51 @@ def test_expand_file_mentions_supports_literal_spaces(tmp_path: Path) -> None:
     assert "Summarize @my notes.txt please" not in expanded
     assert expanded.startswith("Summarize please")
     assert "hello notes" in expanded
+
+
+def test_search_input_mentions_returns_ranked_matches(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "main.py").write_text("print('hi')\n", encoding="utf-8")
+    (tmp_path / "docs" / "maintainer.md").write_text("owner\n", encoding="utf-8")
+    (tmp_path / "domain.txt").write_text("domain\n", encoding="utf-8")
+
+    results = search_input_mentions("ma", root=tmp_path, limit=10)
+
+    assert [item.path for item in results] == [
+        "main.py",
+        "docs/maintainer.md",
+        "domain.txt",
+    ]
+
+
+def test_search_input_mentions_skips_filtered_directories(tmp_path: Path) -> None:
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "main.js").write_text("ignored\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("print('hi')\n", encoding="utf-8")
+
+    results = search_input_mentions("ma", root=tmp_path, limit=10)
+
+    assert [item.path for item in results] == ["main.py"]
+
+
+def test_workspace_file_index_reuses_cached_file_list(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (tmp_path / "main.py").write_text("print('hi')\n", encoding="utf-8")
+
+    walk_calls = 0
+    original_walk = input_mentions.os.walk
+
+    def counting_walk(*args, **kwargs):
+        nonlocal walk_calls
+        walk_calls += 1
+        return original_walk(*args, **kwargs)
+
+    monkeypatch.setattr(input_mentions.os, "walk", counting_walk)
+
+    index = WorkspaceFileIndex(tmp_path)
+
+    assert [item.path for item in index.search("ma", limit=10)] == ["main.py"]
+    assert [item.path for item in index.search("ma", limit=10)] == ["main.py"]
+    assert walk_calls == 1

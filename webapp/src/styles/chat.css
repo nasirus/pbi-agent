@@ -585,7 +585,7 @@
 
 .composer__input-row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: var(--sp-2);
   background: var(--color-surface-2);
   border: 1px solid var(--color-border);
@@ -598,11 +598,18 @@
   border-color: var(--color-accent-border);
 }
 
+.composer__textarea-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
 .composer__textarea {
   flex: 1;
+  width: 100%;
   min-height: 20px;
   max-height: 200px;
-  padding: var(--sp-1) var(--sp-2);
+  padding: 6px var(--sp-3);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
   background: transparent;
@@ -611,6 +618,68 @@
 
 .composer__textarea::placeholder {
   color: var(--color-text-tertiary);
+}
+
+.composer__mentions {
+  margin-top: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--sp-1);
+  background: color-mix(in srgb, var(--color-surface-0) 94%, black 6%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.composer__mention-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  text-align: left;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.composer__mention-item:hover,
+.composer__mention-item--active {
+  background: var(--color-accent-muted);
+  color: var(--color-text);
+}
+
+.composer__mention-empty {
+  padding: var(--sp-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.composer__mention-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.composer__mention-kind {
+  flex-shrink: 0;
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--color-surface-3);
+  color: var(--color-text-tertiary);
+}
+
+.composer__mention-kind--image {
+  background: color-mix(in srgb, var(--color-accent-muted) 72%, white 28%);
+  color: var(--color-accent);
 }
 
 .composer__send {
@@ -753,6 +822,12 @@
   background: var(--color-surface-1);
   color: var(--color-text-secondary);
   border-left: 2px solid var(--color-accent);
+}
+
+.banner--notice {
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface-1) 90%);
+  color: var(--color-text-secondary);
+  border-left: 2px solid var(--color-warning);
 }
 
 .banner--error {
