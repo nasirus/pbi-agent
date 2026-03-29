@@ -4,6 +4,7 @@ import type {
   FileMentionItem,
   LiveSession,
   SessionRecord,
+  SlashCommandItem,
   TaskRecord,
 } from "./types";
 
@@ -41,6 +42,10 @@ export async function fetchSessions(): Promise<SessionRecord[]> {
   return result.sessions;
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  await requestJson<void>(`/api/sessions/${sessionId}`, { method: "DELETE" });
+}
+
 export async function searchFileMentions(
   query: string,
   limit = 8,
@@ -51,6 +56,20 @@ export async function searchFileMentions(
   });
   const result = await requestJson<{ items: FileMentionItem[] }>(
     `/api/files/search?${params.toString()}`,
+  );
+  return result.items;
+}
+
+export async function searchSlashCommands(
+  query: string,
+  limit = 8,
+): Promise<SlashCommandItem[]> {
+  const params = new URLSearchParams({
+    q: query,
+    limit: String(limit),
+  });
+  const result = await requestJson<{ items: SlashCommandItem[] }>(
+    `/api/slash-commands/search?${params.toString()}`,
   );
   return result.items;
 }

@@ -33,6 +33,7 @@ from pbi_agent.config import ConfigError
 from pbi_agent.branding import startup_panel
 from pbi_agent.config import Settings, resolve_settings
 from pbi_agent.providers.capabilities import provider_supports_images
+from pbi_agent.ui.command_registry import search_slash_commands
 from pbi_agent.ui.input_mentions import expand_input_mentions
 from pbi_agent.web.session_manager import APP_EVENT_STREAM_ID, WebSessionManager
 
@@ -59,6 +60,10 @@ StreamIdPath = Annotated[
     str,
     FastAPIPath(min_length=1, description="The event stream identifier."),
 ]
+SessionIdPath = Annotated[
+    str,
+    FastAPIPath(min_length=1, description="The saved session identifier."),
+]
 
 
 class CreateChatSessionRequest(BaseModel):
@@ -83,6 +88,15 @@ class FileMentionItemModel(BaseModel):
 
 class FileMentionSearchResponse(BaseModel):
     items: list[FileMentionItemModel]
+
+
+class SlashCommandItemModel(BaseModel):
+    name: str
+    description: str
+
+
+class SlashCommandSearchResponse(BaseModel):
+    items: list[SlashCommandItemModel]
 
 
 class ExpandInputResponse(BaseModel):
@@ -222,6 +236,20 @@ def list_sessions(
     )
 
 
+@system_router.delete("/sessions/{session_id}", status_code=204)
+def delete_session(
+    session_id: SessionIdPath,
+    manager: SessionManagerDep,
+) -> Response:
+    try:
+        manager.delete_session(session_id)
+    except KeyError as exc:
+        raise _not_found("Session not found.") from exc
+    except Exception as exc:
+        raise _bad_request(str(exc)) from exc
+    return Response(status_code=204)
+
+
 @system_router.get("/files/search", response_model=FileMentionSearchResponse)
 def search_workspace_files(
     manager: SessionManagerDep,
@@ -233,6 +261,23 @@ def search_workspace_files(
             FileMentionItemModel(path=item.path, kind=item.kind)
             for item in manager.search_file_mentions(
                 q,
+                limit=limit,
+            )
+        ]
+    )
+
+
+@system_router.get("/slash-commands/search", response_model=SlashCommandSearchResponse)
+def search_available_slash_commands(
+    q: MentionQuery = "",
+    limit: MentionLimitQuery = 8,
+) -> SlashCommandSearchResponse:
+    return SlashCommandSearchResponse(
+        items=[
+            SlashCommandItemModel(name=item.name, description=item.description)
+            for item in search_slash_commands(
+                q,
+                surface="web",
                 limit=limit,
             )
         ]

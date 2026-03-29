@@ -90,7 +90,10 @@ export function TimelineEntry({
       : "assistant";
 
     return (
-      <div className={`timeline-entry timeline-entry--${roleClass}`}>
+      <div
+        className={`timeline-entry timeline-entry--${roleClass}`}
+        data-timeline-item-id={item.itemId}
+      >
         {subAgentBanner}
         <div className="timeline-entry__content">
           {item.markdown && roleClass !== "user" ? (
@@ -110,7 +113,10 @@ export function TimelineEntry({
 
   if (item.kind === "thinking") {
     return (
-      <div className="timeline-entry timeline-entry--thinking">
+      <div
+        className="timeline-entry timeline-entry--thinking"
+        data-timeline-item-id={item.itemId}
+      >
         {subAgentBanner}
         <div
           className="timeline-entry__header"
@@ -132,7 +138,10 @@ export function TimelineEntry({
 
   // tool_group
   return (
-    <div className="timeline-entry timeline-entry--tool">
+    <div
+      className="timeline-entry timeline-entry--tool"
+      data-timeline-item-id={item.itemId}
+    >
       {subAgentBanner}
       <div
         className="timeline-entry__header"

@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import {
   createChatSession,
+  deleteSession,
   expandChatInput,
   fetchSessions,
-  requestNewChat,
   submitChatInput,
 } from "../../api";
+import type { SessionRecord } from "../../types";
 import { useChatStore } from "../../store";
 import { useLiveChatEvents } from "../../hooks/useLiveChatEvents";
 import { ConnectionBadge } from "./ConnectionBadge";
+import { DeleteSessionModal } from "./DeleteSessionModal";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatTimeline } from "./ChatTimeline";
 import { UsageBar } from "./UsageBar";
@@ -22,13 +24,17 @@ export function ChatPage({
 }: {
   workspaceRoot: string | undefined;
 }) {
+  const client = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inputWarnings, setInputWarnings] = useState<string[]>([]);
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<SessionRecord | null>(null);
   const composerRef = useRef<ComposerHandle>(null);
+  const lastResolvedSessionIdRef = useRef<string | null>(null);
 
   const {
     liveSessionId,
+    resumeSessionId,
     connection,
     inputEnabled,
     waitMessage,
@@ -39,22 +45,22 @@ export function ChatPage({
     items,
     subAgents,
   } = useChatStore(
-    useShallow((s) => ({
-      liveSessionId: s.liveSessionId,
-      connection: s.connection,
-      inputEnabled: s.inputEnabled,
-      waitMessage: s.waitMessage,
-      sessionUsage: s.sessionUsage,
-      turnUsage: s.turnUsage,
-      sessionEnded: s.sessionEnded,
-      fatalError: s.fatalError,
-      items: s.items,
-      subAgents: s.subAgents,
+    useShallow((state) => ({
+      liveSessionId: state.liveSessionId,
+      resumeSessionId: state.resumeSessionId,
+      connection: state.connection,
+      inputEnabled: state.inputEnabled,
+      waitMessage: state.waitMessage,
+      sessionUsage: state.sessionUsage,
+      turnUsage: state.turnUsage,
+      sessionEnded: state.sessionEnded,
+      fatalError: state.fatalError,
+      items: state.items,
+      subAgents: state.subAgents,
     })),
   );
 
-  const switchLiveSession = useChatStore((s) => s.switchLiveSession);
-  const clearTimeline = useChatStore((s) => s.clearTimeline);
+  const switchLiveSession = useChatStore((state) => state.switchLiveSession);
 
   const sessionsQuery = useQuery({
     queryKey: ["sessions"],
@@ -64,7 +70,8 @@ export function ChatPage({
 
   const createSessionMutation = useMutation({
     mutationFn: createChatSession,
-    onSuccess: (session) => switchLiveSession(session.live_session_id),
+    onSuccess: (session) =>
+      switchLiveSession(session.live_session_id, session.resume_session_id),
   });
 
   const sendInputMutation = useMutation({
@@ -78,19 +85,14 @@ export function ChatPage({
     },
   });
 
-  const newChatMutation = useMutation({
-    mutationFn: () => {
-      if (!liveSessionId) throw new Error("No live session available.");
-      return requestNewChat(liveSessionId);
-    },
-    onSuccess: () => clearTimeline(),
+  const deleteSessionMutation = useMutation({
+    mutationFn: deleteSession,
   });
 
   const startedRef = useRef(false);
   const mutateRef = useRef(createSessionMutation.mutate);
   mutateRef.current = createSessionMutation.mutate;
 
-  // Only open the WebSocket after the server has confirmed the session exists
   useLiveChatEvents(createSessionMutation.isSuccess ? liveSessionId : null);
 
   useEffect(() => {
@@ -105,7 +107,6 @@ export function ChatPage({
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Focus composer whenever input becomes available
   useEffect(() => {
     if (inputEnabled && liveSessionId && !sessionEnded) {
       composerRef.current?.focus();
@@ -118,8 +119,43 @@ export function ChatPage({
     return () => window.clearTimeout(timeoutId);
   }, [inputWarnings]);
 
+  useEffect(() => {
+    const previous = lastResolvedSessionIdRef.current;
+    if (resumeSessionId && resumeSessionId !== previous) {
+      client.invalidateQueries({ queryKey: ["sessions"] });
+    }
+    lastResolvedSessionIdRef.current = resumeSessionId;
+  }, [client, resumeSessionId]);
+
+  const activeSessionRecord =
+    resumeSessionId && sessionsQuery.data
+      ? sessionsQuery.data.find((session) => session.session_id === resumeSessionId) ?? {
+          session_id: resumeSessionId,
+          directory: workspaceRoot ?? "",
+          provider: "",
+          model: "",
+          previous_id: null,
+          title: "",
+          total_tokens: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          cost_usd: 0,
+          created_at: "",
+          updated_at: "",
+        }
+      : null;
+
   const handleSubmit = async (text: string, imagePaths: string[]) => {
     setInputWarnings([]);
+    if (text.startsWith("/")) {
+      await sendInputMutation.mutateAsync({
+        text,
+        file_paths: [],
+        image_paths: [],
+      });
+      return;
+    }
+
     const expanded = await expandChatInput(text);
     if (expanded.warnings.length > 0) {
       setInputWarnings(expanded.warnings);
@@ -135,13 +171,36 @@ export function ChatPage({
     });
   };
 
+  const handleDeleteSession = async () => {
+    if (!pendingDeleteSession) return;
+    const deletingActive = pendingDeleteSession.session_id === resumeSessionId;
+
+    await deleteSessionMutation.mutateAsync(pendingDeleteSession.session_id);
+    client.setQueryData<SessionRecord[] | undefined>(["sessions"], (sessions) =>
+      (sessions ?? []).filter(
+        (session) => session.session_id !== pendingDeleteSession.session_id,
+      ),
+    );
+    setPendingDeleteSession(null);
+    await client.invalidateQueries({ queryKey: ["sessions"] });
+
+    if (deletingActive) {
+      await createSessionMutation.mutateAsync({});
+      window.setTimeout(() => composerRef.current?.focus(), 100);
+    }
+  };
+
+  const canDeleteActiveSession = Boolean(resumeSessionId) && items.length > 0;
+  const isDeleteBusy =
+    deleteSessionMutation.isPending || createSessionMutation.isPending;
+
   return (
     <section className={`chat-layout ${sidebarOpen ? "chat-layout--sidebar-open" : ""}`}>
       <div className={`sidebar ${sidebarOpen ? "sidebar--open" : ""}`}>
         <SessionSidebar
           sessions={sessionsQuery.data ?? []}
           isLoading={sessionsQuery.isLoading}
-          activeSessionId={null}
+          activeSessionId={resumeSessionId}
           workspaceRoot={workspaceRoot}
           onNewSession={() => {
             createSessionMutation.mutate({});
@@ -151,6 +210,10 @@ export function ChatPage({
           onResumeSession={(sessionId) =>
             createSessionMutation.mutate({ resume_session_id: sessionId })
           }
+          onDeleteSession={(session) => {
+            deleteSessionMutation.reset();
+            setPendingDeleteSession(session);
+          }}
           onToggle={() => setSidebarOpen((prev) => !prev)}
           isOpen={sidebarOpen}
         />
@@ -159,7 +222,28 @@ export function ChatPage({
       <div className="chat-panel">
         <div className="chat-topbar">
           <ConnectionBadge connection={connection} />
-          <UsageBar sessionUsage={sessionUsage} turnUsage={turnUsage} />
+          <div className="chat-topbar__actions">
+            <UsageBar sessionUsage={sessionUsage} turnUsage={turnUsage} />
+            {canDeleteActiveSession ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--icon btn--danger"
+                title="Delete chat"
+                onClick={() => {
+                  if (!activeSessionRecord) return;
+                  deleteSessionMutation.reset();
+                  setPendingDeleteSession(activeSessionRecord);
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {inputWarnings.length > 0 ? (
@@ -182,6 +266,20 @@ export function ChatPage({
           onSubmit={handleSubmit}
         />
       </div>
+
+      {pendingDeleteSession ? (
+        <DeleteSessionModal
+          session={pendingDeleteSession}
+          isDeleting={isDeleteBusy}
+          error={deleteSessionMutation.error?.message ?? null}
+          onConfirm={handleDeleteSession}
+          onClose={() => {
+            if (isDeleteBusy) return;
+            deleteSessionMutation.reset();
+            setPendingDeleteSession(null);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

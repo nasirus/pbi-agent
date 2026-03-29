@@ -69,6 +69,11 @@ export type FileMentionItem = {
   kind: "file" | "image";
 };
 
+export type SlashCommandItem = {
+  name: string;
+  description: string;
+};
+
 export type ExpandedChatInput = {
   text: string;
   file_paths: string[];

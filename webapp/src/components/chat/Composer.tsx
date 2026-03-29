@@ -8,8 +8,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { searchFileMentions } from "../../api";
-import type { FileMentionItem } from "../../types";
+import { searchFileMentions, searchSlashCommands } from "../../api";
+import type { FileMentionItem, SlashCommandItem } from "../../types";
 
 export interface ComposerHandle {
   focus: () => void;
@@ -23,15 +23,32 @@ interface ComposerProps {
   onSubmit: (text: string, imagePaths: string[]) => Promise<void>;
 }
 
-type ActiveMention = {
+type ActiveCompletionRange = {
   start: number;
   end: number;
   query: string;
 };
 
+type CompletionMode = "mention" | "slash";
+
+type CompletionItem =
+  | {
+      kind: "mention";
+      key: string;
+      mention: FileMentionItem;
+    }
+  | {
+      kind: "slash";
+      key: string;
+      command: SlashCommandItem;
+    };
+
 const EMAIL_PREFIX_PATTERN = /[a-zA-Z0-9._%+-]$/;
 
-function parseActiveMention(text: string, cursorIndex: number): ActiveMention | null {
+function parseActiveMention(
+  text: string,
+  cursorIndex: number,
+): ActiveCompletionRange | null {
   if (cursorIndex < 0 || cursorIndex > text.length) {
     return null;
   }
@@ -61,8 +78,46 @@ function parseActiveMention(text: string, cursorIndex: number): ActiveMention | 
   };
 }
 
+function parseActiveSlashCommand(
+  text: string,
+  cursorIndex: number,
+): ActiveCompletionRange | null {
+  if (cursorIndex <= 0 || cursorIndex > text.length || !text.startsWith("/")) {
+    return null;
+  }
+
+  const firstWhitespaceIndex = text.search(/\s/);
+  const commandEnd = firstWhitespaceIndex >= 0 ? firstWhitespaceIndex : text.length;
+  if (cursorIndex > commandEnd) {
+    return null;
+  }
+
+  return {
+    start: 0,
+    end: cursorIndex,
+    query: text.slice(1, cursorIndex),
+  };
+}
+
 function escapeMentionPath(path: string): string {
   return path.replaceAll(" ", "\\ ");
+}
+
+function replaceTextRange(
+  text: string,
+  start: number,
+  end: number,
+  replacement: string,
+): { nextInput: string; nextCursor: number } {
+  const safeStart = Math.max(0, Math.min(start, text.length));
+  const safeEnd = Math.max(safeStart, Math.min(end, text.length));
+  const prefix = text.slice(0, safeStart);
+  const suffix = text.slice(safeEnd);
+  const insertion = suffix.startsWith(" ") ? replacement : `${replacement} `;
+  return {
+    nextInput: `${prefix}${insertion}${suffix}`,
+    nextCursor: safeStart + insertion.length,
+  };
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer({
@@ -76,12 +131,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [imagePaths, setImagePaths] = useState("");
   const [showImages, setShowImages] = useState(false);
   const [cursorIndex, setCursorIndex] = useState(0);
-  const [mentionItems, setMentionItems] = useState<FileMentionItem[]>([]);
-  const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionLoading, setMentionLoading] = useState(false);
-  const [mentionError, setMentionError] = useState<string | null>(null);
-  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
-  const mentionRequestIdRef = useRef(0);
+  const [completionMode, setCompletionMode] = useState<CompletionMode | null>(null);
+  const [completionItems, setCompletionItems] = useState<CompletionItem[]>([]);
+  const [completionOpen, setCompletionOpen] = useState(false);
+  const [completionLoading, setCompletionLoading] = useState(false);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  const [completionSelectedIndex, setCompletionSelectedIndex] = useState(0);
+  const completionRequestIdRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -96,72 +152,35 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, []);
 
   const canSend = Boolean(liveSessionId) && inputEnabled && !sessionEnded;
-  const activeMention = parseActiveMention(input, cursorIndex);
-  const activeMentionQuery = activeMention?.query ?? null;
+  const activeSlashCommand = parseActiveSlashCommand(input, cursorIndex);
+  const activeMention = activeSlashCommand
+    ? null
+    : parseActiveMention(input, cursorIndex);
+  const activeCompletionMode = activeSlashCommand
+    ? "slash"
+    : activeMention
+      ? "mention"
+      : null;
+  const activeCompletionQuery = activeSlashCommand?.query ?? activeMention?.query ?? null;
 
-  useEffect(() => {
-    if (!canSend || activeMentionQuery === null) {
-      mentionRequestIdRef.current += 1;
-      setMentionItems([]);
-      setMentionOpen(false);
-      setMentionLoading(false);
-      setMentionError(null);
-      setMentionSelectedIndex(0);
-      return undefined;
-    }
-
-    setMentionOpen(true);
-    setMentionError(null);
-    setMentionLoading(true);
-    const requestId = mentionRequestIdRef.current + 1;
-    mentionRequestIdRef.current = requestId;
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        const items = await searchFileMentions(activeMentionQuery, 8);
-        if (mentionRequestIdRef.current !== requestId) return;
-        setMentionItems(items);
-        setMentionLoading(false);
-        setMentionSelectedIndex((previousIndex) =>
-          items.length === 0 ? 0 : Math.min(previousIndex, items.length - 1),
-        );
-      } catch {
-        if (mentionRequestIdRef.current !== requestId) return;
-        setMentionLoading(false);
-        setMentionError("Unable to load files");
-      }
-    }, 120);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [activeMentionQuery, canSend]);
+  const closeCompletions = useCallback(() => {
+    setCompletionMode(null);
+    setCompletionItems([]);
+    setCompletionOpen(false);
+    setCompletionLoading(false);
+    setCompletionError(null);
+    setCompletionSelectedIndex(0);
+  }, []);
 
   const syncCursor = useCallback(() => {
     setCursorIndex(textareaRef.current?.selectionStart ?? 0);
   }, []);
 
-  const applyMention = useCallback(
-    (item: FileMentionItem) => {
-      const element = textareaRef.current;
-      const currentText = element?.value ?? input;
-      const currentCursor = element?.selectionStart ?? cursorIndex;
-      const currentMention = parseActiveMention(currentText, currentCursor);
-      if (!currentMention) return;
-
-      const escapedPath = escapeMentionPath(item.path);
-      const nextInput =
-        currentText.slice(0, currentMention.start) +
-        `@${escapedPath} ` +
-        currentText.slice(currentMention.end);
-      const nextCursor = currentMention.start + escapedPath.length + 2;
-
+  const applyInputState = useCallback(
+    (nextInput: string, nextCursor: number) => {
       setInput(nextInput);
       setCursorIndex(nextCursor);
-      setMentionItems([]);
-      setMentionOpen(false);
-      setMentionLoading(false);
-      setMentionError(null);
-      setMentionSelectedIndex(0);
+      closeCompletions();
 
       window.requestAnimationFrame(() => {
         const nextElement = textareaRef.current;
@@ -172,63 +191,257 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         autoResize();
       });
     },
-    [autoResize, cursorIndex, input],
+    [autoResize, closeCompletions],
   );
+
+  const buildMentionReplacement = useCallback(
+    (
+      item: FileMentionItem,
+      currentText: string,
+      currentCursor: number,
+    ): { nextInput: string; nextCursor: number } | null => {
+      const currentMention = parseActiveMention(currentText, currentCursor);
+      if (!currentMention) {
+        return null;
+      }
+
+      const escapedPath = escapeMentionPath(item.path);
+      return replaceTextRange(
+        currentText,
+        currentMention.start,
+        currentMention.end,
+        `@${escapedPath}`,
+      );
+    },
+    [],
+  );
+
+  const buildSlashReplacement = useCallback(
+    (
+      item: SlashCommandItem,
+      currentText: string,
+      currentCursor: number,
+    ): { nextInput: string; nextCursor: number } | null => {
+      const currentSlash = parseActiveSlashCommand(currentText, currentCursor);
+      if (!currentSlash) {
+        return null;
+      }
+
+      return replaceTextRange(currentText, 0, currentSlash.end, item.name);
+    },
+    [],
+  );
+
+  const applyCompletion = useCallback(
+    (
+      item: CompletionItem,
+      currentText?: string,
+      currentCursor?: number,
+    ): { nextInput: string; nextCursor: number } | null => {
+      const textValue = currentText ?? textareaRef.current?.value ?? input;
+      const cursorValue =
+        currentCursor ?? textareaRef.current?.selectionStart ?? cursorIndex;
+      const nextState =
+        item.kind === "mention"
+          ? buildMentionReplacement(item.mention, textValue, cursorValue)
+          : buildSlashReplacement(item.command, textValue, cursorValue);
+      if (!nextState) {
+        return null;
+      }
+
+      applyInputState(nextState.nextInput, nextState.nextCursor);
+      return nextState;
+    },
+    [applyInputState, buildMentionReplacement, buildSlashReplacement, cursorIndex, input],
+  );
+
+  const submitValue = useCallback(
+    async (textValue: string, imageValue: string) => {
+      const trimmed = textValue.trim();
+      if (!trimmed && !imageValue.trim()) return;
+      await onSubmit(
+        trimmed,
+        imageValue
+          .split("\n")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      );
+      setInput("");
+      setImagePaths("");
+      setCursorIndex(0);
+      closeCompletions();
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+    },
+    [closeCompletions, onSubmit],
+  );
+
+  useEffect(() => {
+    if (!canSend || activeCompletionMode === null || activeCompletionQuery === null) {
+      completionRequestIdRef.current += 1;
+      closeCompletions();
+      return undefined;
+    }
+
+    setCompletionOpen(true);
+    setCompletionMode(activeCompletionMode);
+    setCompletionError(null);
+    setCompletionLoading(true);
+    if (completionMode !== activeCompletionMode) {
+      setCompletionItems([]);
+      setCompletionSelectedIndex(0);
+    }
+
+    const requestId = completionRequestIdRef.current + 1;
+    completionRequestIdRef.current = requestId;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const items =
+          activeCompletionMode === "slash"
+            ? (await searchSlashCommands(activeCompletionQuery, 8)).map(
+                (command): CompletionItem => ({
+                  kind: "slash",
+                  key: command.name,
+                  command,
+                }),
+              )
+            : (await searchFileMentions(activeCompletionQuery, 8)).map(
+                (mention): CompletionItem => ({
+                  kind: "mention",
+                  key: mention.path,
+                  mention,
+                }),
+              );
+        if (completionRequestIdRef.current !== requestId) return;
+        setCompletionItems(items);
+        setCompletionLoading(false);
+        setCompletionSelectedIndex((previousIndex) =>
+          items.length === 0 ? 0 : Math.min(previousIndex, items.length - 1),
+        );
+      } catch {
+        if (completionRequestIdRef.current !== requestId) return;
+        setCompletionLoading(false);
+        setCompletionError(
+          activeCompletionMode === "slash"
+            ? "Unable to load commands"
+            : "Unable to load files",
+        );
+      }
+    }, activeCompletionMode === "slash" ? 60 : 120);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    activeCompletionMode,
+    activeCompletionQuery,
+    canSend,
+    closeCompletions,
+    completionMode,
+  ]);
 
   const handleSubmit = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed && !imagePaths.trim()) return;
-    await onSubmit(
-      trimmed,
-      imagePaths
-        .split("\n")
-        .map((value) => value.trim())
-        .filter(Boolean),
-    );
-    setInput("");
-    setImagePaths("");
-    setCursorIndex(0);
-    setMentionItems([]);
-    setMentionOpen(false);
-    setMentionLoading(false);
-    setMentionError(null);
-    setMentionSelectedIndex(0);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
+    await submitValue(input, imagePaths);
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (mentionOpen && mentionItems.length > 0) {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setMentionSelectedIndex((prev) => (prev + 1) % mentionItems.length);
+  const handleSlashEnter = useCallback(async () => {
+    const currentText = textareaRef.current?.value ?? input;
+    const currentCursor = textareaRef.current?.selectionStart ?? cursorIndex;
+    const selectedCompletion =
+      completionMode === "slash"
+        ? (completionItems[completionSelectedIndex] ?? completionItems[0])
+        : undefined;
+
+    if (selectedCompletion?.kind === "slash") {
+      const nextState = buildSlashReplacement(
+        selectedCompletion.command,
+        currentText,
+        currentCursor,
+      );
+      if (nextState) {
+        await submitValue(nextState.nextInput, "");
         return;
       }
-      if (event.key === "ArrowUp") {
+    }
+
+    if (activeSlashCommand) {
+      try {
+        const commands = await searchSlashCommands(activeSlashCommand.query, 8);
+        const firstMatch = commands[0];
+        if (firstMatch) {
+          const nextState = buildSlashReplacement(
+            firstMatch,
+            currentText,
+            currentCursor,
+          );
+          if (nextState) {
+            await submitValue(nextState.nextInput, "");
+            return;
+          }
+        }
+      } catch {
+        // Fall back to submitting the current slash input unchanged.
+      }
+    }
+
+    await submitValue(currentText, "");
+  }, [
+    activeSlashCommand,
+    buildSlashReplacement,
+    completionItems,
+    completionMode,
+    completionSelectedIndex,
+    cursorIndex,
+    input,
+    submitValue,
+  ]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (completionOpen) {
+      const hasCompletionItems = completionItems.length > 0;
+      if (hasCompletionItems && event.key === "ArrowDown") {
         event.preventDefault();
-        setMentionSelectedIndex(
-          (prev) => (prev - 1 + mentionItems.length) % mentionItems.length,
+        setCompletionSelectedIndex((prev) => (prev + 1) % completionItems.length);
+        return;
+      }
+      if (hasCompletionItems && event.key === "ArrowUp") {
+        event.preventDefault();
+        setCompletionSelectedIndex(
+          (prev) => (prev - 1 + completionItems.length) % completionItems.length,
         );
         return;
       }
-      if (event.key === "Tab" || event.key === "Enter") {
+      if (hasCompletionItems && event.key === "Tab") {
         event.preventDefault();
-        applyMention(mentionItems[mentionSelectedIndex] ?? mentionItems[0]);
+        void applyCompletion(
+          completionItems[completionSelectedIndex] ?? completionItems[0],
+        );
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey && completionMode === "slash") {
+        event.preventDefault();
+        void handleSlashEnter();
+        return;
+      }
+      if (hasCompletionItems && event.key === "Enter") {
+        event.preventDefault();
+        void applyCompletion(
+          completionItems[completionSelectedIndex] ?? completionItems[0],
+        );
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        setMentionOpen(false);
-        setMentionLoading(false);
+        closeCompletions();
         return;
       }
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      handleSubmit();
+      void submitValue(input, imagePaths);
     }
   };
 
@@ -239,9 +452,20 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     : inputEnabled
       ? "composer__status composer__status--ready"
       : "composer__status";
-  const showMentionStatus = mentionLoading && mentionItems.length > 0;
-  const showMentionEmptyState =
-    mentionItems.length === 0 && (mentionLoading || mentionError !== null || mentionOpen);
+  const showCompletionStatus = completionLoading && completionItems.length > 0;
+  const showCompletionEmptyState =
+    completionItems.length === 0 &&
+    (completionLoading || completionError !== null || completionOpen);
+  const completionEmptyText = completionLoading
+    ? completionMode === "slash"
+      ? "Searching commands..."
+      : "Searching files..."
+    : completionError ??
+      (completionMode === "slash" ? "No matching commands" : "No matching files");
+  const completionLabel =
+    completionMode === "slash"
+      ? "Slash command suggestions"
+      : "Workspace file suggestions";
   const statusText = sessionEnded
     ? "Session ended"
     : waitMessage ?? (inputEnabled ? "Ready" : "Waiting for agent...");
@@ -278,34 +502,45 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </button>
       </div>
 
-      {mentionOpen ? (
-        <div className="composer__mentions" role="listbox" aria-label="Workspace file suggestions">
-          {mentionItems.length > 0 ? (
-            mentionItems.map((item, index) => (
+      {completionOpen ? (
+        <div className="composer__completions" role="listbox" aria-label={completionLabel}>
+          {completionItems.length > 0 ? (
+            completionItems.map((item, index) => (
               <button
-                key={item.path}
+                key={item.key}
                 type="button"
-                className={`composer__mention-item ${index === mentionSelectedIndex ? "composer__mention-item--active" : ""}`}
+                className={`composer__completion-item ${index === completionSelectedIndex ? "composer__completion-item--active" : ""}`}
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  applyMention(item);
+                  void applyCompletion(item);
                 }}
               >
-                <span className="composer__mention-path">@{item.path}</span>
-                <span className={`composer__mention-kind composer__mention-kind--${item.kind}`}>
-                  {item.kind}
+                <span className="composer__completion-copy">
+                  <span className="composer__completion-label">
+                    {item.kind === "slash" ? item.command.name : `@${item.mention.path}`}
+                  </span>
+                  {item.kind === "slash" ? (
+                    <span className="composer__completion-description">
+                      {item.command.description}
+                    </span>
+                  ) : null}
                 </span>
+                {item.kind === "mention" ? (
+                  <span
+                    className={`composer__completion-kind composer__completion-kind--${item.mention.kind}`}
+                  >
+                    {item.mention.kind}
+                  </span>
+                ) : null}
               </button>
             ))
-          ) : showMentionEmptyState ? (
-            <div className="composer__mention-empty">
-              {mentionLoading
-                ? "Searching files..."
-                : mentionError ?? "No matching files"}
-            </div>
+          ) : showCompletionEmptyState ? (
+            <div className="composer__completion-empty">{completionEmptyText}</div>
           ) : null}
-          {showMentionStatus ? (
-            <div className="composer__mention-status">Updating results...</div>
+          {showCompletionStatus ? (
+            <div className="composer__completion-status">
+              {completionMode === "slash" ? "Updating commands..." : "Updating results..."}
+            </div>
           ) : null}
         </div>
       ) : null}

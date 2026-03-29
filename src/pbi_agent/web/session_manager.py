@@ -205,6 +205,12 @@ class WebSessionManager:
                 verbose=self._settings.verbose,
                 model=self._settings.model,
                 reasoning_effort=self._settings.reasoning_effort,
+                bind_session=lambda bound_session_id, current=session_id: (
+                    self._bind_live_session(
+                        current,
+                        bound_session_id,
+                    )
+                ),
             )
             worker = threading.Thread(
                 target=self._run_chat_worker,
@@ -231,6 +237,35 @@ class WebSessionManager:
             )
             worker.start()
             return self._serialize_live_session(live_session)
+
+    def delete_session(self, session_id: str) -> None:
+        with SessionStore() as store:
+            record = store.get_session(session_id)
+            if record is None:
+                raise KeyError(session_id)
+            if record.directory != self._directory_key:
+                raise KeyError(session_id)
+            if record.provider != self._settings.provider:
+                raise KeyError(session_id)
+
+            affected_tasks = [
+                task
+                for task in store.list_kanban_tasks(self._directory_key)
+                if task.session_id == session_id
+            ]
+            updated_tasks: list[KanbanTaskRecord] = []
+            for task in affected_tasks:
+                updated = store.update_kanban_task(task.task_id, clear_session_id=True)
+                if updated is not None:
+                    updated_tasks.append(updated)
+
+            deleted = store.delete_session(session_id)
+
+        if not deleted:
+            raise KeyError(session_id)
+
+        for task in updated_tasks:
+            self._publish_task_updated(task)
 
     def submit_chat_input(
         self,
@@ -484,6 +519,16 @@ class WebSessionManager:
         payload = _serialize_task(record)
         self._app_stream.publish("task_updated", {"task": payload})
         return payload
+
+    def _bind_live_session(
+        self,
+        live_session_id: str,
+        resume_session_id: str | None,
+    ) -> None:
+        live_session = self._chat_sessions.get(live_session_id)
+        if live_session is None:
+            return
+        live_session.resume_session_id = resume_session_id
 
     def _serialize_live_session(self, live_session: LiveChatSession) -> dict[str, Any]:
         return {

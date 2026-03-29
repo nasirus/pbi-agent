@@ -64,6 +64,8 @@ class PendingToolGroup:
 class DisplayProtocol(Protocol):
     verbose: bool
 
+    def bind_session(self, session_id: str | None) -> None: ...
+
     def request_shutdown(self) -> None: ...
 
     def submit_input(

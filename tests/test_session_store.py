@@ -198,6 +198,23 @@ def test_list_messages_empty_session(tmp_path) -> None:
     assert msgs == []
 
 
+def test_delete_session_removes_session_and_messages(tmp_path) -> None:
+    db = tmp_path / "sessions.db"
+    with SessionStore(db_path=db) as store:
+        sid = store.create_session("/w", "openai", "gpt-5", "delete me")
+        store.add_message(sid, "user", "hello")
+        store.add_message(sid, "assistant", "hi")
+
+        deleted = store.delete_session(sid)
+
+        rec = store.get_session(sid)
+        msgs = store.list_messages(sid)
+
+    assert deleted is True
+    assert rec is None
+    assert msgs == []
+
+
 def test_create_and_list_kanban_tasks(tmp_path) -> None:
     db = tmp_path / "sessions.db"
     with SessionStore(db_path=db) as store:

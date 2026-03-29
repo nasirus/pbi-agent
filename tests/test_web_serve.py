@@ -9,6 +9,7 @@ from rich.console import Console
 
 from pbi_agent.branding import PBI_AGENT_NAME, PBI_AGENT_TAGLINE
 from pbi_agent.config import Settings
+from pbi_agent.session_store import SESSION_DB_PATH_ENV, SessionStore
 from pbi_agent.web.serve import PBIWebServer, create_app
 
 
@@ -62,6 +63,31 @@ def test_file_search_endpoint_returns_workspace_matches(tmp_path, monkeypatch) -
     assert response.json()["items"] == [
         {"path": "main.py", "kind": "file"},
         {"path": "docs/maintainer.md", "kind": "file"},
+    ]
+
+
+def test_slash_command_search_endpoint_returns_web_commands() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/slash-commands/search", params={"q": "", "limit": 10}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {
+            "name": "/skills",
+            "description": "Show discovered project skills",
+        },
+        {
+            "name": "/mcp",
+            "description": "Show discovered project MCP servers",
+        },
+        {
+            "name": "/agents",
+            "description": "Show discovered project sub-agents",
+        },
     ]
 
 
@@ -166,6 +192,87 @@ def test_chat_session_stream_replays_state_events() -> None:
     assert all(event["type"] == "session_state" for event in events)
     assert {event["payload"]["state"] for event in events}.issuperset({"starting"})
     assert {event["payload"]["state"] for event in events} & {"running", "ended"}
+
+
+def test_chat_session_stream_replays_session_identity_event() -> None:
+    def fake_run_chat_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        display.bind_session("saved-session-1")
+        return 0
+
+    with patch("pbi_agent.web.session_manager.run_chat_loop", fake_run_chat_loop):
+        app = create_app(_settings())
+
+        with TestClient(app) as client:
+            response = client.post("/api/chat/session", json={})
+            assert response.status_code == 200
+            live_session_id = response.json()["session"]["live_session_id"]
+
+            with client.websocket_connect(
+                f"/api/events/{live_session_id}"
+            ) as websocket:
+                events = [websocket.receive_json() for _ in range(4)]
+
+    identity_events = [event for event in events if event["type"] == "session_identity"]
+    assert identity_events
+    assert identity_events[0]["payload"]["resume_session_id"] == "saved-session-1"
+
+
+def test_delete_session_endpoint_removes_session_and_clears_task_links(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Saved chat",
+        )
+
+    with TestClient(app) as client:
+        task_response = client.post(
+            "/api/tasks",
+            json={
+                "title": "Task with chat",
+                "prompt": "Investigate",
+                "session_id": session_id,
+            },
+        )
+        assert task_response.status_code == 200
+
+        delete_response = client.delete(f"/api/sessions/{session_id}")
+        assert delete_response.status_code == 204
+
+        sessions_response = client.get("/api/sessions")
+        tasks_response = client.get("/api/tasks")
+
+    assert sessions_response.json()["sessions"] == []
+    assert tasks_response.json()["tasks"][0]["session_id"] is None
+
+
+def test_delete_session_endpoint_rejects_provider_mismatch(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "xai",
+            "grok-4",
+            "Other provider chat",
+        )
+
+    with TestClient(app) as client:
+        response = client.delete(f"/api/sessions/{session_id}")
+
+    assert response.status_code == 404
 
 
 def test_event_stream_treats_cancelled_error_as_clean_disconnect() -> None:
