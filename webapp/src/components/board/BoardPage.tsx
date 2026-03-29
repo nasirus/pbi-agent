@@ -112,7 +112,7 @@ export function BoardPage() {
       <section className="board-layout">
         <div className="board-layout__header">
           <div>
-            <h2 className="board-layout__title">Board</h2>
+            <h2 className="board-layout__title">Kanban</h2>
           </div>
         </div>
         <div className="center-spinner">
@@ -126,7 +126,7 @@ export function BoardPage() {
     <section className="board-layout">
       <div className="board-layout__header">
         <div>
-          <h2 className="board-layout__title">Board</h2>
+          <h2 className="board-layout__title">Kanban</h2>
           <p className="board-layout__subtitle">
             Tasks update live via the event stream
           </p>
