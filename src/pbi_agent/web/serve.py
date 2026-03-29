@@ -37,7 +37,6 @@ from pbi_agent.web.session_manager import APP_EVENT_STREAM_ID, WebSessionManager
 _WEB_DIR = Path(__file__).resolve().parent
 _APP_STATIC_DIR = _WEB_DIR / "static" / "app"
 _FAVICON_PATH = _WEB_DIR / "static" / "favicon.png"
-_BOARD_STAGES = ("backlog", "plan", "processing", "review")
 
 BoardStage = Literal["backlog", "plan", "processing", "review"]
 RunStatus = Literal["idle", "running", "completed", "failed"]
@@ -409,7 +408,11 @@ def create_app(
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     @app.get("/favicon.ico")
-    def favicon() -> FileResponse:
+    def favicon_ico() -> FileResponse:
+        return FileResponse(_FAVICON_PATH, media_type="image/png")
+
+    @app.get("/favicon.png")
+    def favicon_png() -> FileResponse:
         return FileResponse(_FAVICON_PATH, media_type="image/png")
 
     @app.get("/logo.png")
