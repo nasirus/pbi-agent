@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from difflib import SequenceMatcher
+from typing import Literal, TypeVar
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +52,110 @@ COMMANDS: tuple[SlashCommand, ...] = (
     ),
 )
 
+SlashCommandTuple = tuple[str, str, str]
+CommandSurface = Literal["textual", "web"]
+_MIN_SLASH_FUZZY_SCORE = 25
+_MIN_DESC_SEARCH_LEN = 2
+_T = TypeVar("_T")
 
-SLASH_COMMANDS: list[tuple[str, str, str]] = [
-    (command.name, command.description, command.hidden_keywords) for command in COMMANDS
-]
+
+def _command_matches_surface(command: SlashCommand, surface: CommandSurface) -> bool:
+    return surface == "textual" or not command.local_only
+
+
+def list_slash_commands(*, surface: CommandSurface = "textual") -> list[SlashCommand]:
+    """Return slash commands for the requested UI surface."""
+
+    return [
+        command for command in COMMANDS if _command_matches_surface(command, surface)
+    ]
+
+
+def _command_tuple(command: SlashCommand) -> SlashCommandTuple:
+    return (command.name, command.description, command.hidden_keywords)
+
+
+def list_slash_command_tuples(
+    *, surface: CommandSurface = "textual"
+) -> list[SlashCommandTuple]:
+    """Return slash command tuples for autocomplete consumers."""
+
+    return [_command_tuple(command) for command in list_slash_commands(surface=surface)]
+
+
+def _score_command(search: str, cmd: str, desc: str, keywords: str = "") -> float:
+    if not search:
+        return 0.0
+
+    name = cmd.lstrip("/").lower()
+    lower_desc = desc.lower()
+    if name.startswith(search):
+        return 200.0
+    if search in name:
+        return 150.0
+    if keywords and len(search) >= _MIN_DESC_SEARCH_LEN:
+        for keyword in keywords.lower().split():
+            if keyword.startswith(search) or search in keyword:
+                return 120.0
+    if len(search) >= _MIN_DESC_SEARCH_LEN and search in lower_desc:
+        idx = lower_desc.find(search)
+        return 110.0 if idx == 0 or lower_desc[idx - 1] == " " else 90.0
+    name_ratio = SequenceMatcher(None, search, name).ratio()
+    desc_ratio = SequenceMatcher(None, search, lower_desc).ratio()
+    best = max(name_ratio * 60, desc_ratio * 30)
+    return best if best >= _MIN_SLASH_FUZZY_SCORE else 0.0
+
+
+def _rank_commands(
+    search: str,
+    items: Sequence[tuple[_T, SlashCommandTuple]],
+    *,
+    limit: int,
+) -> list[_T]:
+    if not search:
+        return [item for item, _parts in items[:limit]]
+
+    scored: list[tuple[float, int, _T]] = []
+    for index, (item, (cmd, desc, keywords)) in enumerate(items):
+        score = _score_command(search, cmd, desc, keywords)
+        if score > 0:
+            scored.append((score, index, item))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [item for _score, _index, item in scored[:limit]]
+
+
+def search_slash_commands(
+    search: str,
+    *,
+    surface: CommandSurface = "textual",
+    limit: int = 10,
+) -> list[SlashCommand]:
+    """Return ranked slash commands for the requested UI surface."""
+
+    commands = list_slash_commands(surface=surface)
+    return _rank_commands(
+        search.lower(),
+        [(command, _command_tuple(command)) for command in commands],
+        limit=limit,
+    )
+
+
+def search_slash_command_tuples(
+    search: str,
+    commands: Sequence[SlashCommandTuple],
+    *,
+    limit: int = 10,
+) -> list[SlashCommandTuple]:
+    """Return ranked autocomplete tuples from an arbitrary command list."""
+
+    return _rank_commands(
+        search.lower(),
+        [(command, command) for command in commands],
+        limit=limit,
+    )
+
+
+SLASH_COMMANDS: list[SlashCommandTuple] = list_slash_command_tuples()
 
 LOCAL_COMMANDS: frozenset[str] = frozenset(
     command.name for command in COMMANDS if command.local_only
@@ -67,8 +170,14 @@ def normalize_command_name(value: str) -> str:
 
 __all__ = [
     "COMMANDS",
+    "CommandSurface",
     "LOCAL_COMMANDS",
     "SLASH_COMMANDS",
     "SlashCommand",
+    "SlashCommandTuple",
+    "list_slash_command_tuples",
+    "list_slash_commands",
     "normalize_command_name",
+    "search_slash_command_tuples",
+    "search_slash_commands",
 ]

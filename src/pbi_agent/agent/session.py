@@ -70,6 +70,12 @@ def _selected_sub_agent_model(settings: Settings) -> str:
     return settings.sub_agent_model or settings.model
 
 
+def _bind_session(display: DisplayProtocol, session_id: str | None) -> None:
+    binder = getattr(display, "bind_session", None)
+    if callable(binder):
+        binder(session_id)
+
+
 def run_single_turn(
     prompt: str,
     settings: Settings,
@@ -174,6 +180,7 @@ def run_chat_loop(
         return new_usage
 
     session_usage = _reset_session()
+    _bind_session(display, session_id)
     had_tool_errors = False
     with _open_runtime_provider(
         settings,
@@ -200,15 +207,19 @@ def run_chat_loop(
                 had_tool_errors = False
                 session_id = None
                 title_set = False
+                _bind_session(display, session_id)
                 continue
             if user_input.startswith(RESUME_SESSION_PREFIX):
                 resume_id = user_input[len(RESUME_SESSION_PREFIX) :]
                 provider.reset_conversation()
                 session_usage = _reset_session(clear_display=True)
                 had_tool_errors = False
+                session_id = None
+                title_set = False
                 if store:
                     session_id = resume_id
                     title_set = True
+                    _bind_session(display, session_id)
                     _resume_session(
                         provider=provider,
                         store=store,
@@ -216,6 +227,8 @@ def run_chat_loop(
                         session_usage=session_usage,
                         display=display,
                     )
+                else:
+                    _bind_session(display, session_id)
                 continue
             if user_input.lower() in {"exit", "quit"}:
                 break
@@ -252,6 +265,7 @@ def run_chat_loop(
                     title=_session_title_for_user_turn(turn_input),
                 )
                 title_set = True
+                _bind_session(display, session_id)
             elif not title_set:
                 _update_session_title(
                     store,

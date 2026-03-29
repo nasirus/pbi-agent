@@ -128,3 +128,39 @@
   background: var(--color-surface-3);
   color: var(--color-text-tertiary);
 }
+
+.modal-card--confirm {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.confirm-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+}
+
+.confirm-modal__body {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--color-text-secondary);
+}
+
+.confirm-modal__body strong {
+  color: var(--color-text);
+}
+
+.confirm-modal__error {
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--color-error);
+  border-radius: var(--radius-md);
+  background: var(--color-error-muted);
+  color: var(--color-error);
+  font-size: var(--text-xs);
+}
+
+.confirm-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}

@@ -24,6 +24,7 @@ from pbi_agent.ui.formatting import (
 
 EventPublisher = Callable[[str, dict[str, Any]], None]
 SummaryPublisher = Callable[[str], None]
+SessionBinder = Callable[[str | None], None]
 
 
 def _plain_text(markup: str) -> str:
@@ -95,6 +96,9 @@ class _EventDisplayBase(DisplayProtocol):
 
     def _status_text(self, *, success: bool | None = None) -> str:
         return "ok" if success or success is None else "failed"
+
+    def bind_session(self, session_id: str | None) -> None:
+        del session_id
 
     def request_shutdown(self) -> None:
         return None
@@ -462,6 +466,7 @@ class WebDisplay(_EventDisplayBase):
         verbose: bool = False,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        bind_session: SessionBinder | None = None,
     ) -> None:
         super().__init__(publish_event=publish_event, verbose=verbose)
         self._input_queue: queue.Queue[str | QueuedInput] = queue.Queue()
@@ -469,10 +474,16 @@ class WebDisplay(_EventDisplayBase):
         self._shutdown = threading.Event()
         self._model = model
         self._reasoning_effort = reasoning_effort
+        self._bind_session_callback = bind_session
 
     def request_shutdown(self) -> None:
         self._shutdown.set()
         self._input_event.set()
+
+    def bind_session(self, session_id: str | None) -> None:
+        if self._bind_session_callback is not None:
+            self._bind_session_callback(session_id)
+        self._publish("session_identity", {"resume_session_id": session_id})
 
     def submit_input(self, value: str, *, image_paths: list[str] | None = None) -> None:
         queued: str | QueuedInput = value

@@ -21,6 +21,7 @@ from pbi_agent.session_store import (
 )
 from pbi_agent.task_runner import run_single_turn_in_directory
 from pbi_agent.ui.formatting import shorten
+from pbi_agent.ui.input_mentions import MentionSearchResult, WorkspaceFileIndex
 from pbi_agent.web.display import KanbanTaskDisplay, WebDisplay
 
 
@@ -128,6 +129,7 @@ class WebSessionManager:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._workspace_root = Path.cwd().resolve()
+        self._mention_index = WorkspaceFileIndex(self._workspace_root)
         self._directory_key = str(self._workspace_root)
         self._app_stream = EventStream()
         self._chat_sessions: dict[str, LiveChatSession] = {}
@@ -139,6 +141,21 @@ class WebSessionManager:
     @property
     def workspace_root(self) -> Path:
         return self._workspace_root
+
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
+    def warm_file_mentions_cache(self) -> None:
+        self._mention_index.warm_cache()
+
+    def search_file_mentions(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+    ) -> list[MentionSearchResult]:
+        return self._mention_index.search(query, limit=limit)
 
     def bootstrap(self) -> dict[str, Any]:
         return {
@@ -188,6 +205,12 @@ class WebSessionManager:
                 verbose=self._settings.verbose,
                 model=self._settings.model,
                 reasoning_effort=self._settings.reasoning_effort,
+                bind_session=lambda bound_session_id, current=session_id: (
+                    self._bind_live_session(
+                        current,
+                        bound_session_id,
+                    )
+                ),
             )
             worker = threading.Thread(
                 target=self._run_chat_worker,
@@ -215,11 +238,41 @@ class WebSessionManager:
             worker.start()
             return self._serialize_live_session(live_session)
 
+    def delete_session(self, session_id: str) -> None:
+        with SessionStore() as store:
+            record = store.get_session(session_id)
+            if record is None:
+                raise KeyError(session_id)
+            if record.directory != self._directory_key:
+                raise KeyError(session_id)
+            if record.provider != self._settings.provider:
+                raise KeyError(session_id)
+
+            affected_tasks = [
+                task
+                for task in store.list_kanban_tasks(self._directory_key)
+                if task.session_id == session_id
+            ]
+            updated_tasks: list[KanbanTaskRecord] = []
+            for task in affected_tasks:
+                updated = store.update_kanban_task(task.task_id, clear_session_id=True)
+                if updated is not None:
+                    updated_tasks.append(updated)
+
+            deleted = store.delete_session(session_id)
+
+        if not deleted:
+            raise KeyError(session_id)
+
+        for task in updated_tasks:
+            self._publish_task_updated(task)
+
     def submit_chat_input(
         self,
         live_session_id: str,
         *,
         text: str,
+        file_paths: list[str] | None = None,
         image_paths: list[str] | None = None,
     ) -> dict[str, Any]:
         live_session = self._require_live_session(live_session_id)
@@ -233,6 +286,7 @@ class WebSessionManager:
                     "item_id": f"user-{uuid.uuid4().hex}",
                     "role": "user",
                     "content": message_text,
+                    "file_paths": list(file_paths or []),
                     "markdown": False,
                 },
             )
@@ -465,6 +519,16 @@ class WebSessionManager:
         payload = _serialize_task(record)
         self._app_stream.publish("task_updated", {"task": payload})
         return payload
+
+    def _bind_live_session(
+        self,
+        live_session_id: str,
+        resume_session_id: str | None,
+    ) -> None:
+        live_session = self._chat_sessions.get(live_session_id)
+        if live_session is None:
+            return
+        live_session.resume_session_id = resume_session_id
 
     def _serialize_live_session(self, live_session: LiveChatSession) -> dict[str, Any]:
         return {

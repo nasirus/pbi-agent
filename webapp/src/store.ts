@@ -11,6 +11,7 @@ type SubAgentState = {
 
 type ChatState = {
   liveSessionId: string | null;
+  resumeSessionId: string | null;
   connection: ConnectionState;
   inputEnabled: boolean;
   waitMessage: string | null;
@@ -21,7 +22,7 @@ type ChatState = {
   items: TimelineItem[];
   subAgents: Record<string, SubAgentState>;
   lastEventSeq: number;
-  switchLiveSession: (liveSessionId: string) => void;
+  switchLiveSession: (liveSessionId: string, resumeSessionId?: string | null) => void;
   setConnection: (connection: ConnectionState) => void;
   clearTimeline: () => void;
   applyEvent: (event: WebEvent) => void;
@@ -44,6 +45,7 @@ function upsertItem(items: TimelineItem[], nextItem: TimelineItem): TimelineItem
 
 export const useChatStore = create<ChatState>((set) => ({
   liveSessionId: storedLiveSessionId,
+  resumeSessionId: null,
   connection: "disconnected",
   inputEnabled: false,
   waitMessage: null,
@@ -54,10 +56,11 @@ export const useChatStore = create<ChatState>((set) => ({
   items: [],
   subAgents: {},
   lastEventSeq: 0,
-  switchLiveSession: (liveSessionId) => {
+  switchLiveSession: (liveSessionId, resumeSessionId = null) => {
     window.localStorage.setItem("pbi-agent-live-session-id", liveSessionId);
     set({
       liveSessionId,
+      resumeSessionId,
       connection: "disconnected",
       inputEnabled: false,
       waitMessage: null,
@@ -94,6 +97,12 @@ export const useChatStore = create<ChatState>((set) => ({
           nextState.sessionEnded = false;
           nextState.fatalError = null;
           return { ...state, ...nextState };
+        case "session_identity":
+          nextState.resumeSessionId =
+            typeof payload.resume_session_id === "string"
+              ? payload.resume_session_id
+              : null;
+          return { ...state, ...nextState };
         case "input_state":
           nextState.inputEnabled = Boolean(payload.enabled);
           return { ...state, ...nextState };
@@ -126,6 +135,10 @@ export const useChatStore = create<ChatState>((set) => ({
               | "error"
               | "debug") ?? "assistant",
             content: String(payload.content || ""),
+            filePaths: Array.isArray(payload.file_paths)
+              ? payload.file_paths
+                  .filter((value): value is string => typeof value === "string")
+              : undefined,
             markdown: Boolean(payload.markdown),
             subAgentId:
               typeof payload.sub_agent_id === "string"
@@ -177,6 +190,12 @@ export const useChatStore = create<ChatState>((set) => ({
           return { ...state, ...nextState };
         }
         case "session_state":
+          if ("resume_session_id" in payload) {
+            nextState.resumeSessionId =
+              typeof payload.resume_session_id === "string"
+                ? payload.resume_session_id
+                : null;
+          }
           if (payload.state === "ended") {
             nextState.sessionEnded = true;
             nextState.inputEnabled = false;

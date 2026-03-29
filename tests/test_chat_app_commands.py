@@ -88,7 +88,7 @@ async def test_agents_command_is_forwarded_to_session(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_submit_expands_file_mentions_before_bridge_submit(
+async def test_submit_keeps_file_path_mentions_in_message(
     monkeypatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(ChatApp, "_run_session", lambda self: None)
@@ -106,10 +106,7 @@ async def test_submit_expands_file_mentions_before_bridge_submit(
 
         bridge.submit_input.assert_called_once()
         submitted = bridge.submit_input.call_args.args[0]
-        assert "@notes.txt" not in submitted
-        assert submitted.startswith("Check")
-        assert "## Referenced Files" in submitted
-        assert "hello from file" in submitted
+        assert submitted == "Check notes.txt"
 
 
 @pytest.mark.asyncio
@@ -130,6 +127,6 @@ async def test_submit_auto_stages_image_mentions_before_bridge_submit(
         await pilot.pause()
 
         bridge.submit_input.assert_called_once_with(
-            "Check extract text",
+            "Check chart.png extract text",
             image_paths=["chart.png"],
         )

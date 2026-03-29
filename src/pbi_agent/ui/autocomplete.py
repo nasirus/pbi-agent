@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from pbi_agent.tools.workspace_filters import should_skip_directory_name
+from pbi_agent.ui.command_registry import search_slash_command_tuples
 
 if TYPE_CHECKING:
     from textual import events
@@ -56,7 +57,6 @@ MAX_SUGGESTIONS = 10
 _MAX_WORKSPACE_FILES = 2_000
 _MIN_FUZZY_SCORE = 15
 _MIN_FUZZY_RATIO = 0.4
-_MIN_SLASH_FUZZY_SCORE = 25
 _MIN_DESC_SEARCH_LEN = 2
 
 
@@ -93,29 +93,6 @@ class SlashCommandController:
             self._selected_index = 0
             self._view.clear_completion_suggestions()
 
-    @staticmethod
-    def _score_command(search: str, cmd: str, desc: str, keywords: str = "") -> float:
-        if not search:
-            return 0.0
-
-        name = cmd.lstrip("/").lower()
-        lower_desc = desc.lower()
-        if name.startswith(search):
-            return 200.0
-        if search in name:
-            return 150.0
-        if keywords and len(search) >= _MIN_DESC_SEARCH_LEN:
-            for keyword in keywords.lower().split():
-                if keyword.startswith(search) or search in keyword:
-                    return 120.0
-        if len(search) >= _MIN_DESC_SEARCH_LEN and search in lower_desc:
-            idx = lower_desc.find(search)
-            return 110.0 if idx == 0 or lower_desc[idx - 1] == " " else 90.0
-        name_ratio = SequenceMatcher(None, search, name).ratio()
-        desc_ratio = SequenceMatcher(None, search, lower_desc).ratio()
-        best = max(name_ratio * 60, desc_ratio * 30)
-        return best if best >= _MIN_SLASH_FUZZY_SCORE else 0.0
-
     def on_text_changed(self, text: str, cursor_index: int) -> None:
         if not self.can_handle(text, cursor_index):
             self.reset()
@@ -127,13 +104,14 @@ class SlashCommandController:
                 :MAX_SUGGESTIONS
             ]
         else:
-            scored = [
-                (score, cmd, desc)
-                for cmd, desc, keywords in self._commands
-                if (score := self._score_command(search, cmd, desc, keywords)) > 0
+            suggestions = [
+                (cmd, desc)
+                for cmd, desc, _keywords in search_slash_command_tuples(
+                    search,
+                    self._commands,
+                    limit=MAX_SUGGESTIONS,
+                )
             ]
-            scored.sort(key=lambda item: -item[0])
-            suggestions = [(cmd, desc) for _, cmd, desc in scored[:MAX_SUGGESTIONS]]
 
         if suggestions:
             self._suggestions = suggestions

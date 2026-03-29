@@ -32,6 +32,9 @@ import uvicorn.server
 from pbi_agent.config import ConfigError
 from pbi_agent.branding import startup_panel
 from pbi_agent.config import Settings, resolve_settings
+from pbi_agent.providers.capabilities import provider_supports_images
+from pbi_agent.ui.command_registry import search_slash_commands
+from pbi_agent.ui.input_mentions import expand_input_mentions
 from pbi_agent.web.session_manager import APP_EVENT_STREAM_ID, WebSessionManager
 
 _WEB_DIR = Path(__file__).resolve().parent
@@ -43,6 +46,8 @@ RunStatus = Literal["idle", "running", "completed", "failed"]
 SessionStatus = Literal["starting", "running", "ended"]
 NonEmptyString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 LimitQuery = Annotated[int, Query(ge=1, le=200)]
+MentionQuery = Annotated[str, Query(max_length=200)]
+MentionLimitQuery = Annotated[int, Query(ge=1, le=50)]
 LiveSessionIdPath = Annotated[
     str,
     FastAPIPath(min_length=1, description="The live chat session identifier."),
@@ -55,6 +60,10 @@ StreamIdPath = Annotated[
     str,
     FastAPIPath(min_length=1, description="The event stream identifier."),
 ]
+SessionIdPath = Annotated[
+    str,
+    FastAPIPath(min_length=1, description="The saved session identifier."),
+]
 
 
 class CreateChatSessionRequest(BaseModel):
@@ -64,7 +73,37 @@ class CreateChatSessionRequest(BaseModel):
 
 class ChatInputRequest(BaseModel):
     text: str = ""
+    file_paths: list[str] = Field(default_factory=list)
     image_paths: list[str] = Field(default_factory=list)
+
+
+class ExpandInputRequest(BaseModel):
+    text: str = ""
+
+
+class FileMentionItemModel(BaseModel):
+    path: str
+    kind: Literal["file", "image"]
+
+
+class FileMentionSearchResponse(BaseModel):
+    items: list[FileMentionItemModel]
+
+
+class SlashCommandItemModel(BaseModel):
+    name: str
+    description: str
+
+
+class SlashCommandSearchResponse(BaseModel):
+    items: list[SlashCommandItemModel]
+
+
+class ExpandInputResponse(BaseModel):
+    text: str
+    file_paths: list[str] = Field(default_factory=list)
+    image_paths: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CreateTaskRequest(BaseModel):
@@ -197,6 +236,54 @@ def list_sessions(
     )
 
 
+@system_router.delete("/sessions/{session_id}", status_code=204)
+def delete_session(
+    session_id: SessionIdPath,
+    manager: SessionManagerDep,
+) -> Response:
+    try:
+        manager.delete_session(session_id)
+    except KeyError as exc:
+        raise _not_found("Session not found.") from exc
+    except Exception as exc:
+        raise _bad_request(str(exc)) from exc
+    return Response(status_code=204)
+
+
+@system_router.get("/files/search", response_model=FileMentionSearchResponse)
+def search_workspace_files(
+    manager: SessionManagerDep,
+    q: MentionQuery = "",
+    limit: MentionLimitQuery = 8,
+) -> FileMentionSearchResponse:
+    return FileMentionSearchResponse(
+        items=[
+            FileMentionItemModel(path=item.path, kind=item.kind)
+            for item in manager.search_file_mentions(
+                q,
+                limit=limit,
+            )
+        ]
+    )
+
+
+@system_router.get("/slash-commands/search", response_model=SlashCommandSearchResponse)
+def search_available_slash_commands(
+    q: MentionQuery = "",
+    limit: MentionLimitQuery = 8,
+) -> SlashCommandSearchResponse:
+    return SlashCommandSearchResponse(
+        items=[
+            SlashCommandItemModel(name=item.name, description=item.description)
+            for item in search_slash_commands(
+                q,
+                surface="web",
+                limit=limit,
+            )
+        ]
+    )
+
+
 @chat_router.post("/session", response_model=ChatSessionResponse)
 def create_chat_session(
     request: CreateChatSessionRequest,
@@ -226,6 +313,7 @@ def submit_chat_input(
         session = manager.submit_chat_input(
             live_session_id,
             text=request.text,
+            file_paths=request.file_paths,
             image_paths=request.image_paths,
         )
     except KeyError as exc:
@@ -234,6 +322,29 @@ def submit_chat_input(
         raise _bad_request(str(exc)) from exc
     return ChatSessionResponse(
         session=_model_from_payload(LiveSessionModel, session),
+    )
+
+
+@chat_router.post("/expand-input", response_model=ExpandInputResponse)
+def expand_chat_input(
+    request: ExpandInputRequest,
+    manager: SessionManagerDep,
+) -> ExpandInputResponse:
+    expanded_text, file_paths, image_paths, warnings = expand_input_mentions(
+        request.text,
+        root=manager.workspace_root,
+    )
+    if image_paths and not provider_supports_images(manager.settings.provider):
+        warnings = [
+            *warnings,
+            "Image mentions are not supported by the current provider.",
+        ]
+        image_paths = []
+    return ExpandInputResponse(
+        text=expanded_text,
+        file_paths=file_paths,
+        image_paths=image_paths,
+        warnings=warnings,
     )
 
 
@@ -371,6 +482,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        threading.Thread(
+            target=manager.warm_file_mentions_cache,
+            daemon=True,
+            name="pbi-agent-web-mention-cache",
+        ).start()
         try:
             yield
         except asyncio.CancelledError:

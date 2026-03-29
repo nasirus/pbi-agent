@@ -128,6 +128,9 @@ class Display(DisplayProtocol):
         self._shutdown.set()
         self._input_event.set()
 
+    def bind_session(self, session_id: str | None) -> None:
+        del session_id
+
     def submit_input(self, value: str, *, image_paths: list[str] | None = None) -> None:
         queued: str | QueuedInput = value
         if image_paths:

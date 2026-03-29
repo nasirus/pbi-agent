@@ -37,7 +37,7 @@ export function AppShell() {
         </div>
         <nav className="topnav">
           <NavLink to="/" end>Chat</NavLink>
-          <NavLink to="/board">Board</NavLink>
+          <NavLink to="/board">Kanban</NavLink>
         </nav>
         <div className="runtime-meta">
           <span className="runtime-meta__pill">{bootstrap?.provider ?? "..."}</span>

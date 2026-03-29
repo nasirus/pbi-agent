@@ -2,10 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const SCROLL_THRESHOLD = 80;
 
-export function useAutoScroll(deps: unknown[]) {
+export function useAutoScroll(
+  deps: unknown[],
+  options?: {
+    followOnChange?: boolean;
+  },
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showNewMessages, setShowNewMessages] = useState(false);
   const userScrolledRef = useRef(false);
+  const followOnChange = options?.followOnChange ?? true;
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
@@ -25,13 +31,13 @@ export function useAutoScroll(deps: unknown[]) {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    if (!followOnChange) return;
     if (!userScrolledRef.current) {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     } else {
       setShowNewMessages(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [followOnChange, ...deps]);
 
   const scrollToBottom = useCallback(() => {
     const el = containerRef.current;

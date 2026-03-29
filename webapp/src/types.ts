@@ -64,6 +64,23 @@ export type LiveSession = {
   ended_at: string | null;
 };
 
+export type FileMentionItem = {
+  path: string;
+  kind: "file" | "image";
+};
+
+export type SlashCommandItem = {
+  name: string;
+  description: string;
+};
+
+export type ExpandedChatInput = {
+  text: string;
+  file_paths: string[];
+  image_paths: string[];
+  warnings: string[];
+};
+
 export type BootstrapPayload = {
   workspace_root: string;
   provider: string;
@@ -80,6 +97,7 @@ export type TimelineMessageItem = {
   itemId: string;
   role: "user" | "assistant" | "notice" | "error" | "debug";
   content: string;
+  filePaths?: string[];
   markdown: boolean;
   subAgentId?: string;
 };
