@@ -79,6 +79,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [mentionLoading, setMentionLoading] = useState(false);
   const [mentionError, setMentionError] = useState<string | null>(null);
   const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+  const mentionRequestIdRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -98,6 +99,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   useEffect(() => {
     if (!canSend || activeMentionQuery === null) {
+      mentionRequestIdRef.current += 1;
       setMentionItems([]);
       setMentionOpen(false);
       setMentionLoading(false);
@@ -107,28 +109,27 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
 
     setMentionOpen(true);
-    setMentionLoading(true);
     setMentionError(null);
-    let cancelled = false;
+    setMentionLoading(true);
+    const requestId = mentionRequestIdRef.current + 1;
+    mentionRequestIdRef.current = requestId;
     const timeoutId = window.setTimeout(async () => {
       try {
         const items = await searchFileMentions(activeMentionQuery, 8);
-        if (cancelled) return;
+        if (mentionRequestIdRef.current !== requestId) return;
         setMentionItems(items);
-        setMentionOpen(true);
         setMentionLoading(false);
-        setMentionSelectedIndex(0);
+        setMentionSelectedIndex((previousIndex) =>
+          items.length === 0 ? 0 : Math.min(previousIndex, items.length - 1),
+        );
       } catch {
-        if (cancelled) return;
-        setMentionItems([]);
+        if (mentionRequestIdRef.current !== requestId) return;
         setMentionLoading(false);
         setMentionError("Unable to load files");
-        setMentionOpen(true);
       }
     }, 120);
 
     return () => {
-      cancelled = true;
       window.clearTimeout(timeoutId);
     };
   }, [activeMentionQuery, canSend]);
@@ -240,6 +241,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     : inputEnabled
       ? "composer__status composer__status--ready"
       : "composer__status";
+  const showMentionStatus = mentionLoading && mentionItems.length > 0;
+  const showMentionEmptyState =
+    mentionItems.length === 0 && (mentionLoading || mentionError !== null || mentionOpen);
 
   return (
     <form className="composer" onSubmit={handleSubmit}>
@@ -275,13 +279,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
       {mentionOpen ? (
         <div className="composer__mentions" role="listbox" aria-label="Workspace file suggestions">
-          {mentionLoading ? (
-            <div className="composer__mention-empty">Searching files...</div>
-          ) : mentionError ? (
-            <div className="composer__mention-empty">{mentionError}</div>
-          ) : mentionItems.length === 0 ? (
-            <div className="composer__mention-empty">No matching files</div>
-          ) : (
+          {mentionItems.length > 0 ? (
             mentionItems.map((item, index) => (
               <button
                 key={item.path}
@@ -298,7 +296,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 </span>
               </button>
             ))
-          )}
+          ) : showMentionEmptyState ? (
+            <div className="composer__mention-empty">
+              {mentionLoading
+                ? "Searching files..."
+                : mentionError ?? "No matching files"}
+            </div>
+          ) : null}
+          {showMentionStatus ? (
+            <div className="composer__mention-status">Updating results...</div>
+          ) : null}
         </div>
       ) : null}
 

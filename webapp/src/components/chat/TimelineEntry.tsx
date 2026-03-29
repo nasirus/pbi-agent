@@ -1,6 +1,66 @@
-import { useState } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { TimelineItem } from "../../types";
+
+function renderUserMessage(
+  content: string,
+  filePaths: string[] | undefined,
+): JSX.Element {
+  if (!filePaths || filePaths.length === 0) {
+    return <p>{content}</p>;
+  }
+
+  const uniquePaths = Array.from(new Set(filePaths)).sort(
+    (left, right) => right.length - left.length,
+  );
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  let partIndex = 0;
+
+  while (cursor < content.length) {
+    let nextMatch:
+      | {
+          index: number;
+          path: string;
+        }
+      | undefined;
+
+    for (const path of uniquePaths) {
+      const index = content.indexOf(path, cursor);
+      if (index < 0) {
+        continue;
+      }
+      if (
+        !nextMatch ||
+        index < nextMatch.index ||
+        (index === nextMatch.index && path.length > nextMatch.path.length)
+      ) {
+        nextMatch = { index, path };
+      }
+    }
+
+    if (!nextMatch) {
+      nodes.push(content.slice(cursor));
+      break;
+    }
+
+    if (nextMatch.index > cursor) {
+      nodes.push(content.slice(cursor, nextMatch.index));
+    }
+    nodes.push(
+      <span
+        key={`file-tag-${partIndex}`}
+        className="timeline-entry__file-tag"
+      >
+        {nextMatch.path}
+      </span>,
+    );
+    partIndex += 1;
+    cursor = nextMatch.index + nextMatch.path.length;
+  }
+
+  return <p>{nodes}</p>;
+}
 
 export function TimelineEntry({
   item,
@@ -36,7 +96,12 @@ export function TimelineEntry({
           {item.markdown && roleClass !== "user" ? (
             <ReactMarkdown>{item.content}</ReactMarkdown>
           ) : (
-            <p>{item.content}</p>
+            renderUserMessage(
+              item.content,
+              item.kind === "message" && item.role === "user"
+                ? item.filePaths
+                : undefined,
+            )
           )}
         </div>
       </div>

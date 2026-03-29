@@ -21,10 +21,7 @@ def test_expand_file_mentions_appends_workspace_file_content(tmp_path: Path) -> 
     )
 
     assert warnings == []
-    assert "Summarize @report.md" not in expanded
-    assert expanded.startswith("Summarize")
-    assert "## Referenced Files" in expanded
-    assert "hello report" in expanded
+    assert expanded == "Summarize report.md"
 
 
 def test_expand_file_mentions_warns_for_missing_file(tmp_path: Path) -> None:
@@ -67,12 +64,13 @@ def test_expand_input_mentions_extracts_image_paths(tmp_path: Path) -> None:
     target = tmp_path / "mockup.png"
     target.write_bytes(b"not-used-by-parser")
 
-    expanded, image_paths, warnings = expand_input_mentions(
+    expanded, file_paths, image_paths, warnings = expand_input_mentions(
         "Review @mockup.png carefully",
         root=tmp_path,
     )
 
-    assert expanded == "Review carefully"
+    assert expanded == "Review mockup.png carefully"
+    assert file_paths == ["mockup.png"]
     assert image_paths == ["mockup.png"]
     assert warnings == []
 
@@ -87,9 +85,7 @@ def test_expand_file_mentions_supports_escaped_spaces(tmp_path: Path) -> None:
     )
 
     assert warnings == []
-    assert "Summarize @my\\ notes.txt" not in expanded
-    assert expanded.startswith("Summarize")
-    assert "hello notes" in expanded
+    assert expanded == "Summarize my notes.txt"
 
 
 def test_expand_file_mentions_supports_literal_spaces(tmp_path: Path) -> None:
@@ -102,9 +98,7 @@ def test_expand_file_mentions_supports_literal_spaces(tmp_path: Path) -> None:
     )
 
     assert warnings == []
-    assert "Summarize @my notes.txt please" not in expanded
-    assert expanded.startswith("Summarize please")
-    assert "hello notes" in expanded
+    assert expanded == "Summarize my notes.txt please"
 
 
 def test_search_input_mentions_returns_ranked_matches(tmp_path: Path) -> None:

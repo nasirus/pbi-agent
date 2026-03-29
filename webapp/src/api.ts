@@ -70,7 +70,7 @@ export async function createChatSession(
 
 export async function submitChatInput(
   liveSessionId: string,
-  payload: { text: string; image_paths: string[] },
+  payload: { text: string; file_paths: string[]; image_paths: string[] },
 ): Promise<LiveSession> {
   const result = await requestJson<{ session: LiveSession }>(
     `/api/chat/session/${liveSessionId}/input`,

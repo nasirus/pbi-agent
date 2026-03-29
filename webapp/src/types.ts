@@ -71,6 +71,7 @@ export type FileMentionItem = {
 
 export type ExpandedChatInput = {
   text: string;
+  file_paths: string[];
   image_paths: string[];
   warnings: string[];
 };
@@ -91,6 +92,7 @@ export type TimelineMessageItem = {
   itemId: string;
   role: "user" | "assistant" | "notice" | "error" | "debug";
   content: string;
+  filePaths?: string[];
   markdown: boolean;
   subAgentId?: string;
 };

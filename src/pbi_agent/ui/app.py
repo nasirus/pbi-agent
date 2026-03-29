@@ -357,7 +357,7 @@ class ChatApp(App):
         submitted_value = value
         image_paths: list[str] = []
         if not value.startswith("/"):
-            submitted_value, image_paths, warnings = expand_input_mentions(
+            submitted_value, _file_paths, image_paths, warnings = expand_input_mentions(
                 value,
                 root=Path.cwd().resolve(),
             )
@@ -415,7 +415,7 @@ class ChatApp(App):
             "- `Ctrl+B` toggle sessions sidebar\n"
             "- `Ctrl+Q` quit\n\n"
             "### Input Features\n"
-            "- Type `@` to autocomplete workspace files; text files are inlined and supported image files are attached\n"
+            "- Type `@` to reference workspace files; file paths stay in the prompt and supported image files are attached\n"
             "- Type `/` to autocomplete local slash commands"
         )
 

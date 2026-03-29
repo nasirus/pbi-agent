@@ -237,6 +237,7 @@ class WebSessionManager:
         live_session_id: str,
         *,
         text: str,
+        file_paths: list[str] | None = None,
         image_paths: list[str] | None = None,
     ) -> dict[str, Any]:
         live_session = self._require_live_session(live_session_id)
@@ -250,6 +251,7 @@ class WebSessionManager:
                     "item_id": f"user-{uuid.uuid4().hex}",
                     "role": "user",
                     "content": message_text,
+                    "file_paths": list(file_paths or []),
                     "markdown": False,
                 },
             )

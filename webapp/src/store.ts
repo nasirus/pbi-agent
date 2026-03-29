@@ -126,6 +126,10 @@ export const useChatStore = create<ChatState>((set) => ({
               | "error"
               | "debug") ?? "assistant",
             content: String(payload.content || ""),
+            filePaths: Array.isArray(payload.file_paths)
+              ? payload.file_paths
+                  .filter((value): value is string => typeof value === "string")
+              : undefined,
             markdown: Boolean(payload.markdown),
             subAgentId:
               typeof payload.sub_agent_id === "string"

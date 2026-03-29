@@ -82,8 +82,8 @@ def test_expand_input_endpoint_expands_mentions_and_extracts_images(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["text"].startswith("Review and carefully")
-    assert "## Referenced Files" in payload["text"]
+    assert payload["text"] == "Review notes.md and mockup.png carefully"
+    assert payload["file_paths"] == ["notes.md", "mockup.png"]
     assert payload["image_paths"] == ["mockup.png"]
     assert payload["warnings"] == []
 
@@ -103,7 +103,8 @@ def test_expand_input_endpoint_warns_when_image_mentions_are_unsupported(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["text"] == "Review carefully"
+    assert payload["text"] == "Review mockup.png carefully"
+    assert payload["file_paths"] == ["mockup.png"]
     assert payload["image_paths"] == []
     assert payload["warnings"] == [
         "Image mentions are not supported by the current provider."

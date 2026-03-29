@@ -68,7 +68,11 @@ export function ChatPage({
   });
 
   const sendInputMutation = useMutation({
-    mutationFn: (payload: { text: string; image_paths: string[] }) => {
+    mutationFn: (payload: {
+      text: string;
+      file_paths: string[];
+      image_paths: string[];
+    }) => {
       if (!liveSessionId) throw new Error("No live session available.");
       return submitChatInput(liveSessionId, payload);
     },
@@ -126,6 +130,7 @@ export function ChatPage({
     );
     await sendInputMutation.mutateAsync({
       text: expanded.text,
+      file_paths: expanded.file_paths,
       image_paths: mergedImagePaths,
     });
   };
@@ -157,7 +162,6 @@ export function ChatPage({
           <UsageBar sessionUsage={sessionUsage} turnUsage={turnUsage} />
         </div>
 
-        {waitMessage ? <div className="banner banner--wait">{waitMessage}</div> : null}
         {inputWarnings.length > 0 ? (
           <div className="banner banner--notice">{inputWarnings.join(" ")}</div>
         ) : null}
@@ -168,6 +172,23 @@ export function ChatPage({
           subAgents={subAgents}
           connection={connection}
         />
+
+        {waitMessage ? (
+          <div className="chat-status-rail">
+            <div className="chat-wait-card" role="status" aria-live="polite">
+              <div className="chat-wait-card__badge">Agent</div>
+              <div className="chat-wait-card__copy">
+                <span className="chat-wait-card__eyebrow">Working on your request</span>
+                <span className="chat-wait-card__message">{waitMessage}</span>
+              </div>
+              <div className="chat-wait-card__dots" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <Composer
           ref={composerRef}

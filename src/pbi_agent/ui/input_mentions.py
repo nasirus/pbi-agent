@@ -10,11 +10,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Literal
 
-from pbi_agent.tools.workspace_access import (
-    read_text_file,
-    relative_workspace_path,
-    resolve_safe_path,
-)
+from pbi_agent.tools.workspace_access import resolve_safe_path
 from pbi_agent.tools.workspace_filters import should_skip_directory_name
 
 PATH_CHAR_CLASS = r"A-Za-z0-9._~/\\:-"
@@ -22,7 +18,6 @@ FILE_MENTION_PATTERN = re.compile(r"@(?P<path>(?:\\.|[" + PATH_CHAR_CLASS + r"])
 EMAIL_PREFIX_PATTERN = re.compile(r"[a-zA-Z0-9._%+-]$")
 IMAGE_FILE_SUFFIXES = frozenset({".jpeg", ".jpg", ".png", ".webp"})
 
-_MAX_INLINE_BYTES = 64 * 1024
 _MAX_WORKSPACE_FILES = 2_000
 _MIN_FUZZY_SCORE = 15
 _MIN_FUZZY_RATIO = 0.4
@@ -90,11 +85,11 @@ def expand_file_mentions(
     text: str,
     *,
     root: Path,
-    max_inline_bytes: int = _MAX_INLINE_BYTES,
+    max_inline_bytes: int = 0,
 ) -> tuple[str, list[str]]:
-    """Return input text with referenced workspace files appended inline."""
+    """Return input text with normalized workspace file mentions."""
 
-    expanded, _image_paths, warnings = expand_input_mentions(
+    expanded, _file_paths, _image_paths, warnings = expand_input_mentions(
         text,
         root=root,
         max_inline_bytes=max_inline_bytes,
@@ -106,52 +101,38 @@ def expand_input_mentions(
     text: str,
     *,
     root: Path,
-    max_inline_bytes: int = _MAX_INLINE_BYTES,
-) -> tuple[str, list[str], list[str]]:
-    """Return expanded text plus image mention paths and warnings."""
+    max_inline_bytes: int = 0,
+) -> tuple[str, list[str], list[str], list[str]]:
+    """Return normalized mention text plus image mention paths and warnings."""
 
+    del max_inline_bytes
     warnings: list[str] = []
     mentioned_files = _collect_mentioned_files(text, root=root, warnings=warnings)
     if not mentioned_files:
-        return text, [], warnings
+        return text, [], [], warnings
 
-    parts = [_strip_mention_text(text, mentioned_files)]
-    inline_parts: list[str] = []
+    root = root.resolve()
+    parts: list[str] = []
+    cursor = 0
+    file_paths: list[str] = []
+    seen_file_paths: set[str] = set()
     image_paths: list[str] = []
+    seen_image_paths: set[str] = set()
     for match in mentioned_files:
-        relative_path = relative_workspace_path(root, match.path)
+        relative_path = match.path.relative_to(root).as_posix()
+        if relative_path not in seen_file_paths:
+            seen_file_paths.add(relative_path)
+            file_paths.append(relative_path)
+        parts.append(text[cursor : match.start])
+        parts.append(relative_path)
+        cursor = match.end
         if match.path.suffix.lower() in IMAGE_FILE_SUFFIXES:
-            image_paths.append(relative_path)
-            continue
+            if relative_path not in seen_image_paths:
+                seen_image_paths.add(relative_path)
+                image_paths.append(relative_path)
 
-        try:
-            size = match.path.stat().st_size
-        except OSError as exc:
-            inline_parts.append(f"### {relative_path}\n[Could not inspect file: {exc}]")
-            continue
-
-        if size > max_inline_bytes:
-            inline_parts.append(
-                "### "
-                + relative_path
-                + "\n"
-                + f"[File too large to inline ({size} bytes). Use read_file if needed.]"
-            )
-            continue
-
-        try:
-            content, encoding = read_text_file(match.path)
-        except ValueError as exc:
-            inline_parts.append(f"### {relative_path}\n[Could not read file: {exc}]")
-            continue
-
-        inline_parts.append(
-            f"### {relative_path}\n[encoding: {encoding}]\n<file>\n{content}\n</file>"
-        )
-
-    if inline_parts:
-        parts.extend(["", "## Referenced Files", *inline_parts])
-    return "\n".join(parts), image_paths, warnings
+    parts.append(text[cursor:])
+    return "".join(parts), file_paths, image_paths, warnings
 
 
 def search_input_mentions(
@@ -171,7 +152,6 @@ def _collect_mentioned_files(
     text: str, *, root: Path, warnings: list[str]
 ) -> list[_MentionMatch]:
     root = root.resolve()
-    seen: set[Path] = set()
     files: list[_MentionMatch] = []
     index = 0
     while index < len(text):
@@ -200,9 +180,7 @@ def _collect_mentioned_files(
             index = at_index + 1
             continue
 
-        if resolved not in seen:
-            seen.add(resolved)
-            files.append(_MentionMatch(resolved, at_index, at_index + 1 + consumed))
+        files.append(_MentionMatch(resolved, at_index, at_index + 1 + consumed))
         index = at_index + 1 + consumed
 
     return files
@@ -294,20 +272,6 @@ def _fuzzy_search(
     ]
     scored.sort(key=lambda item: -item[0])
     return [candidate for _, candidate in scored[:limit]]
-
-
-def _strip_mention_text(text: str, mentions: list[_MentionMatch]) -> str:
-    parts: list[str] = []
-    cursor = 0
-    for match in mentions:
-        parts.append(text[cursor : match.start])
-        cursor = match.end
-    parts.append(text[cursor:])
-    cleaned = "".join(parts)
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
-    cleaned = re.sub(r"[ \t]+([,.;:!?])", r"\1", cleaned)
-    cleaned = re.sub(r"[ \t]*\n[ \t]*", "\n", cleaned)
-    return cleaned.strip()
 
 
 def _resolve_mentioned_file(

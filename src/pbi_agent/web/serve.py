@@ -68,6 +68,7 @@ class CreateChatSessionRequest(BaseModel):
 
 class ChatInputRequest(BaseModel):
     text: str = ""
+    file_paths: list[str] = Field(default_factory=list)
     image_paths: list[str] = Field(default_factory=list)
 
 
@@ -86,6 +87,7 @@ class FileMentionSearchResponse(BaseModel):
 
 class ExpandInputResponse(BaseModel):
     text: str
+    file_paths: list[str] = Field(default_factory=list)
     image_paths: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -266,6 +268,7 @@ def submit_chat_input(
         session = manager.submit_chat_input(
             live_session_id,
             text=request.text,
+            file_paths=request.file_paths,
             image_paths=request.image_paths,
         )
     except KeyError as exc:
@@ -282,7 +285,7 @@ def expand_chat_input(
     request: ExpandInputRequest,
     manager: SessionManagerDep,
 ) -> ExpandInputResponse:
-    expanded_text, image_paths, warnings = expand_input_mentions(
+    expanded_text, file_paths, image_paths, warnings = expand_input_mentions(
         request.text,
         root=manager.workspace_root,
     )
@@ -294,6 +297,7 @@ def expand_chat_input(
         image_paths = []
     return ExpandInputResponse(
         text=expanded_text,
+        file_paths=file_paths,
         image_paths=image_paths,
         warnings=warnings,
     )
