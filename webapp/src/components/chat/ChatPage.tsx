@@ -173,28 +173,12 @@ export function ChatPage({
           connection={connection}
         />
 
-        {waitMessage ? (
-          <div className="chat-status-rail">
-            <div className="chat-wait-card" role="status" aria-live="polite">
-              <div className="chat-wait-card__badge">Agent</div>
-              <div className="chat-wait-card__copy">
-                <span className="chat-wait-card__eyebrow">Working on your request</span>
-                <span className="chat-wait-card__message">{waitMessage}</span>
-              </div>
-              <div className="chat-wait-card__dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-          </div>
-        ) : null}
-
         <Composer
           ref={composerRef}
           inputEnabled={inputEnabled}
           sessionEnded={sessionEnded}
           liveSessionId={liveSessionId}
+          waitMessage={waitMessage}
           onSubmit={handleSubmit}
         />
       </div>

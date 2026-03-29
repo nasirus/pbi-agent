@@ -19,6 +19,7 @@ interface ComposerProps {
   inputEnabled: boolean;
   sessionEnded: boolean;
   liveSessionId: string | null;
+  waitMessage: string | null;
   onSubmit: (text: string, imagePaths: string[]) => Promise<void>;
 }
 
@@ -68,6 +69,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   inputEnabled,
   sessionEnded,
   liveSessionId,
+  waitMessage,
   onSubmit,
 }, ref) {
   const [input, setInput] = useState("");
@@ -230,20 +232,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   };
 
-  const statusText = sessionEnded
-    ? "Session ended"
-    : inputEnabled
-      ? "Ready"
-      : "Waiting for agent...";
-
   const statusClass = sessionEnded
     ? "composer__status composer__status--ended"
+    : waitMessage
+      ? "composer__status composer__status--waiting"
     : inputEnabled
       ? "composer__status composer__status--ready"
       : "composer__status";
   const showMentionStatus = mentionLoading && mentionItems.length > 0;
   const showMentionEmptyState =
     mentionItems.length === 0 && (mentionLoading || mentionError !== null || mentionOpen);
+  const statusText = sessionEnded
+    ? "Session ended"
+    : waitMessage ?? (inputEnabled ? "Ready" : "Waiting for agent...");
 
   return (
     <form className="composer" onSubmit={handleSubmit}>
@@ -310,7 +311,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       ) : null}
 
       <div className="composer__footer">
-        <span className={statusClass}>{statusText}</span>
+        <span
+          className={statusClass}
+          role={waitMessage ? "status" : undefined}
+          aria-live={waitMessage ? "polite" : undefined}
+        >
+          {waitMessage ? <span className="composer__status-dot" aria-hidden="true" /> : null}
+          <span className="composer__status-text">{statusText}</span>
+        </span>
         <button
           type="button"
           className="composer__attach-toggle"
