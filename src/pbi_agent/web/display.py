@@ -9,7 +9,12 @@ from rich.text import Text
 
 from pbi_agent.models.messages import TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageRecord
-from pbi_agent.display.protocol import DisplayProtocol, PendingToolGroup, QueuedInput
+from pbi_agent.display.protocol import (
+    DisplayProtocol,
+    PendingToolGroup,
+    QueuedInput,
+    QueuedRuntimeChange,
+)
 from pbi_agent.display.formatting import (
     REDACTED_THINKING_NOTICE,
     format_wait_seconds,
@@ -500,7 +505,9 @@ class WebDisplay(_EventDisplayBase):
         bind_session: SessionBinder | None = None,
     ) -> None:
         super().__init__(publish_event=publish_event, verbose=verbose)
-        self._input_queue: queue.Queue[str | QueuedInput] = queue.Queue()
+        self._input_queue: queue.Queue[str | QueuedInput | QueuedRuntimeChange] = (
+            queue.Queue()
+        )
         self._input_event = threading.Event()
         self._shutdown = threading.Event()
         self._model = model
@@ -543,7 +550,24 @@ class WebDisplay(_EventDisplayBase):
         self._input_event.set()
         self._publish("input_state", {"enabled": False})
 
-    def user_prompt(self) -> str | QueuedInput:
+    def request_runtime_change(
+        self,
+        *,
+        settings,
+        model_profile_id: str | None,
+    ) -> None:
+        self._model = settings.model
+        self._reasoning_effort = settings.reasoning_effort
+        self._input_queue.put(
+            QueuedRuntimeChange(
+                settings=settings,
+                model_profile_id=model_profile_id,
+            )
+        )
+        self._input_event.set()
+        self._publish("input_state", {"enabled": False})
+
+    def user_prompt(self) -> str | QueuedInput | QueuedRuntimeChange:
         while True:
             if self._shutdown.is_set():
                 return "exit"

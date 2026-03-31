@@ -1,16 +1,33 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from pbi_agent.agent.error_formatting import format_user_facing_error
 from pbi_agent.agent.session import run_chat_loop
-from pbi_agent.config import Settings
+from pbi_agent.config import (
+    ConfigError,
+    InternalConfig,
+    ModelProfileConfig,
+    OPENAI_SERVICE_TIERS,
+    PROVIDER_KINDS,
+    ProviderConfig,
+    Settings,
+    load_internal_config_snapshot,
+    provider_has_secret,
+    provider_secret_source,
+    provider_ui_metadata,
+    resolve_settings_for_model_profile,
+    save_internal_config_with_revision,
+    slugify,
+)
+from pbi_agent.display.formatting import shorten
 from pbi_agent.media import load_workspace_image
 from pbi_agent.models.messages import ImageAttachment
 from pbi_agent.providers.capabilities import provider_supports_images
@@ -24,9 +41,8 @@ from pbi_agent.session_store import (
     SessionStore,
 )
 from pbi_agent.task_runner import run_single_turn_in_directory
-from pbi_agent.display.formatting import shorten
-from pbi_agent.web.input_mentions import MentionSearchResult, WorkspaceFileIndex
 from pbi_agent.web.display import KanbanTaskDisplay, WebDisplay
+from pbi_agent.web.input_mentions import MentionSearchResult, WorkspaceFileIndex
 from pbi_agent.web.uploads import (
     StoredImageUpload,
     delete_uploaded_images,
@@ -62,7 +78,37 @@ def _serialize_session(record: SessionRecord) -> dict[str, Any]:
     }
 
 
-def _serialize_task(record: KanbanTaskRecord) -> dict[str, Any]:
+def _runtime_summary(settings: Settings) -> dict[str, str]:
+    return {
+        "provider": settings.provider,
+        "model": settings.model,
+        "reasoning_effort": settings.reasoning_effort,
+    }
+
+
+def _resolved_runtime_view(settings: Settings) -> dict[str, Any]:
+    return {
+        "provider": settings.provider,
+        "model": settings.model,
+        "sub_agent_model": settings.sub_agent_model,
+        "reasoning_effort": settings.reasoning_effort,
+        "max_tokens": settings.max_tokens,
+        "service_tier": settings.service_tier,
+        "web_search": settings.web_search,
+        "max_tool_workers": settings.max_tool_workers,
+        "max_retries": settings.max_retries,
+        "compact_threshold": settings.compact_threshold,
+        "responses_url": settings.responses_url,
+        "generic_api_url": settings.generic_api_url,
+        "supports_image_inputs": provider_supports_images(settings.provider),
+    }
+
+
+def _serialize_task(
+    record: KanbanTaskRecord,
+    *,
+    settings: Settings,
+) -> dict[str, Any]:
     return {
         "task_id": record.task_id,
         "directory": record.directory,
@@ -72,12 +118,14 @@ def _serialize_task(record: KanbanTaskRecord) -> dict[str, Any]:
         "position": record.position,
         "project_dir": record.project_dir,
         "session_id": record.session_id,
+        "model_profile_id": record.model_profile_id,
         "run_status": record.run_status,
         "last_result_summary": record.last_result_summary,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
         "last_run_started_at": record.last_run_started_at,
         "last_run_finished_at": record.last_run_finished_at,
+        "runtime_summary": _runtime_summary(settings),
     }
 
 
@@ -105,6 +153,10 @@ def _message_image_payload(
         "byte_count": attachment.byte_count,
         "preview_url": attachment.preview_url,
     }
+
+
+def _config_sort_key(name: str, item_id: str) -> tuple[str, str]:
+    return (name.lower(), item_id)
 
 
 class EventStream:
@@ -155,6 +207,8 @@ class LiveChatSession:
     event_stream: EventStream
     display: WebDisplay
     worker: threading.Thread
+    settings: Settings
+    model_profile_id: str | None
     resume_session_id: str | None
     created_at: str
     status: str = "starting"
@@ -164,8 +218,14 @@ class LiveChatSession:
 
 
 class WebSessionManager:
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        runtime_args: argparse.Namespace | None = None,
+    ) -> None:
+        self._default_settings = settings
+        self._runtime_args = runtime_args
         self._workspace_root = Path.cwd().resolve()
         self._mention_index = WorkspaceFileIndex(self._workspace_root)
         self._directory_key = str(self._workspace_root)
@@ -182,7 +242,7 @@ class WebSessionManager:
 
     @property
     def settings(self) -> Settings:
-        return self._settings
+        return self._default_settings
 
     def warm_file_mentions_cache(self) -> None:
         self._mention_index.warm_cache()
@@ -196,12 +256,15 @@ class WebSessionManager:
         return self._mention_index.search(query, limit=limit)
 
     def bootstrap(self) -> dict[str, Any]:
+        default_settings = self._resolve_settings_or_default(None)
         return {
             "workspace_root": str(self._workspace_root),
-            "provider": self._settings.provider,
-            "model": self._settings.model,
-            "reasoning_effort": self._settings.reasoning_effort,
-            "supports_image_inputs": provider_supports_images(self._settings.provider),
+            "provider": default_settings.provider,
+            "model": default_settings.model,
+            "reasoning_effort": default_settings.reasoning_effort,
+            "supports_image_inputs": provider_supports_images(
+                default_settings.provider
+            ),
             "sessions": self.list_sessions(),
             "tasks": self.list_tasks(),
             "live_sessions": [
@@ -211,26 +274,67 @@ class WebSessionManager:
             "board_stages": ["backlog", "plan", "processing", "review"],
         }
 
+    def config_bootstrap(self) -> dict[str, Any]:
+        config, revision = load_internal_config_snapshot()
+        return {
+            "providers": [
+                self._provider_view(provider)
+                for provider in sorted(
+                    config.providers,
+                    key=lambda item: _config_sort_key(item.name, item.id),
+                )
+            ],
+            "model_profiles": [
+                self._model_profile_view(
+                    profile,
+                    provider=self._require_provider(config, profile.provider_id),
+                    active_profile_id=config.active_model_profile,
+                )
+                for profile in sorted(
+                    config.model_profiles,
+                    key=lambda item: _config_sort_key(item.name, item.id),
+                )
+            ],
+            "active_model_profile": config.active_model_profile,
+            "config_revision": revision,
+            "options": {
+                "provider_kinds": list(PROVIDER_KINDS),
+                "reasoning_efforts": ["low", "medium", "high", "xhigh"],
+                "openai_service_tiers": list(OPENAI_SERVICE_TIERS),
+                "provider_metadata": {
+                    provider_kind: provider_ui_metadata(provider_kind)
+                    for provider_kind in PROVIDER_KINDS
+                },
+            },
+        }
+
     def list_sessions(self, limit: int = 30) -> list[dict[str, Any]]:
         with SessionStore() as store:
             sessions = store.list_sessions(
                 self._directory_key,
                 limit=limit,
-                provider=self._settings.provider,
             )
         return [_serialize_session(session) for session in sessions]
 
     def list_tasks(self) -> list[dict[str, Any]]:
         with SessionStore() as store:
             records = store.list_kanban_tasks(self._directory_key)
-        return [_serialize_task(record) for record in records]
+        return [
+            _serialize_task(
+                record,
+                settings=self._resolve_settings_or_default(record.model_profile_id),
+            )
+            for record in records
+        ]
 
     def create_live_chat(
         self,
         *,
         resume_session_id: str | None = None,
         live_session_id: str | None = None,
+        model_profile_id: str | None = None,
     ) -> dict[str, Any]:
+        resolved_settings = self._resolve_settings(model_profile_id)
         with self._lock:
             if live_session_id and live_session_id in self._chat_sessions:
                 return self._serialize_live_session(
@@ -241,9 +345,9 @@ class WebSessionManager:
             event_stream = EventStream()
             display = WebDisplay(
                 publish_event=event_stream.publish,
-                verbose=self._settings.verbose,
-                model=self._settings.model,
-                reasoning_effort=self._settings.reasoning_effort,
+                verbose=resolved_settings.verbose,
+                model=resolved_settings.model,
+                reasoning_effort=resolved_settings.reasoning_effort,
                 bind_session=lambda bound_session_id, current=session_id: (
                     self._bind_live_session(
                         current,
@@ -262,10 +366,13 @@ class WebSessionManager:
                 event_stream=event_stream,
                 display=display,
                 worker=worker,
+                settings=resolved_settings,
+                model_profile_id=model_profile_id,
                 resume_session_id=resume_session_id,
                 created_at=_now_iso(),
             )
             self._chat_sessions[session_id] = live_session
+            self._publish_live_session_runtime(live_session)
             event_stream.publish(
                 "session_state",
                 {
@@ -283,8 +390,6 @@ class WebSessionManager:
             if record is None:
                 raise KeyError(session_id)
             if record.directory != self._directory_key:
-                raise KeyError(session_id)
-            if record.provider != self._settings.provider:
                 raise KeyError(session_id)
 
             affected_tasks = [
@@ -323,7 +428,7 @@ class WebSessionManager:
         live_session = self._require_live_session(live_session_id)
         if live_session.status == "ended":
             raise RuntimeError("Live chat session has already ended.")
-        if not provider_supports_images(self._settings.provider):
+        if not provider_supports_images(live_session.settings.provider):
             raise ValueError("Image inputs are not supported by the current provider.")
 
         attachments: list[dict[str, Any]] = []
@@ -345,13 +450,16 @@ class WebSessionManager:
         file_paths: list[str] | None = None,
         image_paths: list[str] | None = None,
         image_upload_ids: list[str] | None = None,
+        model_profile_id: str | None = None,
     ) -> dict[str, Any]:
         live_session = self._require_live_session(live_session_id)
         if live_session.status == "ended":
             raise RuntimeError("Live chat session has already ended.")
+        if model_profile_id != live_session.model_profile_id:
+            self._queue_runtime_change(live_session, model_profile_id)
         message_text = text.strip()
         if (image_paths or image_upload_ids) and not provider_supports_images(
-            self._settings.provider
+            live_session.settings.provider
         ):
             raise ValueError("Image inputs are not supported by the current provider.")
         resolved_images: list[ImageAttachment] = []
@@ -389,10 +497,17 @@ class WebSessionManager:
         )
         return self._serialize_live_session(live_session)
 
-    def request_new_chat(self, live_session_id: str) -> dict[str, Any]:
+    def request_new_chat(
+        self,
+        live_session_id: str,
+        *,
+        model_profile_id: str | None = None,
+    ) -> dict[str, Any]:
         live_session = self._require_live_session(live_session_id)
         if live_session.status == "ended":
             raise RuntimeError("Live chat session has already ended.")
+        if model_profile_id != live_session.model_profile_id:
+            self._queue_runtime_change(live_session, model_profile_id)
         live_session.display.request_new_chat()
         return self._serialize_live_session(live_session)
 
@@ -412,8 +527,11 @@ class WebSessionManager:
         stage: str = KANBAN_STAGE_BACKLOG,
         project_dir: str = ".",
         session_id: str | None = None,
+        model_profile_id: str | None = None,
     ) -> dict[str, Any]:
         self._validate_project_dir(project_dir)
+        if model_profile_id is not None:
+            self._resolve_settings(model_profile_id)
         with SessionStore() as store:
             record = store.create_kanban_task(
                 directory=self._directory_key,
@@ -422,6 +540,7 @@ class WebSessionManager:
                 stage=stage,
                 project_dir=project_dir,
                 session_id=session_id,
+                model_profile_id=model_profile_id,
             )
         return self._publish_task_updated(record)
 
@@ -435,10 +554,14 @@ class WebSessionManager:
         position: int | None = None,
         project_dir: str | None = None,
         session_id: str | None = None,
-        clear_session_id: bool = False,
+        session_id_present: bool = False,
+        model_profile_id: str | None = None,
+        model_profile_id_present: bool = False,
     ) -> dict[str, Any]:
         if project_dir is not None:
             self._validate_project_dir(project_dir)
+        if model_profile_id_present and model_profile_id is not None:
+            self._resolve_settings(model_profile_id)
         with SessionStore() as store:
             current = store.get_kanban_task(task_id)
             if current is None or current.directory != self._directory_key:
@@ -456,7 +579,11 @@ class WebSessionManager:
                 prompt=prompt,
                 project_dir=project_dir,
                 session_id=session_id,
-                clear_session_id=clear_session_id,
+                clear_session_id=session_id_present and session_id is None,
+                model_profile_id=model_profile_id,
+                clear_model_profile_id=(
+                    model_profile_id_present and model_profile_id is None
+                ),
             )
         if updated is None:
             raise KeyError(task_id)
@@ -486,6 +613,8 @@ class WebSessionManager:
                 with self._lock:
                     self._running_task_ids.discard(task_id)
                 raise KeyError(task_id)
+            if record.model_profile_id is not None:
+                self._resolve_settings(record.model_profile_id)
             running_record = store.set_kanban_task_running(task_id)
         if running_record is None:
             with self._lock:
@@ -499,7 +628,323 @@ class WebSessionManager:
             name=f"pbi-agent-web-task-{task_id[:8]}",
         )
         worker.start()
-        return _serialize_task(running_record)
+        return self._serialize_task_record(running_record)
+
+    def create_provider(
+        self,
+        *,
+        provider_id: str | None,
+        name: str,
+        kind: str,
+        api_key: str | None,
+        api_key_env: str | None,
+        responses_url: str | None,
+        generic_api_url: str | None,
+        expected_revision: str,
+    ) -> dict[str, Any]:
+        self._validate_secret_inputs(api_key=api_key, api_key_env=api_key_env)
+        config, _ = load_internal_config_snapshot()
+        provider = ProviderConfig(
+            id=slugify(provider_id or name),
+            name=name,
+            kind=kind,
+            api_key=api_key or "",
+            api_key_env=api_key_env,
+            responses_url=responses_url,
+            generic_api_url=generic_api_url,
+        )
+        provider.validate()
+        providers = self._provider_map(config)
+        if provider.id in providers:
+            raise ConfigError(f"Provider '{provider.id}' already exists.")
+        config.providers.append(provider)
+        config.providers.sort(key=lambda item: _config_sort_key(item.name, item.id))
+        revision = save_internal_config_with_revision(
+            config,
+            expected_revision=expected_revision,
+        )
+        return {"provider": self._provider_view(provider), "config_revision": revision}
+
+    def update_provider(
+        self,
+        provider_id: str,
+        *,
+        name: str | None,
+        kind: str | None,
+        api_key: str | None,
+        api_key_env: str | None,
+        responses_url: str | None,
+        generic_api_url: str | None,
+        fields_set: set[str],
+        expected_revision: str,
+    ) -> dict[str, Any]:
+        if "name" in fields_set and name is None:
+            raise ConfigError("Provider name cannot be null.")
+        if "kind" in fields_set and kind is None:
+            raise ConfigError("Provider kind cannot be null.")
+        self._validate_secret_inputs(
+            api_key=api_key if "api_key" in fields_set else None,
+            api_key_env=api_key_env if "api_key_env" in fields_set else None,
+        )
+        config, _ = load_internal_config_snapshot()
+        provider = self._provider_map(config).get(slugify(provider_id))
+        if provider is None:
+            raise ConfigError(f"Unknown provider ID '{provider_id}'.")
+
+        next_api_key = provider.api_key
+        next_api_key_env = provider.api_key_env
+        if "api_key" in fields_set:
+            next_api_key = api_key or ""
+            if api_key:
+                next_api_key_env = None
+        if "api_key_env" in fields_set:
+            next_api_key_env = (api_key_env or "").strip() or None
+            if next_api_key_env:
+                next_api_key = ""
+        updated = replace(
+            provider,
+            name=name if "name" in fields_set else provider.name,
+            kind=kind if "kind" in fields_set else provider.kind,
+            api_key=next_api_key,
+            api_key_env=next_api_key_env,
+            responses_url=(
+                responses_url
+                if "responses_url" in fields_set
+                else provider.responses_url
+            ),
+            generic_api_url=(
+                generic_api_url
+                if "generic_api_url" in fields_set
+                else provider.generic_api_url
+            ),
+        )
+        updated.validate()
+
+        for profile in config.model_profiles:
+            if profile.provider_id == updated.id:
+                profile.validate(provider_kind=updated.kind)
+
+        config.providers = [
+            updated if existing.id == updated.id else existing
+            for existing in config.providers
+        ]
+        config.providers.sort(key=lambda item: _config_sort_key(item.name, item.id))
+        revision = save_internal_config_with_revision(
+            config,
+            expected_revision=expected_revision,
+        )
+        return {"provider": self._provider_view(updated), "config_revision": revision}
+
+    def delete_provider(
+        self,
+        provider_id: str,
+        *,
+        expected_revision: str,
+    ) -> str:
+        config, _ = load_internal_config_snapshot()
+        normalized_id = slugify(provider_id)
+        provider = self._provider_map(config).get(normalized_id)
+        if provider is None:
+            raise ConfigError(f"Unknown provider ID '{provider_id}'.")
+        for profile in config.model_profiles:
+            if profile.provider_id == normalized_id:
+                raise ConfigError(
+                    f"Cannot delete provider '{normalized_id}': model profile "
+                    f"'{profile.id}' still references it."
+                )
+        config.providers = [
+            existing for existing in config.providers if existing.id != normalized_id
+        ]
+        return save_internal_config_with_revision(
+            config,
+            expected_revision=expected_revision,
+        )
+
+    def create_model_profile(
+        self,
+        *,
+        profile_id: str | None,
+        name: str,
+        provider_id: str,
+        model: str | None,
+        sub_agent_model: str | None,
+        reasoning_effort: str | None,
+        max_tokens: int | None,
+        service_tier: str | None,
+        web_search: bool | None,
+        max_tool_workers: int | None,
+        max_retries: int | None,
+        compact_threshold: int | None,
+        expected_revision: str,
+    ) -> dict[str, Any]:
+        config, _ = load_internal_config_snapshot()
+        provider = self._require_provider(config, provider_id)
+        profile = ModelProfileConfig(
+            id=slugify(profile_id or name),
+            name=name,
+            provider_id=provider.id,
+            model=model,
+            sub_agent_model=sub_agent_model,
+            reasoning_effort=reasoning_effort,
+            max_tokens=max_tokens,
+            service_tier=service_tier,
+            web_search=web_search,
+            max_tool_workers=max_tool_workers,
+            max_retries=max_retries,
+            compact_threshold=compact_threshold,
+        )
+        profile.validate(provider_kind=provider.kind)
+        if profile.id in self._profile_map(config):
+            raise ConfigError(f"Model profile '{profile.id}' already exists.")
+        config.model_profiles.append(profile)
+        config.model_profiles.sort(
+            key=lambda item: _config_sort_key(item.name, item.id)
+        )
+        revision = save_internal_config_with_revision(
+            config,
+            expected_revision=expected_revision,
+        )
+        return {
+            "model_profile": self._model_profile_view(
+                profile,
+                provider=provider,
+                active_profile_id=config.active_model_profile,
+            ),
+            "config_revision": revision,
+        }
+
+    def update_model_profile(
+        self,
+        profile_id: str,
+        *,
+        name: str | None,
+        provider_id: str | None,
+        model: str | None,
+        sub_agent_model: str | None,
+        reasoning_effort: str | None,
+        max_tokens: int | None,
+        service_tier: str | None,
+        web_search: bool | None,
+        max_tool_workers: int | None,
+        max_retries: int | None,
+        compact_threshold: int | None,
+        fields_set: set[str],
+        expected_revision: str,
+    ) -> dict[str, Any]:
+        if "name" in fields_set and name is None:
+            raise ConfigError("Model profile name cannot be null.")
+        if "provider_id" in fields_set and provider_id is None:
+            raise ConfigError("provider_id cannot be null.")
+        config, _ = load_internal_config_snapshot()
+        profile = self._profile_map(config).get(slugify(profile_id))
+        if profile is None:
+            raise ConfigError(f"Unknown model profile ID '{profile_id}'.")
+        next_provider_id = (
+            slugify(provider_id)
+            if "provider_id" in fields_set and provider_id is not None
+            else profile.provider_id
+        )
+        provider = self._require_provider(config, next_provider_id)
+        updated = replace(
+            profile,
+            name=name if "name" in fields_set else profile.name,
+            provider_id=next_provider_id,
+            model=model if "model" in fields_set else profile.model,
+            sub_agent_model=(
+                sub_agent_model
+                if "sub_agent_model" in fields_set
+                else profile.sub_agent_model
+            ),
+            reasoning_effort=(
+                reasoning_effort
+                if "reasoning_effort" in fields_set
+                else profile.reasoning_effort
+            ),
+            max_tokens=max_tokens if "max_tokens" in fields_set else profile.max_tokens,
+            service_tier=(
+                service_tier if "service_tier" in fields_set else profile.service_tier
+            ),
+            web_search=web_search if "web_search" in fields_set else profile.web_search,
+            max_tool_workers=(
+                max_tool_workers
+                if "max_tool_workers" in fields_set
+                else profile.max_tool_workers
+            ),
+            max_retries=(
+                max_retries if "max_retries" in fields_set else profile.max_retries
+            ),
+            compact_threshold=(
+                compact_threshold
+                if "compact_threshold" in fields_set
+                else profile.compact_threshold
+            ),
+        )
+        updated.validate(provider_kind=provider.kind)
+        config.model_profiles = [
+            updated if existing.id == updated.id else existing
+            for existing in config.model_profiles
+        ]
+        config.model_profiles.sort(
+            key=lambda item: _config_sort_key(item.name, item.id)
+        )
+        revision = save_internal_config_with_revision(
+            config,
+            expected_revision=expected_revision,
+        )
+        return {
+            "model_profile": self._model_profile_view(
+                updated,
+                provider=provider,
+                active_profile_id=config.active_model_profile,
+            ),
+            "config_revision": revision,
+        }
+
+    def delete_model_profile(
+        self,
+        profile_id: str,
+        *,
+        expected_revision: str,
+    ) -> str:
+        config, _ = load_internal_config_snapshot()
+        normalized_id = slugify(profile_id)
+        profile = self._profile_map(config).get(normalized_id)
+        if profile is None:
+            raise ConfigError(f"Unknown model profile ID '{profile_id}'.")
+        config.model_profiles = [
+            existing
+            for existing in config.model_profiles
+            if existing.id != normalized_id
+        ]
+        if config.active_model_profile == normalized_id:
+            config.active_model_profile = None
+        return save_internal_config_with_revision(
+            config,
+            expected_revision=expected_revision,
+        )
+
+    def set_active_model_profile(
+        self,
+        model_profile_id: str | None,
+        *,
+        expected_revision: str,
+    ) -> dict[str, Any]:
+        config, _ = load_internal_config_snapshot()
+        if model_profile_id is None:
+            config.active_model_profile = None
+        else:
+            profile = self._profile_map(config).get(slugify(model_profile_id))
+            if profile is None:
+                raise ConfigError(f"Unknown model profile ID '{model_profile_id}'.")
+            config.active_model_profile = profile.id
+        revision = save_internal_config_with_revision(
+            config,
+            expected_revision=expected_revision,
+        )
+        return {
+            "active_model_profile": config.active_model_profile,
+            "config_revision": revision,
+        }
 
     def shutdown(self) -> None:
         sessions = list(self._chat_sessions.values())
@@ -521,7 +966,7 @@ class WebSessionManager:
         )
         try:
             exit_code = run_chat_loop(
-                self._settings,
+                live_session.settings,
                 live_session.display,
                 resume_session_id=live_session.resume_session_id,
             )
@@ -567,12 +1012,15 @@ class WebSessionManager:
             if record is None:
                 raise KeyError(task_id)
 
+            runtime_settings = self._resolve_settings_or_default(
+                record.model_profile_id
+            )
             outcome = run_single_turn_in_directory(
                 record.prompt,
-                self._settings,
+                runtime_settings,
                 KanbanTaskDisplay(
                     publish_summary=publish_summary,
-                    verbose=self._settings.verbose,
+                    verbose=runtime_settings.verbose,
                 ),
                 project_dir=record.project_dir,
                 workspace_root=self._workspace_root,
@@ -612,7 +1060,7 @@ class WebSessionManager:
                 self._running_task_ids.discard(task_id)
 
     def _publish_task_updated(self, record: KanbanTaskRecord) -> dict[str, Any]:
-        payload = _serialize_task(record)
+        payload = self._serialize_task_record(record)
         self._app_stream.publish("task_updated", {"task": payload})
         return payload
 
@@ -630,12 +1078,22 @@ class WebSessionManager:
         return {
             "live_session_id": live_session.live_session_id,
             "resume_session_id": live_session.resume_session_id,
+            "model_profile_id": live_session.model_profile_id,
+            "provider": live_session.settings.provider,
+            "model": live_session.settings.model,
+            "reasoning_effort": live_session.settings.reasoning_effort,
             "created_at": live_session.created_at,
             "status": live_session.status,
             "exit_code": live_session.exit_code,
             "fatal_error": live_session.fatal_error,
             "ended_at": live_session.ended_at,
         }
+
+    def _serialize_task_record(self, record: KanbanTaskRecord) -> dict[str, Any]:
+        return _serialize_task(
+            record,
+            settings=self._resolve_settings_or_default(record.model_profile_id),
+        )
 
     def _require_live_session(self, live_session_id: str) -> LiveChatSession:
         live_session = self._chat_sessions.get(live_session_id)
@@ -651,3 +1109,112 @@ class WebSessionManager:
             raise FileNotFoundError(f"Project directory does not exist: {target}")
         if not target.is_dir():
             raise NotADirectoryError(f"Project path is not a directory: {target}")
+
+    def _resolve_settings(self, model_profile_id: str | None) -> Settings:
+        if self._runtime_args is None:
+            if model_profile_id is not None:
+                raise ConfigError(
+                    "Model profile resolution is unavailable for this app instance."
+                )
+            return self._default_settings
+        return resolve_settings_for_model_profile(self._runtime_args, model_profile_id)
+
+    def _resolve_settings_or_default(self, model_profile_id: str | None) -> Settings:
+        try:
+            return self._resolve_settings(model_profile_id)
+        except ConfigError:
+            return self._default_settings
+
+    def _queue_runtime_change(
+        self,
+        live_session: LiveChatSession,
+        model_profile_id: str | None,
+    ) -> None:
+        resolved_settings = self._resolve_settings(model_profile_id)
+        live_session.settings = resolved_settings
+        live_session.model_profile_id = model_profile_id
+        live_session.resume_session_id = None
+        live_session.display.request_runtime_change(
+            settings=resolved_settings,
+            model_profile_id=model_profile_id,
+        )
+        self._publish_live_session_runtime(live_session)
+
+    def _publish_live_session_runtime(self, live_session: LiveChatSession) -> None:
+        live_session.event_stream.publish(
+            "session_runtime_updated",
+            {
+                "live_session_id": live_session.live_session_id,
+                "model_profile_id": live_session.model_profile_id,
+                "provider": live_session.settings.provider,
+                "model": live_session.settings.model,
+                "reasoning_effort": live_session.settings.reasoning_effort,
+            },
+        )
+
+    def _provider_view(self, provider: ProviderConfig) -> dict[str, Any]:
+        return {
+            "id": provider.id,
+            "name": provider.name,
+            "kind": provider.kind,
+            "responses_url": provider.responses_url,
+            "generic_api_url": provider.generic_api_url,
+            "secret_source": provider_secret_source(provider),
+            "secret_env_var": provider.api_key_env,
+            "has_secret": provider_has_secret(provider),
+        }
+
+    def _model_profile_view(
+        self,
+        profile: ModelProfileConfig,
+        *,
+        provider: ProviderConfig,
+        active_profile_id: str | None,
+    ) -> dict[str, Any]:
+        settings = self._resolve_settings_or_default(profile.id)
+        return {
+            "id": profile.id,
+            "name": profile.name,
+            "provider_id": profile.provider_id,
+            "provider": {
+                "id": provider.id,
+                "name": provider.name,
+                "kind": provider.kind,
+            },
+            "model": profile.model,
+            "sub_agent_model": profile.sub_agent_model,
+            "reasoning_effort": profile.reasoning_effort,
+            "max_tokens": profile.max_tokens,
+            "service_tier": profile.service_tier,
+            "web_search": profile.web_search,
+            "max_tool_workers": profile.max_tool_workers,
+            "max_retries": profile.max_retries,
+            "compact_threshold": profile.compact_threshold,
+            "is_active_default": profile.id == active_profile_id,
+            "resolved_runtime": _resolved_runtime_view(settings),
+        }
+
+    def _provider_map(self, config: InternalConfig) -> dict[str, ProviderConfig]:
+        return {provider.id: provider for provider in config.providers}
+
+    def _profile_map(self, config: InternalConfig) -> dict[str, ModelProfileConfig]:
+        return {profile.id: profile for profile in config.model_profiles}
+
+    def _require_provider(
+        self, config: InternalConfig, provider_id: str
+    ) -> ProviderConfig:
+        provider = self._provider_map(config).get(slugify(provider_id))
+        if provider is None:
+            raise ConfigError(f"Unknown provider ID '{provider_id}'.")
+        return provider
+
+    def _validate_secret_inputs(
+        self,
+        *,
+        api_key: str | None,
+        api_key_env: str | None,
+    ) -> None:
+        if api_key and api_key_env:
+            raise ConfigError(
+                "api_key and api_key_env cannot both be set in the same request."
+            )

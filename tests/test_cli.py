@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pbi_agent import cli
-from pbi_agent.config import DEFAULT_XAI_RESPONSES_URL
+from pbi_agent.config import DEFAULT_XAI_RESPONSES_URL, load_internal_config
 from pbi_agent.session_store import SessionStore
 
 
@@ -36,10 +36,7 @@ class DefaultWebCommandTests(unittest.TestCase):
         )
 
     def test_main_defaults_to_web_for_global_options_only(self) -> None:
-        with (
-            patch("pbi_agent.cli._handle_web_command", return_value=17) as mock_web,
-            patch("pbi_agent.cli.save_internal_config") as mock_save,
-        ):
+        with patch("pbi_agent.cli._handle_web_command", return_value=17) as mock_web:
             rc = cli.main(["--api-key", "test-key"])
 
         self.assertEqual(rc, 17)
@@ -48,7 +45,6 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertEqual(args.host, "127.0.0.1")
         self.assertEqual(args.port, 8000)
         self.assertEqual(settings.api_key, "test-key")
-        mock_save.assert_called_once_with(settings)
 
     def test_main_inserts_web_before_web_specific_flags(self) -> None:
         with patch("pbi_agent.cli._handle_web_command", return_value=23) as mock_web:
@@ -155,6 +151,13 @@ class DefaultWebCommandTests(unittest.TestCase):
         args = parser.parse_args(["--max-tokens", "2048", "web"])
 
         self.assertEqual(args.max_tokens, 2048)
+
+    def test_parser_accepts_model_profile_flag(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["--model-profile", "analysis", "web"])
+
+        self.assertEqual(args.model_profile, "analysis")
 
     def test_parser_accepts_sub_agent_model_flag(self) -> None:
         parser = cli.build_parser()
@@ -505,10 +508,7 @@ class DefaultWebCommandTests(unittest.TestCase):
 
             try:
                 os.chdir(root_dir)
-                with (
-                    patch("sys.stdout", stdout),
-                    patch("pbi_agent.cli.save_internal_config") as mock_save,
-                ):
+                with patch("sys.stdout", stdout):
                     rc = cli.main(["--skills"])
             finally:
                 os.chdir(original_cwd)
@@ -517,7 +517,6 @@ class DefaultWebCommandTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Project Skills", output)
         self.assertIn("repo-skill", output)
-        mock_save.assert_not_called()
 
     def test_main_mcp_flag_lists_project_servers_without_settings(self) -> None:
         stdout = io.StringIO()
@@ -540,10 +539,7 @@ class DefaultWebCommandTests(unittest.TestCase):
 
             try:
                 os.chdir(root_dir)
-                with (
-                    patch("sys.stdout", stdout),
-                    patch("pbi_agent.cli.save_internal_config") as mock_save,
-                ):
+                with patch("sys.stdout", stdout):
                     rc = cli.main(["--mcp"])
             finally:
                 os.chdir(original_cwd)
@@ -553,7 +549,6 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertIn("MCP Servers", output)
         self.assertIn("echo", output)
         self.assertIn("uv run server.py", output)
-        mock_save.assert_not_called()
 
     def test_main_agents_flag_lists_project_sub_agents_without_settings(self) -> None:
         stdout = io.StringIO()
@@ -573,10 +568,7 @@ class DefaultWebCommandTests(unittest.TestCase):
 
             try:
                 os.chdir(root_dir)
-                with (
-                    patch("sys.stdout", stdout),
-                    patch("pbi_agent.cli.save_internal_config") as mock_save,
-                ):
+                with patch("sys.stdout", stdout):
                     rc = cli.main(["--agents"])
             finally:
                 os.chdir(original_cwd)
@@ -585,7 +577,6 @@ class DefaultWebCommandTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Sub-Agents", output)
         self.assertIn("code-reviewer", output)
-        mock_save.assert_not_called()
 
     def test_handle_audit_command_uses_direct_single_turn_path(self) -> None:
         parser = cli.build_parser()
@@ -685,7 +676,6 @@ class DefaultWebCommandTests(unittest.TestCase):
                 ),
                 patch("pbi_agent.config.load_dotenv"),
                 patch("pbi_agent.cli.configure_logging"),
-                patch("pbi_agent.cli.save_internal_config"),
                 patch("pbi_agent.cli._handle_run_command", return_value=0) as mock_run,
             ):
                 os.environ.pop("PBI_AGENT_API_KEY", None)
@@ -730,7 +720,6 @@ class DefaultWebCommandTests(unittest.TestCase):
                     ),
                     patch("pbi_agent.config.load_dotenv"),
                     patch("pbi_agent.cli.configure_logging"),
-                    patch("pbi_agent.cli.save_internal_config"),
                     patch(
                         "pbi_agent.cli._handle_run_command", return_value=0
                     ) as mock_run,
@@ -749,6 +738,315 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertEqual(Path(args.project_dir), saved_project)
         self.assertEqual(settings.provider, "xai")
         self.assertEqual(settings.model, "grok-4")
+
+    def test_main_config_providers_crud_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+
+            with patch.dict(
+                os.environ,
+                {"PBI_AGENT_INTERNAL_CONFIG_PATH": str(config_path)},
+                clear=False,
+            ):
+                rc = cli.main(
+                    [
+                        "config",
+                        "providers",
+                        "create",
+                        "--name",
+                        "OpenAI Main",
+                        "--kind",
+                        "openai",
+                        "--api-key",
+                        "saved-key",
+                    ]
+                )
+                self.assertEqual(rc, 0)
+                self.assertEqual(load_internal_config().providers[0].id, "openai-main")
+
+                stdout = io.StringIO()
+                with patch("sys.stdout", stdout):
+                    rc = cli.main(["config", "providers", "list"])
+                self.assertEqual(rc, 0)
+                self.assertIn("openai-main", stdout.getvalue())
+
+                rc = cli.main(
+                    [
+                        "config",
+                        "providers",
+                        "update",
+                        "openai-main",
+                        "--name",
+                        "OpenAI Prod",
+                    ]
+                )
+                self.assertEqual(rc, 0)
+                self.assertEqual(
+                    load_internal_config().providers[0].name, "OpenAI Prod"
+                )
+
+                rc = cli.main(["config", "providers", "delete", "openai-main"])
+                self.assertEqual(rc, 0)
+                self.assertEqual(load_internal_config().providers, [])
+
+    def test_main_config_profiles_crud_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+
+            with patch.dict(
+                os.environ,
+                {"PBI_AGENT_INTERNAL_CONFIG_PATH": str(config_path)},
+                clear=False,
+            ):
+                os.environ.pop("PBI_AGENT_API_KEY", None)
+                os.environ.pop("OPENAI_API_KEY", None)
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "providers",
+                            "create",
+                            "--name",
+                            "OpenAI Main",
+                            "--kind",
+                            "openai",
+                            "--api-key",
+                            "saved-key",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "profiles",
+                            "create",
+                            "--name",
+                            "Analysis",
+                            "--provider-id",
+                            "openai-main",
+                            "--model",
+                            "gpt-5.4",
+                            "--max-retries",
+                            "4",
+                        ]
+                    ),
+                    0,
+                )
+
+                stdout = io.StringIO()
+                with patch("sys.stdout", stdout):
+                    rc = cli.main(["config", "profiles", "list"])
+                self.assertEqual(rc, 0)
+                self.assertIn("analysis", stdout.getvalue())
+
+                self.assertEqual(
+                    cli.main(["config", "profiles", "select", "analysis"]), 0
+                )
+                self.assertEqual(
+                    load_internal_config().active_model_profile, "analysis"
+                )
+
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "profiles",
+                            "update",
+                            "analysis",
+                            "--model",
+                            "gpt-5.4-2026-03-05",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    load_internal_config().model_profiles[0].model, "gpt-5.4-2026-03-05"
+                )
+
+                self.assertEqual(
+                    cli.main(["config", "profiles", "delete", "analysis"]), 0
+                )
+                config = load_internal_config()
+                self.assertEqual(config.model_profiles, [])
+                self.assertIsNone(config.active_model_profile)
+
+    def test_main_config_provider_delete_fails_when_profile_references_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {"PBI_AGENT_INTERNAL_CONFIG_PATH": str(config_path)},
+                clear=False,
+            ):
+                os.environ.pop("PBI_AGENT_API_KEY", None)
+                os.environ.pop("XAI_API_KEY", None)
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "providers",
+                            "create",
+                            "--name",
+                            "OpenAI Main",
+                            "--kind",
+                            "openai",
+                            "--api-key",
+                            "saved-key",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "profiles",
+                            "create",
+                            "--name",
+                            "Analysis",
+                            "--provider-id",
+                            "openai-main",
+                        ]
+                    ),
+                    0,
+                )
+
+                with patch("sys.stderr", stderr):
+                    rc = cli.main(["config", "providers", "delete", "openai-main"])
+
+        self.assertEqual(rc, 2)
+        self.assertIn("still references it", stderr.getvalue())
+
+    def test_main_web_uses_model_profile_without_mutating_saved_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+
+            with patch.dict(
+                os.environ,
+                {"PBI_AGENT_INTERNAL_CONFIG_PATH": str(config_path)},
+                clear=False,
+            ):
+                os.environ.pop("PBI_AGENT_API_KEY", None)
+                os.environ.pop("OPENAI_API_KEY", None)
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "providers",
+                            "create",
+                            "--name",
+                            "OpenAI Main",
+                            "--kind",
+                            "openai",
+                            "--api-key",
+                            "saved-key",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "profiles",
+                            "create",
+                            "--name",
+                            "Analysis",
+                            "--provider-id",
+                            "openai-main",
+                            "--model",
+                            "gpt-5.4-2026-03-05",
+                        ]
+                    ),
+                    0,
+                )
+                before = config_path.read_text(encoding="utf-8")
+
+                with (
+                    patch("pbi_agent.config.load_dotenv"),
+                    patch("pbi_agent.cli.configure_logging"),
+                    patch(
+                        "pbi_agent.cli._handle_web_command", return_value=0
+                    ) as mock_web,
+                ):
+                    rc = cli.main(["--model-profile", "analysis", "web"])
+
+                after = config_path.read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 0)
+        _args, settings = mock_web.call_args.args
+        self.assertEqual(settings.provider, "openai")
+        self.assertEqual(settings.model, "gpt-5.4-2026-03-05")
+        self.assertEqual(settings.api_key, "saved-key")
+        self.assertEqual(before, after)
+
+    def test_main_run_uses_model_profile_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+
+            with patch.dict(
+                os.environ,
+                {"PBI_AGENT_INTERNAL_CONFIG_PATH": str(config_path)},
+                clear=False,
+            ):
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "providers",
+                            "create",
+                            "--name",
+                            "xAI Main",
+                            "--kind",
+                            "xai",
+                            "--api-key",
+                            "saved-key",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "profiles",
+                            "create",
+                            "--name",
+                            "Fast",
+                            "--provider-id",
+                            "xai-main",
+                            "--model",
+                            "grok-4.20",
+                        ]
+                    ),
+                    0,
+                )
+
+                with (
+                    patch("pbi_agent.config.load_dotenv"),
+                    patch("pbi_agent.cli.configure_logging"),
+                    patch(
+                        "pbi_agent.cli._handle_run_command", return_value=0
+                    ) as mock_run,
+                ):
+                    rc = cli.main(
+                        [
+                            "--model-profile",
+                            "fast",
+                            "run",
+                            "--prompt",
+                            "hello",
+                        ]
+                    )
+
+        self.assertEqual(rc, 0)
+        _args, settings = mock_run.call_args.args
+        self.assertEqual(settings.provider, "xai")
+        self.assertEqual(settings.model, "grok-4.20")
 
     def test_main_run_with_nonexistent_session_id_exits_with_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

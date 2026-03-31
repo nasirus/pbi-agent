@@ -36,7 +36,11 @@ if TYPE_CHECKING:
 from pbi_agent.providers.capabilities import provider_supports_images
 from pbi_agent.session_store import MessageImageAttachment, SessionStore
 from pbi_agent.tools.types import ParentContextSnapshot
-from pbi_agent.display.protocol import DisplayProtocol, QueuedInput
+from pbi_agent.display.protocol import (
+    DisplayProtocol,
+    QueuedInput,
+    QueuedRuntimeChange,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -164,160 +168,191 @@ def run_chat_loop(
     *,
     resume_session_id: str | None = None,
 ) -> int:
-    model = _selected_model(settings)
-    _tier = settings.service_tier or ""
     store = _open_store(settings)
     session_id: str | None = resume_session_id
     title_set = bool(resume_session_id)
+    current_settings = settings
+    resume_session_to_restore = resume_session_id
+    should_exit = False
 
-    def _reset_session(*, clear_display: bool = False) -> TokenUsage:
+    def _reset_session(
+        active_settings: Settings, *, clear_display: bool = False
+    ) -> TokenUsage:
         if clear_display:
             display.reset_chat()
         display.welcome(
-            model=model,
-            reasoning_effort=settings.reasoning_effort,
+            model=_selected_model(active_settings),
+            reasoning_effort=active_settings.reasoning_effort,
         )
-        new_usage = TokenUsage(model=model, service_tier=_tier)
+        new_usage = TokenUsage(
+            model=_selected_model(active_settings),
+            service_tier=active_settings.service_tier or "",
+        )
         display.session_usage(new_usage)
         return new_usage
 
-    session_usage = _reset_session()
+    session_usage = _reset_session(current_settings)
     _bind_session(display, session_id)
     had_tool_errors = False
-    with _open_runtime_provider(
-        settings,
-        excluded_tools=get_custom_excluded_tools(),
-    ) as provider:
-        _resume_session(
-            provider=provider,
-            store=store,
-            session_id=resume_session_id,
-            session_usage=session_usage,
-            display=display,
-        )
-        while True:
-            queued_input = display.user_prompt()
-            image_paths: list[str] = []
-            queued_images: list[ImageAttachment] = []
-            message_image_attachments: list[MessageImageAttachment] = []
-            if isinstance(queued_input, QueuedInput):
-                user_input = queued_input.text.strip()
-                image_paths = queued_input.image_paths
-                queued_images = queued_input.images
-                message_image_attachments = queued_input.image_attachments
-            else:
-                user_input = queued_input.strip()
-            if user_input == NEW_CHAT_SENTINEL:
-                provider.reset_conversation()
-                session_usage = _reset_session(clear_display=True)
-                had_tool_errors = False
-                session_id = None
-                title_set = False
-                _bind_session(display, session_id)
-                continue
-            if user_input.startswith(RESUME_SESSION_PREFIX):
-                resume_id = user_input[len(RESUME_SESSION_PREFIX) :]
-                provider.reset_conversation()
-                session_usage = _reset_session(clear_display=True)
-                had_tool_errors = False
-                session_id = None
-                title_set = False
-                if store:
-                    session_id = resume_id
+    while not should_exit:
+        with _open_runtime_provider(
+            current_settings,
+            excluded_tools=get_custom_excluded_tools(),
+        ) as provider:
+            if resume_session_to_restore is not None:
+                _resume_session(
+                    provider=provider,
+                    store=store,
+                    session_id=resume_session_to_restore,
+                    session_usage=session_usage,
+                    display=display,
+                )
+                resume_session_to_restore = None
+            while True:
+                queued_input = display.user_prompt()
+                image_paths: list[str] = []
+                queued_images: list[ImageAttachment] = []
+                message_image_attachments: list[MessageImageAttachment] = []
+                if isinstance(queued_input, QueuedRuntimeChange):
+                    current_settings = queued_input.settings
+                    session_usage = _reset_session(
+                        current_settings,
+                        clear_display=True,
+                    )
+                    had_tool_errors = False
+                    session_id = None
+                    title_set = False
+                    resume_session_to_restore = None
+                    _bind_session(display, session_id)
+                    break
+                if isinstance(queued_input, QueuedInput):
+                    user_input = queued_input.text.strip()
+                    image_paths = queued_input.image_paths
+                    queued_images = queued_input.images
+                    message_image_attachments = queued_input.image_attachments
+                else:
+                    user_input = queued_input.strip()
+                if user_input == NEW_CHAT_SENTINEL:
+                    provider.reset_conversation()
+                    session_usage = _reset_session(
+                        current_settings,
+                        clear_display=True,
+                    )
+                    had_tool_errors = False
+                    session_id = None
+                    title_set = False
+                    _bind_session(display, session_id)
+                    continue
+                if user_input.startswith(RESUME_SESSION_PREFIX):
+                    resume_id = user_input[len(RESUME_SESSION_PREFIX) :]
+                    provider.reset_conversation()
+                    session_usage = _reset_session(
+                        current_settings,
+                        clear_display=True,
+                    )
+                    had_tool_errors = False
+                    session_id = None
+                    title_set = False
+                    if store:
+                        session_id = resume_id
+                        title_set = True
+                        _bind_session(display, session_id)
+                        _resume_session(
+                            provider=provider,
+                            store=store,
+                            session_id=resume_id,
+                            session_usage=session_usage,
+                            display=display,
+                        )
+                    else:
+                        _bind_session(display, session_id)
+                    continue
+                if user_input.lower() in {"exit", "quit"}:
+                    should_exit = True
+                    break
+                normalized_command = _normalize_user_command(user_input)
+                if normalized_command == SKILLS_COMMAND:
+                    display.render_markdown(format_project_skills_markdown())
+                    continue
+                if normalized_command == MCP_COMMAND:
+                    display.render_markdown(format_project_mcp_servers_markdown())
+                    continue
+                if normalized_command == AGENTS_COMMAND:
+                    display.render_markdown(format_project_sub_agents_markdown())
+                    continue
+                if normalized_command == AGENTS_RELOAD_COMMAND:
+                    _reload_provider_sub_agents(provider)
+                    display.render_markdown(
+                        format_project_sub_agents_markdown(reloaded=True)
+                    )
+                    continue
+                if not user_input and not image_paths and not queued_images:
+                    continue
+
+                turn_input = _build_user_turn_input(
+                    text=user_input,
+                    image_paths=image_paths,
+                    images=queued_images,
+                    settings=current_settings,
+                )
+                turn_history_text = _user_turn_history_text(turn_input)
+
+                if session_id is None:
+                    session_id = _create_session(
+                        store,
+                        current_settings,
+                        title=_session_title_for_user_turn(turn_input),
+                    )
                     title_set = True
                     _bind_session(display, session_id)
-                    _resume_session(
-                        provider=provider,
-                        store=store,
-                        session_id=resume_id,
-                        session_usage=session_usage,
-                        display=display,
+                elif not title_set:
+                    _update_session_title(
+                        store,
+                        session_id,
+                        _session_title_for_user_turn(turn_input),
                     )
-                else:
-                    _bind_session(display, session_id)
-                continue
-            if user_input.lower() in {"exit", "quit"}:
-                break
-            normalized_command = _normalize_user_command(user_input)
-            if normalized_command == SKILLS_COMMAND:
-                display.render_markdown(format_project_skills_markdown())
-                continue
-            if normalized_command == MCP_COMMAND:
-                display.render_markdown(format_project_mcp_servers_markdown())
-                continue
-            if normalized_command == AGENTS_COMMAND:
-                display.render_markdown(format_project_sub_agents_markdown())
-                continue
-            if normalized_command == AGENTS_RELOAD_COMMAND:
-                _reload_provider_sub_agents(provider)
-                display.render_markdown(
-                    format_project_sub_agents_markdown(reloaded=True)
-                )
-                continue
-            if not user_input and not image_paths and not queued_images:
-                continue
+                    title_set = True
 
-            turn_input = _build_user_turn_input(
-                text=user_input,
-                image_paths=image_paths,
-                images=queued_images,
-                settings=settings,
-            )
-            turn_history_text = _user_turn_history_text(turn_input)
-
-            if session_id is None:
-                session_id = _create_session(
-                    store,
-                    settings,
-                    title=_session_title_for_user_turn(turn_input),
+                turn_start = time.monotonic()
+                turn_usage = TokenUsage(
+                    model=_selected_model(current_settings),
+                    service_tier=current_settings.service_tier or "",
                 )
-                title_set = True
-                _bind_session(display, session_id)
-            elif not title_set:
-                _update_session_title(
+                display.assistant_start()
+                response = _request_user_turn(
+                    provider=provider,
+                    user_input=turn_input,
+                    display=display,
+                    session_usage=session_usage,
+                    turn_usage=turn_usage,
+                )
+                response, loop_had_errors, _ = _run_tool_iterations(
+                    provider=provider,
+                    response=response,
+                    max_workers=current_settings.max_tool_workers,
+                    display=display,
+                    session_usage=session_usage,
+                    turn_usage=turn_usage,
+                    store=store,
+                    session_id=session_id,
+                    current_user_turn_text=turn_history_text,
+                )
+
+                _add_message(
                     store,
                     session_id,
-                    _session_title_for_user_turn(turn_input),
+                    "user",
+                    turn_history_text,
+                    image_attachments=message_image_attachments,
                 )
-                title_set = True
-
-            turn_start = time.monotonic()
-            turn_usage = TokenUsage(model=model, service_tier=_tier)
-            display.assistant_start()
-            response = _request_user_turn(
-                provider=provider,
-                user_input=turn_input,
-                display=display,
-                session_usage=session_usage,
-                turn_usage=turn_usage,
-            )
-            response, loop_had_errors, _ = _run_tool_iterations(
-                provider=provider,
-                response=response,
-                max_workers=settings.max_tool_workers,
-                display=display,
-                session_usage=session_usage,
-                turn_usage=turn_usage,
-                store=store,
-                session_id=session_id,
-                current_user_turn_text=turn_history_text,
-            )
-
-            _add_message(
-                store,
-                session_id,
-                "user",
-                turn_history_text,
-                image_attachments=message_image_attachments,
-            )
-            _add_message(store, session_id, "assistant", response.text)
-            _update_session_after_turn(
-                store, session_id, response.response_id, session_usage
-            )
-            had_tool_errors = had_tool_errors or loop_had_errors
-            elapsed = time.monotonic() - turn_start
-            display.turn_usage(turn_usage, elapsed)
-            display.session_usage(session_usage)
+                _add_message(store, session_id, "assistant", response.text)
+                _update_session_after_turn(
+                    store, session_id, response.response_id, session_usage
+                )
+                had_tool_errors = had_tool_errors or loop_had_errors
+                elapsed = time.monotonic() - turn_start
+                display.turn_usage(turn_usage, elapsed)
+                display.session_usage(session_usage)
 
     _close_store(store)
     return 4 if had_tool_errors else 0

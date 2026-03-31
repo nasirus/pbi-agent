@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS kanban_tasks (
     position              INTEGER NOT NULL DEFAULT 0,
     project_dir           TEXT NOT NULL DEFAULT '.',
     session_id            TEXT,
+    model_profile_id      TEXT,
     run_status            TEXT NOT NULL DEFAULT 'idle',
     last_result_summary   TEXT NOT NULL DEFAULT '',
     created_at            TEXT NOT NULL,
@@ -125,6 +126,7 @@ class KanbanTaskRecord:
     position: int
     project_dir: str
     session_id: str | None
+    model_profile_id: str | None
     run_status: str
     last_result_summary: str
     created_at: str
@@ -412,6 +414,7 @@ class SessionStore:
         stage: str = KANBAN_STAGE_BACKLOG,
         project_dir: str = ".",
         session_id: str | None = None,
+        model_profile_id: str | None = None,
     ) -> KanbanTaskRecord:
         if stage not in KANBAN_STAGES:
             raise ValueError(f"unsupported kanban stage: {stage}")
@@ -423,9 +426,9 @@ class SessionStore:
             self._conn.execute(
                 "INSERT INTO kanban_tasks "
                 "(task_id, directory, title, prompt, stage, position, project_dir, "
-                "session_id, run_status, last_result_summary, created_at, updated_at, "
+                "session_id, model_profile_id, run_status, last_result_summary, created_at, updated_at, "
                 "last_run_started_at, last_run_finished_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 (
                     task_id,
                     directory,
@@ -435,6 +438,7 @@ class SessionStore:
                     position,
                     project_dir_value,
                     session_id,
+                    model_profile_id,
                     KANBAN_RUN_STATUS_IDLE,
                     "",
                     now,
@@ -490,6 +494,8 @@ class SessionStore:
         project_dir: str | None = None,
         session_id: str | None = None,
         clear_session_id: bool = False,
+        model_profile_id: str | None = None,
+        clear_model_profile_id: bool = False,
         run_status: str | None = None,
         last_result_summary: str | None = None,
         last_run_started_at: str | None = None,
@@ -516,6 +522,11 @@ class SessionStore:
         elif session_id is not None:
             clauses.append("session_id = ?")
             params.append(session_id)
+        if clear_model_profile_id:
+            clauses.append("model_profile_id = NULL")
+        elif model_profile_id is not None:
+            clauses.append("model_profile_id = ?")
+            params.append(model_profile_id)
         if run_status is not None:
             clauses.append("run_status = ?")
             params.append(run_status)

@@ -22,12 +22,20 @@ export type TaskRecord = {
   position: number;
   project_dir: string;
   session_id: string | null;
+  model_profile_id: string | null;
   run_status: "idle" | "running" | "completed" | "failed";
   last_result_summary: string;
   created_at: string;
   updated_at: string;
   last_run_started_at: string | null;
   last_run_finished_at: string | null;
+  runtime_summary: RuntimeSummary;
+};
+
+export type RuntimeSummary = {
+  provider: string;
+  model: string;
+  reasoning_effort: string;
 };
 
 export type UsagePayload = {
@@ -57,6 +65,10 @@ export type UsagePayload = {
 export type LiveSession = {
   live_session_id: string;
   resume_session_id: string | null;
+  model_profile_id: string | null;
+  provider: string;
+  model: string;
+  reasoning_effort: string;
   created_at: string;
   status: "starting" | "running" | "ended";
   exit_code: number | null;
@@ -99,6 +111,78 @@ export type BootstrapPayload = {
   tasks: TaskRecord[];
   live_sessions: LiveSession[];
   board_stages: string[];
+};
+
+export type ProviderView = {
+  id: string;
+  name: string;
+  kind: string;
+  responses_url: string | null;
+  generic_api_url: string | null;
+  secret_source: "none" | "plaintext" | "env_var";
+  secret_env_var: string | null;
+  has_secret: boolean;
+};
+
+export type ProviderKindMetadata = {
+  default_model: string;
+  default_sub_agent_model: string | null;
+  default_responses_url: string | null;
+  default_generic_api_url: string | null;
+  supports_responses_url: boolean;
+  supports_generic_api_url: boolean;
+  supports_service_tier: boolean;
+  supports_native_web_search: boolean;
+  supports_image_inputs: boolean;
+};
+
+export type ConfigOptions = {
+  provider_kinds: string[];
+  reasoning_efforts: string[];
+  openai_service_tiers: string[];
+  provider_metadata: Record<string, ProviderKindMetadata>;
+};
+
+export type ResolvedRuntimeView = {
+  provider: string;
+  model: string;
+  sub_agent_model: string | null;
+  reasoning_effort: string;
+  max_tokens: number;
+  service_tier: string | null;
+  web_search: boolean;
+  max_tool_workers: number;
+  max_retries: number;
+  compact_threshold: number;
+  responses_url: string;
+  generic_api_url: string;
+  supports_image_inputs: boolean;
+};
+
+export type ModelProfileView = {
+  id: string;
+  name: string;
+  provider_id: string;
+  provider: { id: string; name: string; kind: string };
+  model: string | null;
+  sub_agent_model: string | null;
+  reasoning_effort: string | null;
+  max_tokens: number | null;
+  service_tier: string | null;
+  web_search: boolean | null;
+  max_tool_workers: number | null;
+  max_retries: number | null;
+  compact_threshold: number | null;
+  is_active_default: boolean;
+  resolved_runtime: ResolvedRuntimeView;
+};
+
+export type ConfigBootstrapPayload = {
+  providers: ProviderView[];
+  model_profiles: ModelProfileView[];
+  active_model_profile: string | null;
+  config_revision: string;
+  options: ConfigOptions;
 };
 
 export type TimelineMessageItem = {

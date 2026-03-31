@@ -16,6 +16,7 @@ If you run `pbi-agent` without a command, the CLI inserts `web` automatically. G
 | Flag | Env Var | Default | Description |
 | --- | --- | --- | --- |
 | `--provider` | `PBI_AGENT_PROVIDER` | `openai` | LLM provider backend: `openai`, `xai`, `google`, `anthropic`, or `generic`. |
+| `--model-profile` | `PBI_AGENT_MODEL_PROFILE` | none | Select a saved model profile by ID before explicit CLI and env overrides are applied. |
 | `--api-key` | `PBI_AGENT_API_KEY` | none | Shared API key override. If unset, provider-specific fallback env vars are checked. |
 | `--model` | `PBI_AGENT_MODEL` | per-provider | Model override for the selected provider. Generic omits `model` when this is unset. |
 | `--sub-agent-model` | `PBI_AGENT_SUB_AGENT_MODEL` | per-provider sub-model | Optional model override for `sub_agent`. When unset, child agents use the provider-specific sub-agent default from `config.py`. |
@@ -32,6 +33,8 @@ If you run `pbi-agent` without a command, the CLI inserts `web` automatically. G
 | `--skills` | none | `false` | List discovered project skills from `.agents/skills` and exit. |
 | `--mcp` | none | `false` | List discovered project MCP servers from `.agents/mcp.json` and exit. |
 | `--agents` | none | `false` | List discovered project sub-agents from `.agents/*.md` and exit. |
+
+Saved config is only mutated by `pbi-agent config ...` commands. Runtime commands such as `run`, `audit`, and `web` resolve settings but do not rewrite saved providers or profiles.
 
 Per-provider model defaults:
 
@@ -54,6 +57,41 @@ These flags exist in the parser but are suppressed from help output:
 | `--google-api-key` | `--api-key` |
 | `--anthropic-api-key` | `--api-key` |
 | `--generic-api-key` | `--api-key` |
+
+## `pbi-agent config`
+
+Manage the saved internal config file under `~/.pbi-agent/config.json` (or `PBI_AGENT_INTERNAL_CONFIG_PATH` in tests and custom setups).
+
+```bash
+pbi-agent config providers create --name "OpenAI Main" --kind openai
+pbi-agent config profiles create --name analysis --provider-id openai-main --model gpt-5.4
+pbi-agent config profiles select analysis
+```
+
+### `pbi-agent config providers`
+
+Stored providers hold connection-only settings: provider kind, API key, and endpoint overrides.
+
+| Command | Purpose |
+| --- | --- |
+| `pbi-agent config providers list` | List saved providers. |
+| `pbi-agent config providers create --name NAME [--id ID] --kind PROVIDER [--api-key KEY] [--responses-url URL] [--generic-api-url URL]` | Create a provider. |
+| `pbi-agent config providers update ID [--name NAME] [--kind PROVIDER] [--api-key KEY] [--responses-url URL] [--generic-api-url URL]` | Update a provider by ID. |
+| `pbi-agent config providers delete ID` | Delete a provider by ID. Deletion fails while any saved model profile still references it. |
+
+### `pbi-agent config profiles`
+
+Stored model profiles hold runnable model and runtime settings tied to one saved provider.
+
+| Command | Purpose |
+| --- | --- |
+| `pbi-agent config profiles list` | List saved model profiles. |
+| `pbi-agent config profiles create --name NAME [--id ID] --provider-id PROVIDER_ID [profile options]` | Create a model profile. |
+| `pbi-agent config profiles update ID [--name NAME] [--provider-id PROVIDER_ID] [profile options]` | Update a model profile by ID. |
+| `pbi-agent config profiles delete ID` | Delete a model profile by ID. |
+| `pbi-agent config profiles select ID` | Set the active model profile used when `--model-profile` and `PBI_AGENT_MODEL_PROFILE` are absent. |
+
+Profile options: `--model`, `--sub-agent-model`, `--reasoning-effort`, `--max-tokens`, `--service-tier`, `--web-search`, `--no-web-search`, `--max-tool-workers`, `--max-retries`, and `--compact-threshold`.
 
 ## `pbi-agent web` (default)
 
@@ -177,5 +215,5 @@ pbi-agent init --dest .
 | `--force` | `false` | Overwrite existing files that would otherwise block initialization. |
 
 ::: warning
-`init` is the only command that does not resolve provider settings or require an API key. All other commands validate provider configuration before they start the session.
+`init`, `sessions`, and `config` do not resolve provider settings or require an API key. Runtime commands still validate provider configuration before they start the session.
 :::

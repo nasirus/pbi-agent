@@ -8,319 +8,419 @@ import pytest
 import pbi_agent.config as config_module
 from pbi_agent.cli import build_parser
 from pbi_agent.config import (
+    ConfigConflictError,
     ConfigError,
-    DEFAULT_RESPONSES_URL,
-    Settings,
+    InternalConfig,
+    ModelProfileConfig,
+    ProviderConfig,
+    create_model_profile_config,
+    create_provider_config,
+    delete_provider_config,
+    load_internal_config,
+    load_internal_config_snapshot,
     resolve_settings,
     save_internal_config,
+    save_internal_config_with_revision,
+    select_active_model_profile,
 )
 
 
-def test_resolve_settings_uses_saved_provider_when_none_specified(
+def _args(*argv: str):
+    return build_parser().parse_args(list(argv))
+
+
+def test_load_internal_config_treats_old_provider_scoped_shape_as_absent(
     monkeypatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    internal_config = tmp_path / "internal-config.json"
-    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
-    for name in (
-        "PBI_AGENT_PROVIDER",
-        "PBI_AGENT_API_KEY",
-        "OPENAI_API_KEY",
-        "XAI_API_KEY",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    save_internal_config(
-        Settings(
-            api_key="xai-saved-key",
-            provider="xai",
-            responses_url="https://api.x.ai/v1/responses",
-            model="grok-4-1-fast-reasoning",
-            reasoning_effort="high",
-            max_tool_workers=6,
-            max_retries=5,
-            compact_threshold=123456,
-        )
-    )
-
-    parser = build_parser()
-    args = parser.parse_args(["web"])
-
-    settings = resolve_settings(args)
-
-    assert settings.provider == "xai"
-    assert settings.api_key == "xai-saved-key"
-    assert settings.max_tool_workers == 6
-    assert settings.max_retries == 5
-    assert settings.compact_threshold == 123456
-    assert settings.sub_agent_model == "grok-4-1-fast"
-
-
-def test_resolve_settings_uses_saved_generic_api_url(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    internal_config = tmp_path / "internal-config.json"
-    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
-    for name in (
-        "PBI_AGENT_PROVIDER",
-        "PBI_AGENT_API_KEY",
-        "GENERIC_API_KEY",
-        "PBI_AGENT_GENERIC_API_URL",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    save_internal_config(
-        Settings(
-            api_key="generic-saved-key",
-            provider="generic",
-            responses_url=DEFAULT_RESPONSES_URL,
-            generic_api_url="https://example.test/v1/chat/completions",
-            model="openrouter/custom-model",
-            reasoning_effort="high",
-        )
-    )
-
-    parser = build_parser()
-    args = parser.parse_args(["web"])
-
-    settings = resolve_settings(args)
-
-    assert settings.provider == "generic"
-    assert settings.generic_api_url == "https://example.test/v1/chat/completions"
-
-
-def test_resolve_settings_uses_saved_anthropic_model(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    internal_config = tmp_path / "internal-config.json"
-    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
-    for name in (
-        "PBI_AGENT_PROVIDER",
-        "PBI_AGENT_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "PBI_AGENT_MODEL",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    save_internal_config(
-        Settings(
-            api_key="anthropic-saved-key",
-            provider="anthropic",
-            responses_url=DEFAULT_RESPONSES_URL,
-            model="claude-sonnet-4-5",
-            reasoning_effort="high",
-        )
-    )
-
-    parser = build_parser()
-    args = parser.parse_args(["web"])
-
-    settings = resolve_settings(args)
-
-    assert settings.provider == "anthropic"
-    assert settings.model == "claude-sonnet-4-5"
-
-
-@pytest.mark.parametrize(
-    ("provider", "model", "expected_sub_agent_model"),
-    [
-        ("openai", "custom-openai-main", "gpt-5.4-mini"),
-        ("xai", "custom-xai-main", "grok-4-1-fast"),
-        ("google", "custom-google-main", "gemini-3-flash-preview"),
-        ("anthropic", "custom-anthropic-main", "claude-sonnet-4-6"),
-        ("generic", "custom-generic-main", None),
-    ],
-)
-def test_resolve_settings_uses_provider_specific_default_sub_agent_model(
-    monkeypatch,
-    tmp_path: Path,
-    provider: str,
-    model: str,
-    expected_sub_agent_model: str | None,
-) -> None:
-    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    internal_config = tmp_path / "internal-config.json"
-    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
-    for name in (
-        "PBI_AGENT_PROVIDER",
-        "PBI_AGENT_API_KEY",
-        "OPENAI_API_KEY",
-        "XAI_API_KEY",
-        "GEMINI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "GENERIC_API_KEY",
-        "PBI_AGENT_MODEL",
-        "PBI_AGENT_SUB_AGENT_MODEL",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    save_internal_config(
-        Settings(
-            api_key=f"{provider}-saved-key",
-            provider=provider,
-            responses_url=DEFAULT_RESPONSES_URL,
-            model=model,
-            reasoning_effort="high",
-        )
-    )
-
-    parser = build_parser()
-    args = parser.parse_args(["web"])
-
-    settings = resolve_settings(args)
-
-    assert settings.provider == provider
-    assert settings.model == model
-    assert settings.sub_agent_model == expected_sub_agent_model
-
-
-def test_resolve_settings_uses_saved_sub_agent_model(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    internal_config = tmp_path / "internal-config.json"
-    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
-    for name in (
-        "PBI_AGENT_PROVIDER",
-        "PBI_AGENT_API_KEY",
-        "OPENAI_API_KEY",
-        "PBI_AGENT_MODEL",
-        "PBI_AGENT_SUB_AGENT_MODEL",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    save_internal_config(
-        Settings(
-            api_key="openai-saved-key",
-            provider="openai",
-            responses_url=DEFAULT_RESPONSES_URL,
-            model="gpt-5.4-2026-03-05",
-            sub_agent_model="gpt-5.4-mini",
-            reasoning_effort="xhigh",
-        )
-    )
-
-    parser = build_parser()
-    args = parser.parse_args(["web"])
-
-    settings = resolve_settings(args)
-
-    assert settings.provider == "openai"
-    assert settings.model == "gpt-5.4-2026-03-05"
-    assert settings.sub_agent_model == "gpt-5.4-mini"
-
-
-def test_resolve_settings_prefers_cli_sub_agent_model_over_env_and_config(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    internal_config = tmp_path / "internal-config.json"
-    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
-    monkeypatch.setenv("PBI_AGENT_PROVIDER", "openai")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
-    monkeypatch.setenv("PBI_AGENT_SUB_AGENT_MODEL", "gpt-5.4-env")
-
-    save_internal_config(
-        Settings(
-            api_key="openai-saved-key",
-            provider="openai",
-            responses_url=DEFAULT_RESPONSES_URL,
-            model="gpt-5.4-2026-03-05",
-            sub_agent_model="gpt-5.4-saved",
-            reasoning_effort="xhigh",
-        )
-    )
-
-    parser = build_parser()
-    args = parser.parse_args(["--sub-agent-model", "gpt-5.4-cli", "web"])
-
-    settings = resolve_settings(args)
-
-    assert settings.sub_agent_model == "gpt-5.4-cli"
-
-
-def test_resolve_settings_rejects_invalid_service_tier_from_env(monkeypatch) -> None:
-    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    monkeypatch.setenv("PBI_AGENT_PROVIDER", "openai")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
-    monkeypatch.setenv("PBI_AGENT_SERVICE_TIER", "bogus")
-
-    parser = build_parser()
-    args = parser.parse_args(["web"])
-    settings = resolve_settings(args)
-
-    with pytest.raises(ConfigError, match="--service-tier must be one of"):
-        settings.validate()
-
-
-def test_resolve_settings_rejects_invalid_service_tier_from_saved_config(
-    monkeypatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    internal_config = tmp_path / "internal-config.json"
-    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
-    for name in (
-        "PBI_AGENT_PROVIDER",
-        "PBI_AGENT_API_KEY",
-        "OPENAI_API_KEY",
-        "PBI_AGENT_SERVICE_TIER",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    internal_config.write_text(
+    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(tmp_path / "config.json"))
+    (tmp_path / "config.json").write_text(
         json.dumps(
             {
                 "last_used_provider": "openai",
-                "providers": {
-                    "openai": {
-                        "api_key": "openai-saved-key",
-                        "service_tier": "bogus",
-                    }
-                },
+                "providers": {"openai": {"api_key": "legacy-key"}},
             }
         ),
         encoding="utf-8",
     )
 
-    parser = build_parser()
-    args = parser.parse_args(["web"])
-    settings = resolve_settings(args)
+    config = load_internal_config()
 
-    with pytest.raises(ConfigError, match="--service-tier must be one of"):
-        settings.validate()
+    assert config.providers == []
+    assert config.model_profiles == []
+    assert config.active_model_profile is None
 
 
-def test_save_internal_config_persists_by_provider_and_last_used(
-    monkeypatch, tmp_path: Path
-) -> None:
-    internal_config = tmp_path / "internal-config.json"
-    monkeypatch.setenv("PBI_AGENT_INTERNAL_CONFIG_PATH", str(internal_config))
+def test_config_store_roundtrip_and_active_profile_selection(monkeypatch) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
 
-    save_internal_config(
-        Settings(
-            api_key="openai-key",
-            provider="openai",
-            responses_url=DEFAULT_RESPONSES_URL,
+    provider = create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key="saved-openai-key",
+            responses_url="https://api.openai.com/v1/responses",
+        )
+    )
+    profile = create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id=provider.id,
             model="gpt-5.4-2026-03-05",
             sub_agent_model="gpt-5.4-mini",
             reasoning_effort="xhigh",
+            max_tokens=4096,
+            service_tier="flex",
+            web_search=False,
+            max_tool_workers=6,
+            max_retries=5,
+            compact_threshold=123456,
         )
     )
+    select_active_model_profile(profile.id)
+
+    config = load_internal_config()
+
+    assert [item.id for item in config.providers] == ["openai-main"]
+    assert [item.id for item in config.model_profiles] == ["analysis"]
+    assert config.active_model_profile == "analysis"
+    assert config.providers[0].api_key == "saved-openai-key"
+    assert config.model_profiles[0].service_tier == "flex"
+
+
+def test_resolve_settings_uses_active_saved_profile(monkeypatch) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    monkeypatch.delenv("PBI_AGENT_PROVIDER", raising=False)
+    monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key="saved-openai-key",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="gpt-5.4-2026-03-05",
+            reasoning_effort="xhigh",
+            max_tool_workers=6,
+            max_retries=5,
+            compact_threshold=123456,
+            web_search=False,
+        )
+    )
+    select_active_model_profile("analysis")
+
+    settings = resolve_settings(_args("web"))
+
+    assert settings.provider == "openai"
+    assert settings.api_key == "saved-openai-key"
+    assert settings.model == "gpt-5.4-2026-03-05"
+    assert settings.sub_agent_model == "gpt-5.4-mini"
+    assert settings.max_tool_workers == 6
+    assert settings.max_retries == 5
+    assert settings.compact_threshold == 123456
+    assert settings.web_search is False
+
+
+def test_resolve_settings_prefers_cli_profile_selector_over_env_and_active_profile(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    monkeypatch.setenv("PBI_AGENT_MODEL_PROFILE", "env-profile")
+
+    create_provider_config(
+        ProviderConfig(id="openai-main", name="OpenAI Main", kind="openai", api_key="k")
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="active-profile",
+            name="Active Profile",
+            provider_id="openai-main",
+            model="gpt-5.4-active",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="env-profile",
+            name="Env Profile",
+            provider_id="openai-main",
+            model="gpt-5.4-env",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="cli-profile",
+            name="CLI Profile",
+            provider_id="openai-main",
+            model="gpt-5.4-cli",
+        )
+    )
+    select_active_model_profile("active-profile")
+
+    settings = resolve_settings(_args("--model-profile", "cli-profile", "web"))
+
+    assert settings.model == "gpt-5.4-cli"
+
+
+def test_resolve_settings_prefers_cli_and_env_over_selected_profile(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    monkeypatch.setenv("PBI_AGENT_MODEL", "env-model")
+    monkeypatch.setenv("PBI_AGENT_MAX_RETRIES", "9")
+
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key="saved-openai-key",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="saved-model",
+            max_retries=5,
+            max_tool_workers=2,
+        )
+    )
+
+    settings = resolve_settings(
+        _args(
+            "--model-profile",
+            "analysis",
+            "--max-tool-workers",
+            "7",
+            "web",
+        )
+    )
+
+    assert settings.model == "env-model"
+    assert settings.max_retries == 9
+    assert settings.max_tool_workers == 7
+
+
+def test_provider_specific_api_key_env_fallback_still_applies_after_profile_selection(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "xai-env-key")
+
+    create_provider_config(
+        ProviderConfig(
+            id="xai-main",
+            name="xAI Main",
+            kind="xai",
+            api_key="saved-xai-key",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="xai-fast",
+            name="xAI Fast",
+            provider_id="xai-main",
+            model="grok-4.20",
+        )
+    )
+
+    settings = resolve_settings(_args("--model-profile", "xai-fast", "web"))
+
+    assert settings.provider == "xai"
+    assert settings.api_key == "xai-env-key"
+
+
+def test_saved_provider_env_var_reference_beats_saved_plaintext_secret(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_PRIMARY_KEY", "env-ref-key")
+
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key="saved-openai-key",
+            api_key_env="OPENAI_PRIMARY_KEY",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="gpt-5.4-2026-03-05",
+        )
+    )
+
+    settings = resolve_settings(_args("--model-profile", "analysis", "web"))
+
+    assert settings.api_key == "env-ref-key"
+
+
+def test_runtime_overrides_do_not_mutate_saved_config(monkeypatch) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key="saved-openai-key",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="saved-model",
+            max_retries=3,
+        )
+    )
+    before = config_module._internal_config_path().read_text(encoding="utf-8")
+
+    settings = resolve_settings(
+        _args("--model-profile", "analysis", "--model", "cli-model", "web")
+    )
+    after = config_module._internal_config_path().read_text(encoding="utf-8")
+
+    assert settings.model == "cli-model"
+    assert before == after
+
+
+def test_save_internal_config_rejects_stale_revision() -> None:
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key="saved-openai-key",
+        )
+    )
+    config, revision = load_internal_config_snapshot()
+    config.providers.append(
+        ProviderConfig(
+            id="xai-main",
+            name="xAI Main",
+            kind="xai",
+            api_key="saved-xai-key",
+        )
+    )
+    save_internal_config_with_revision(
+        InternalConfig(
+            providers=[
+                ProviderConfig(
+                    id="replacement",
+                    name="Replacement",
+                    kind="openai",
+                    api_key="replacement-key",
+                )
+            ],
+            model_profiles=[],
+            active_model_profile=None,
+        )
+    )
+
+    with pytest.raises(ConfigConflictError, match="Config has changed"):
+        save_internal_config_with_revision(config, expected_revision=revision)
+
+
+def test_resolve_settings_rejects_unknown_profile_id(monkeypatch) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+
+    with pytest.raises(ConfigError, match="Unknown model profile ID 'missing'"):
+        resolve_settings(_args("--model-profile", "missing", "web"))
+
+
+def test_resolve_settings_rejects_profile_pointing_to_missing_provider(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
     save_internal_config(
-        Settings(
-            api_key="xai-key",
-            provider="xai",
-            responses_url="https://api.x.ai/v1/responses",
-            model="grok-4-1-fast-reasoning",
-            reasoning_effort="high",
+        InternalConfig(
+            providers=[],
+            model_profiles=[
+                ModelProfileConfig(
+                    id="broken-profile",
+                    name="Broken Profile",
+                    provider_id="missing-provider",
+                )
+            ],
+            active_model_profile="broken-profile",
         )
     )
 
-    content = internal_config.read_text(encoding="utf-8")
+    with pytest.raises(
+        ConfigError,
+        match="references missing provider 'missing-provider'",
+    ):
+        resolve_settings(_args("web"))
 
-    assert '"last_used_provider": "xai"' in content
-    assert '"openai": {' in content
-    assert '"sub_agent_model": "gpt-5.4-mini"' in content
-    assert '"xai": {' in content
+
+def test_invalid_service_tier_on_non_openai_profile_is_rejected(monkeypatch) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    create_provider_config(
+        ProviderConfig(id="xai-main", name="xAI Main", kind="xai", api_key="x")
+    )
+
+    with pytest.raises(ConfigError, match="only supported with the OpenAI provider"):
+        create_model_profile_config(
+            ModelProfileConfig(
+                id="bad-profile",
+                name="Bad Profile",
+                provider_id="xai-main",
+                service_tier="flex",
+            )
+        )
+
+
+def test_delete_provider_is_blocked_while_profile_still_references_it(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key="saved-openai-key",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+        )
+    )
+
+    with pytest.raises(ConfigError, match="still references it"):
+        delete_provider_config("openai-main")
+
+
+def test_resolve_settings_falls_back_to_unsaved_runtime_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    monkeypatch.setenv("PBI_AGENT_PROVIDER", "google")
+    monkeypatch.setenv("GEMINI_API_KEY", "google-key")
+
+    settings = resolve_settings(_args("web"))
+
+    assert settings.provider == "google"
+    assert settings.model == "gemini-3.1-pro-preview"
+    assert settings.sub_agent_model == "gemini-3-flash-preview"
+    assert settings.api_key == "google-key"

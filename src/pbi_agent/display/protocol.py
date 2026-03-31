@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from pbi_agent.config import Settings
 from pbi_agent.models.messages import ImageAttachment, TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageImageAttachment, MessageRecord
 from pbi_agent.display.formatting import tool_group_class
@@ -22,6 +23,12 @@ class QueuedInput:
     image_paths: list[str] = field(default_factory=list)
     images: list[ImageAttachment] = field(default_factory=list)
     image_attachments: list[MessageImageAttachment] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class QueuedRuntimeChange:
+    settings: Settings
+    model_profile_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -102,7 +109,7 @@ class DisplayProtocol(Protocol):
         single_turn_hint: str | None = None,
     ) -> None: ...
 
-    def user_prompt(self) -> str | QueuedInput: ...
+    def user_prompt(self) -> str | QueuedInput | QueuedRuntimeChange: ...
 
     def assistant_start(self) -> None: ...
 
@@ -199,4 +206,5 @@ __all__ = [
     "PendingToolGroup",
     "PendingToolGroupItem",
     "QueuedInput",
+    "QueuedRuntimeChange",
 ]
