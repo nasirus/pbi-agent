@@ -21,6 +21,7 @@ from pbi_agent.config import (
     OPENAI_SERVICE_TIERS,
     PROVIDER_KINDS,
     ProviderConfig,
+    ResolvedRuntime,
     Settings,
     create_model_profile_config,
     create_provider_config,
@@ -28,7 +29,7 @@ from pbi_agent.config import (
     delete_provider_config,
     list_model_profile_configs,
     list_provider_configs,
-    resolve_settings,
+    resolve_runtime,
     select_active_model_profile,
     slugify,
     update_model_profile_config,
@@ -119,10 +120,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     model_group = parser.add_argument_group("Model behavior")
     model_group.add_argument(
-        "--model-profile",
-        dest="model_profile",
+        "--profile-id",
+        dest="profile_id",
         default=None,
-        help="Select a saved model profile by ID before applying explicit overrides.",
+        help="Select a saved profile ID before applying explicit overrides.",
     )
     model_group.add_argument(
         "--model",
@@ -592,14 +593,18 @@ def main(argv: list[str] | None = None) -> int:
         if _run_session is None:
             return 1
         args.project_dir = _run_session.directory
-        args.provider = _run_session.provider
-        if not args.model:
+        if _run_session.profile_id:
+            args.profile_id = _run_session.profile_id
+        else:
+            args.provider = _run_session.provider
+        if not args.model and not _run_session.profile_id:
             args.model = _run_session.model
 
     # ---- resolve settings for commands that need a provider ----
 
     try:
-        settings = resolve_settings(args)
+        runtime = resolve_runtime(args)
+        settings = runtime.settings
         configure_logging(settings.verbose)
         settings.validate()
     except ConfigError as exc:
@@ -609,13 +614,13 @@ def main(argv: list[str] | None = None) -> int:
     LOGGER.debug("Resolved settings: %s", settings.redacted())
 
     if args.command == "run":
-        return _handle_run_command(args, settings)
+        return _handle_run_command(args, runtime)
 
     if args.command == "audit":
-        return _handle_audit_command(args, settings)
+        return _handle_audit_command(args, runtime)
 
     if args.command == "web":
-        return _handle_web_command(args, settings)
+        return _handle_web_command(args, runtime)
 
     parser.error("Unknown command.")
     return 1
@@ -873,7 +878,17 @@ def _workspace_directory_for_args(args: argparse.Namespace) -> Path:
     return Path.cwd().resolve()
 
 
-def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
+def _coerce_runtime(settings: Settings | ResolvedRuntime) -> ResolvedRuntime:
+    if isinstance(settings, ResolvedRuntime):
+        return settings
+    return ResolvedRuntime(settings=settings, provider_id="", profile_id="")
+
+
+def _handle_run_command(
+    args: argparse.Namespace,
+    settings: Settings | ResolvedRuntime,
+) -> int:
+    runtime = _coerce_runtime(settings)
     project_dir = (Path.cwd() / args.project_dir).resolve()
 
     if not project_dir.exists():
@@ -894,7 +909,7 @@ def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
         os.chdir(project_dir)
         return _run_single_turn_command(
             prompt=args.prompt,
-            settings=settings,
+            settings=runtime,
             image_paths=list(args.images or []),
             resume_session_id=args.session_id,
         )
@@ -902,7 +917,11 @@ def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
         os.chdir(original_cwd)
 
 
-def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
+def _handle_audit_command(
+    args: argparse.Namespace,
+    settings: Settings | ResolvedRuntime,
+) -> int:
+    runtime = _coerce_runtime(settings)
     from pbi_agent.agent.error_formatting import format_user_facing_error
     from pbi_agent.agent.audit_prompt import (
         AUDIT_REPORT_FILENAME,
@@ -927,7 +946,7 @@ def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
         copy_audit_todo(report_dir)
         exit_code = _run_single_turn_command(
             prompt=build_audit_prompt(),
-            settings=settings,
+            settings=runtime,
             single_turn_hint=(
                 f"Audit mode: Evaluating report and writing "
                 f"{AUDIT_TODO_FILENAME} progress tracker and "
@@ -961,7 +980,7 @@ def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
 def _run_single_turn_command(
     *,
     prompt: str,
-    settings: Settings,
+    settings: Settings | ResolvedRuntime,
     single_turn_hint: str | None = None,
     image_paths: list[str] | None = None,
     resume_session_id: str | None = None,
@@ -970,12 +989,13 @@ def _run_single_turn_command(
     from pbi_agent.agent.session import run_single_turn
     from pbi_agent.display.console_display import ConsoleDisplay
 
-    display = ConsoleDisplay(verbose=settings.verbose)
+    runtime = _coerce_runtime(settings)
+    display = ConsoleDisplay(verbose=runtime.settings.verbose)
 
     try:
         outcome = run_single_turn(
             prompt,
-            settings,
+            runtime,
             display,
             single_turn_hint=single_turn_hint,
             image_paths=image_paths,
@@ -1035,7 +1055,11 @@ def _temporary_env_overrides(env_updates: dict[str, str]):
                 os.environ[key] = old_value
 
 
-def _handle_web_command(args: argparse.Namespace, settings: Settings) -> int:
+def _handle_web_command(
+    args: argparse.Namespace,
+    settings: Settings | ResolvedRuntime,
+) -> int:
+    runtime = _coerce_runtime(settings)
     if args.port < 1 or args.port > 65535:
         print("Error: --port must be between 1 and 65535.", file=sys.stderr)
         return 2
@@ -1046,10 +1070,10 @@ def _handle_web_command(args: argparse.Namespace, settings: Settings) -> int:
 
     server = _create_web_server(
         args,
-        settings,
+        runtime,
     )
     try:
-        with _temporary_env_overrides(_settings_env(settings)):
+        with _temporary_env_overrides(_settings_env(runtime.settings)):
             server.serve(debug=args.dev)
             return 0
     except KeyboardInterrupt:
@@ -1162,11 +1186,16 @@ def _open_url_in_windows_browser(browser_url: str) -> bool:
     return False
 
 
-def _create_web_server(args: argparse.Namespace, settings: Settings) -> object:
+def _create_web_server(
+    args: argparse.Namespace,
+    settings: Settings | ResolvedRuntime,
+) -> object:
     from pbi_agent.web.serve import PBIWebServer
 
+    runtime = _coerce_runtime(settings)
+
     return PBIWebServer(
-        settings=settings,
+        settings=runtime,
         runtime_args=args,
         host=args.host,
         port=args.port,

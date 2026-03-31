@@ -553,15 +553,15 @@ class WebDisplay(_EventDisplayBase):
     def request_runtime_change(
         self,
         *,
-        settings,
-        model_profile_id: str | None,
+        runtime,
+        profile_id: str | None,
     ) -> None:
-        self._model = settings.model
-        self._reasoning_effort = settings.reasoning_effort
+        self._model = runtime.settings.model
+        self._reasoning_effort = runtime.settings.reasoning_effort
         self._input_queue.put(
             QueuedRuntimeChange(
-                settings=settings,
-                model_profile_id=model_profile_id,
+                runtime=runtime,
+                profile_id=profile_id,
             )
         )
         self._input_event.set()

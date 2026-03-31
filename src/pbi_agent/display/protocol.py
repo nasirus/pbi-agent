@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from pbi_agent.config import Settings
+from pbi_agent.config import ResolvedRuntime
 from pbi_agent.models.messages import ImageAttachment, TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageImageAttachment, MessageRecord
 from pbi_agent.display.formatting import tool_group_class
@@ -27,8 +27,8 @@ class QueuedInput:
 
 @dataclass(slots=True)
 class QueuedRuntimeChange:
-    settings: Settings
-    model_profile_id: str | None = None
+    runtime: ResolvedRuntime
+    profile_id: str | None = None
 
 
 @dataclass(slots=True)

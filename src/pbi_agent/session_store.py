@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_id    TEXT PRIMARY KEY,
     directory     TEXT NOT NULL,
     provider      TEXT NOT NULL,
+    provider_id   TEXT,
     model         TEXT NOT NULL DEFAULT '',
+    profile_id    TEXT,
     previous_id   TEXT,
     title         TEXT NOT NULL DEFAULT '',
     total_tokens  INTEGER NOT NULL DEFAULT 0,
@@ -54,6 +56,8 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id             TEXT NOT NULL REFERENCES sessions(session_id),
     role                   TEXT NOT NULL,
     content                TEXT NOT NULL DEFAULT '',
+    provider_id            TEXT,
+    profile_id             TEXT,
     image_attachments_json TEXT NOT NULL DEFAULT '[]',
     created_at             TEXT NOT NULL
 );
@@ -86,7 +90,9 @@ class SessionRecord:
     session_id: str
     directory: str
     provider: str
+    provider_id: str | None
     model: str
+    profile_id: str | None
     previous_id: str | None
     title: str
     total_tokens: int
@@ -104,6 +110,8 @@ class MessageRecord:
     role: str
     content: str
     created_at: str
+    provider_id: str | None = None
+    profile_id: str | None = None
     image_attachments: list["MessageImageAttachment"] = field(default_factory=list)
 
 
@@ -229,16 +237,29 @@ class SessionStore:
         self._conn.close()
 
     def _ensure_schema(self) -> None:
+        session_columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        if "provider_id" not in session_columns:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN provider_id TEXT")
+        if "profile_id" not in session_columns:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN profile_id TEXT")
+
         message_columns = {
             row["name"]
             for row in self._conn.execute("PRAGMA table_info(messages)").fetchall()
         }
+        if "provider_id" not in message_columns:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN provider_id TEXT")
+        if "profile_id" not in message_columns:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN profile_id TEXT")
         if "image_attachments_json" not in message_columns:
             self._conn.execute(
                 "ALTER TABLE messages "
                 "ADD COLUMN image_attachments_json TEXT NOT NULL DEFAULT '[]'"
             )
-            self._conn.commit()
+        self._conn.commit()
 
     def create_session(
         self,
@@ -246,17 +267,30 @@ class SessionStore:
         provider: str,
         model: str,
         title: str = "",
+        *,
+        provider_id: str | None = None,
+        profile_id: str | None = None,
     ) -> str:
         session_id = uuid.uuid4().hex
         now = _now_iso()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO sessions "
-                "(session_id, directory, provider, model, previous_id, title, "
+                "(session_id, directory, provider, provider_id, model, profile_id, previous_id, title, "
                 "total_tokens, input_tokens, output_tokens, cost_usd, "
                 "created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, NULL, ?, 0, 0, 0, 0.0, ?, ?)",
-                (session_id, directory, provider, model, title, now, now),
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, 0, 0, 0.0, ?, ?)",
+                (
+                    session_id,
+                    directory,
+                    provider,
+                    provider_id,
+                    model,
+                    profile_id,
+                    title,
+                    now,
+                    now,
+                ),
             )
             self._conn.commit()
         return session_id
@@ -266,20 +300,39 @@ class SessionStore:
         session_id: str,
         *,
         previous_id: str | None = None,
+        clear_previous_id: bool = False,
         title: str | None = None,
+        provider: str | None = None,
+        provider_id: str | None = None,
         total_tokens: int | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         cost_usd: float | None = None,
+        model: str | None = None,
+        profile_id: str | None = None,
     ) -> None:
         clauses: list[str] = []
         params: list[object] = []
-        if previous_id is not None:
+        if clear_previous_id:
+            clauses.append("previous_id = NULL")
+        elif previous_id is not None:
             clauses.append("previous_id = ?")
             params.append(previous_id)
         if title is not None:
             clauses.append("title = ?")
             params.append(title)
+        if provider is not None:
+            clauses.append("provider = ?")
+            params.append(provider)
+        if provider_id is not None:
+            clauses.append("provider_id = ?")
+            params.append(provider_id)
+        if model is not None:
+            clauses.append("model = ?")
+            params.append(model)
+        if profile_id is not None:
+            clauses.append("profile_id = ?")
+            params.append(profile_id)
         if total_tokens is not None:
             clauses += [
                 "total_tokens = ?",
@@ -361,18 +414,22 @@ class SessionStore:
         role: str,
         content: str,
         *,
+        provider_id: str | None = None,
+        profile_id: str | None = None,
         image_attachments: list[MessageImageAttachment] | None = None,
     ) -> int:
         now = _now_iso()
         with self._lock:
             cursor = self._conn.execute(
                 "INSERT INTO messages "
-                "(session_id, role, content, image_attachments_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(session_id, role, content, provider_id, profile_id, image_attachments_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     session_id,
                     role,
                     content,
+                    provider_id,
+                    profile_id,
                     _serialize_image_attachments(image_attachments),
                     now,
                 ),
@@ -395,6 +452,8 @@ class SessionStore:
                     session_id=data["session_id"],
                     role=data["role"],
                     content=data["content"],
+                    provider_id=data.get("provider_id"),
+                    profile_id=data.get("profile_id"),
                     image_attachments=_deserialize_image_attachments(
                         data.get("image_attachments_json")
                     ),

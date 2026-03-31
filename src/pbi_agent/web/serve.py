@@ -36,8 +36,9 @@ from pbi_agent.branding import startup_panel
 from pbi_agent.config import (
     ConfigConflictError,
     ConfigError,
+    ResolvedRuntime,
     Settings,
-    resolve_settings,
+    resolve_runtime,
 )
 from pbi_agent.providers.capabilities import provider_supports_images
 from pbi_agent.web.command_registry import search_slash_commands
@@ -82,7 +83,7 @@ ConfigRevisionHeader = Annotated[str, Header(alias="If-Match", min_length=1)]
 class CreateChatSessionRequest(BaseModel):
     resume_session_id: str | None = None
     live_session_id: str | None = None
-    model_profile_id: str | None = None
+    profile_id: str | None = None
 
 
 class ChatInputRequest(BaseModel):
@@ -90,11 +91,11 @@ class ChatInputRequest(BaseModel):
     file_paths: list[str] = Field(default_factory=list)
     image_paths: list[str] = Field(default_factory=list)
     image_upload_ids: list[str] = Field(default_factory=list)
-    model_profile_id: str | None = None
+    profile_id: str | None = None
 
 
 class NewChatRequest(BaseModel):
-    model_profile_id: str | None = None
+    profile_id: str | None = None
 
 
 class ExpandInputRequest(BaseModel):
@@ -132,7 +133,7 @@ class CreateTaskRequest(BaseModel):
     stage: BoardStage = "backlog"
     project_dir: str = "."
     session_id: str | None = None
-    model_profile_id: str | None = None
+    profile_id: str | None = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -142,14 +143,16 @@ class UpdateTaskRequest(BaseModel):
     position: Annotated[int, Field(ge=0)] | None = None
     project_dir: str | None = None
     session_id: str | None = None
-    model_profile_id: str | None = None
+    profile_id: str | None = None
 
 
 class SessionRecordModel(BaseModel):
     session_id: str
     directory: str
     provider: str
+    provider_id: str | None
     model: str
+    profile_id: str | None
     previous_id: str | None
     title: str
     total_tokens: int
@@ -163,7 +166,8 @@ class SessionRecordModel(BaseModel):
 class LiveSessionModel(BaseModel):
     live_session_id: str
     resume_session_id: str | None
-    model_profile_id: str | None
+    provider_id: str
+    profile_id: str
     provider: str
     model: str
     reasoning_effort: str
@@ -188,6 +192,8 @@ class ImageUploadResponse(BaseModel):
 
 class RuntimeSummaryModel(BaseModel):
     provider: str
+    provider_id: str
+    profile_id: str
     model: str
     reasoning_effort: str
 
@@ -201,7 +207,7 @@ class TaskRecordModel(BaseModel):
     position: int
     project_dir: str
     session_id: str | None
-    model_profile_id: str | None
+    profile_id: str | None
     run_status: RunStatus
     last_result_summary: str
     created_at: str
@@ -214,6 +220,8 @@ class TaskRecordModel(BaseModel):
 class BootstrapResponse(BaseModel):
     workspace_root: str
     provider: str
+    provider_id: str
+    profile_id: str
     model: str
     reasoning_effort: str
     supports_image_inputs: bool
@@ -306,6 +314,8 @@ class ModelProfileProviderModel(BaseModel):
 
 class ResolvedRuntimeViewModel(BaseModel):
     provider: str
+    provider_id: str
+    profile_id: str
     model: str
     sub_agent_model: str | None
     reasoning_effort: str
@@ -369,7 +379,7 @@ class ModelProfileUpdateRequest(BaseModel):
 
 class ModelProfileListResponse(BaseModel):
     model_profiles: list[ModelProfileViewModel]
-    active_model_profile: str | None
+    active_profile_id: str | None
     config_revision: str
 
 
@@ -378,19 +388,19 @@ class ModelProfileResponse(BaseModel):
     config_revision: str
 
 
-class ActiveModelProfileRequest(BaseModel):
-    model_profile_id: str | None = None
+class ActiveProfileRequest(BaseModel):
+    profile_id: str | None = None
 
 
-class ActiveModelProfileResponse(BaseModel):
-    active_model_profile: str | None
+class ActiveProfileResponse(BaseModel):
+    active_profile_id: str | None
     config_revision: str
 
 
 class ConfigBootstrapResponse(BaseModel):
     providers: list[ProviderViewModel]
     model_profiles: list[ModelProfileViewModel]
-    active_model_profile: str | None
+    active_profile_id: str | None
     config_revision: str
     options: ConfigOptionsModel
 
@@ -430,7 +440,7 @@ def _config_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, ConfigConflictError):
         return _conflict(detail)
     if detail.startswith("Unknown provider ID") or detail.startswith(
-        "Unknown model profile ID"
+        "Unknown profile ID"
     ):
         return _not_found(detail)
     if "already exists" in detail or "still references it" in detail:
@@ -533,7 +543,7 @@ def list_model_profiles(manager: SessionManagerDep) -> ModelProfileListResponse:
             _model_from_payload(ModelProfileViewModel, item)
             for item in payload["model_profiles"]
         ],
-        active_model_profile=payload["active_model_profile"],
+        active_profile_id=payload["active_profile_id"],
         config_revision=str(payload["config_revision"]),
     )
 
@@ -571,17 +581,17 @@ def create_model_profile(
 
 
 @config_router.patch(
-    "/model-profiles/{model_profile_id}", response_model=ModelProfileResponse
+    "/model-profiles/{profile_id}", response_model=ModelProfileResponse
 )
 def update_model_profile(
-    model_profile_id: str,
+    profile_id: str,
     request: ModelProfileUpdateRequest,
     manager: SessionManagerDep,
     expected_revision: ConfigRevisionHeader,
 ) -> ModelProfileResponse:
     try:
         payload = manager.update_model_profile(
-            model_profile_id,
+            profile_id,
             name=request.name,
             provider_id=request.provider_id,
             model=request.model,
@@ -606,15 +616,15 @@ def update_model_profile(
     )
 
 
-@config_router.delete("/model-profiles/{model_profile_id}", status_code=204)
+@config_router.delete("/model-profiles/{profile_id}", status_code=204)
 def delete_model_profile(
-    model_profile_id: str,
+    profile_id: str,
     manager: SessionManagerDep,
     expected_revision: ConfigRevisionHeader,
 ) -> Response:
     try:
         manager.delete_model_profile(
-            model_profile_id,
+            profile_id,
             expected_revision=expected_revision,
         )
     except Exception as exc:
@@ -624,22 +634,22 @@ def delete_model_profile(
 
 @config_router.put(
     "/active-model-profile",
-    response_model=ActiveModelProfileResponse,
+    response_model=ActiveProfileResponse,
 )
 def set_active_model_profile(
-    request: ActiveModelProfileRequest,
+    request: ActiveProfileRequest,
     manager: SessionManagerDep,
     expected_revision: ConfigRevisionHeader,
-) -> ActiveModelProfileResponse:
+) -> ActiveProfileResponse:
     try:
         payload = manager.set_active_model_profile(
-            request.model_profile_id,
+            request.profile_id,
             expected_revision=expected_revision,
         )
     except Exception as exc:
         raise _config_http_error(exc) from exc
-    return ActiveModelProfileResponse(
-        active_model_profile=payload["active_model_profile"],
+    return ActiveProfileResponse(
+        active_profile_id=payload["active_profile_id"],
         config_revision=str(payload["config_revision"]),
     )
 
@@ -710,7 +720,7 @@ def create_chat_session(
         session = manager.create_live_chat(
             resume_session_id=request.resume_session_id,
             live_session_id=request.live_session_id,
-            model_profile_id=request.model_profile_id,
+            profile_id=request.profile_id,
         )
     except ConfigError as exc:
         raise _config_http_error(exc) from exc
@@ -736,7 +746,7 @@ def submit_chat_input(
             file_paths=request.file_paths,
             image_paths=request.image_paths,
             image_upload_ids=request.image_upload_ids,
-            model_profile_id=request.model_profile_id,
+            profile_id=request.profile_id,
         )
     except KeyError as exc:
         raise _not_found("Live session not found.") from exc
@@ -812,7 +822,7 @@ def request_new_chat(
     try:
         session = manager.request_new_chat(
             live_session_id,
-            model_profile_id=request.model_profile_id,
+            profile_id=request.profile_id,
         )
     except KeyError as exc:
         raise _not_found("Live session not found.") from exc
@@ -855,7 +865,7 @@ def create_task(
             stage=request.stage,
             project_dir=request.project_dir,
             session_id=request.session_id,
-            model_profile_id=request.model_profile_id,
+            profile_id=request.profile_id,
         )
     except ConfigError as exc:
         raise _config_http_error(exc) from exc
@@ -880,8 +890,8 @@ def update_task(
             project_dir=request.project_dir,
             session_id=request.session_id,
             session_id_present="session_id" in request.model_fields_set,
-            model_profile_id=request.model_profile_id,
-            model_profile_id_present="model_profile_id" in request.model_fields_set,
+            profile_id=request.profile_id,
+            profile_id_present="profile_id" in request.model_fields_set,
         )
     except KeyError as exc:
         raise _not_found("Task not found.") from exc
@@ -948,7 +958,7 @@ async def stream_events(websocket: WebSocket, stream_id: StreamIdPath) -> None:
 
 
 def create_app(
-    settings: Settings,
+    settings: Settings | ResolvedRuntime,
     *,
     runtime_args: argparse.Namespace | None = None,
     debug: bool = False,
@@ -1185,7 +1195,7 @@ def _default_settings_namespace() -> argparse.Namespace:
         provider=None,
         responses_url=None,
         generic_api_url=None,
-        model_profile=None,
+        profile_id=None,
         model=None,
         sub_agent_model=None,
         max_tokens=None,
@@ -1202,8 +1212,8 @@ def _default_settings_namespace() -> argparse.Namespace:
 def _create_default_fastapi_app() -> FastAPI:
     args = _default_settings_namespace()
     try:
-        settings = resolve_settings(args)
-        settings.validate()
+        runtime = resolve_runtime(args)
+        runtime.settings.validate()
     except ConfigError as error:
         app = FastAPI(
             title="PBI Agent", docs_url=None, redoc_url=None, openapi_url=None
@@ -1215,7 +1225,7 @@ def _create_default_fastapi_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=detail)
 
         return app
-    return create_app(settings, runtime_args=args)
+    return create_app(runtime, runtime_args=args)
 
 
 app = _create_default_fastapi_app()

@@ -18,6 +18,7 @@ from pbi_agent.config import (
     delete_provider_config,
     load_internal_config,
     load_internal_config_snapshot,
+    resolve_runtime,
     resolve_settings,
     save_internal_config,
     save_internal_config_with_revision,
@@ -134,7 +135,7 @@ def test_resolve_settings_prefers_cli_profile_selector_over_env_and_active_profi
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
-    monkeypatch.setenv("PBI_AGENT_MODEL_PROFILE", "env-profile")
+    monkeypatch.setenv("PBI_AGENT_PROFILE_ID", "env-profile")
 
     create_provider_config(
         ProviderConfig(id="openai-main", name="OpenAI Main", kind="openai", api_key="k")
@@ -165,7 +166,7 @@ def test_resolve_settings_prefers_cli_profile_selector_over_env_and_active_profi
     )
     select_active_model_profile("active-profile")
 
-    settings = resolve_settings(_args("--model-profile", "cli-profile", "web"))
+    settings = resolve_settings(_args("--profile-id", "cli-profile", "web"))
 
     assert settings.model == "gpt-5.4-cli"
 
@@ -198,7 +199,7 @@ def test_resolve_settings_prefers_cli_and_env_over_selected_profile(
 
     settings = resolve_settings(
         _args(
-            "--model-profile",
+            "--profile-id",
             "analysis",
             "--max-tool-workers",
             "7",
@@ -235,7 +236,7 @@ def test_provider_specific_api_key_env_fallback_still_applies_after_profile_sele
         )
     )
 
-    settings = resolve_settings(_args("--model-profile", "xai-fast", "web"))
+    settings = resolve_settings(_args("--profile-id", "xai-fast", "web"))
 
     assert settings.provider == "xai"
     assert settings.api_key == "xai-env-key"
@@ -267,12 +268,12 @@ def test_saved_provider_env_var_reference_beats_saved_plaintext_secret(
         )
     )
 
-    settings = resolve_settings(_args("--model-profile", "analysis", "web"))
+    settings = resolve_settings(_args("--profile-id", "analysis", "web"))
 
     assert settings.api_key == "env-ref-key"
 
 
-def test_runtime_overrides_do_not_mutate_saved_config(monkeypatch) -> None:
+def test_runtime_overrides_persist_a_derived_profile(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
 
     create_provider_config(
@@ -294,13 +295,19 @@ def test_runtime_overrides_do_not_mutate_saved_config(monkeypatch) -> None:
     )
     before = config_module._internal_config_path().read_text(encoding="utf-8")
 
-    settings = resolve_settings(
-        _args("--model-profile", "analysis", "--model", "cli-model", "web")
+    runtime = resolve_runtime(
+        _args("--profile-id", "analysis", "--model", "cli-model", "web")
     )
     after = config_module._internal_config_path().read_text(encoding="utf-8")
 
-    assert settings.model == "cli-model"
-    assert before == after
+    assert runtime.settings.model == "cli-model"
+    assert runtime.profile_id != "analysis"
+    assert before != after
+    config = load_internal_config()
+    assert sorted(profile.id for profile in config.model_profiles) == [
+        "analysis",
+        runtime.profile_id,
+    ]
 
 
 def test_save_internal_config_rejects_stale_revision() -> None:
@@ -343,8 +350,8 @@ def test_save_internal_config_rejects_stale_revision() -> None:
 def test_resolve_settings_rejects_unknown_profile_id(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
 
-    with pytest.raises(ConfigError, match="Unknown model profile ID 'missing'"):
-        resolve_settings(_args("--model-profile", "missing", "web"))
+    with pytest.raises(ConfigError, match="Unknown profile ID 'missing'"):
+        resolve_settings(_args("--profile-id", "missing", "web"))
 
 
 def test_resolve_settings_rejects_profile_pointing_to_missing_provider(

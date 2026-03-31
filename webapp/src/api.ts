@@ -12,20 +12,33 @@ import type {
   TaskRecord,
 } from "./types";
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
   if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   const response = await fetch(path, {
-    headers,
     ...init,
+    headers, // must come after ...init so Content-Type is not overwritten
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => ({}))) as {
       detail?: string;
     };
-    throw new Error(payload.detail || `Request failed: ${response.status}`);
+    throw new ApiError(
+      payload.detail || `Request failed: ${response.status}`,
+      response.status,
+    );
   }
   if (response.status === 204) {
     return undefined as T;
@@ -87,7 +100,7 @@ export async function createChatSession(
   payload: Partial<{
     live_session_id: string;
     resume_session_id: string;
-    model_profile_id: string | null;
+    profile_id: string | null;
   }> = {},
 ): Promise<LiveSession> {
   const result = await requestJson<{ session: LiveSession }>("/api/chat/session", {
@@ -104,7 +117,7 @@ export async function submitChatInput(
     file_paths: string[];
     image_paths: string[];
     image_upload_ids: string[];
-    model_profile_id?: string | null;
+    profile_id?: string | null;
   },
 ): Promise<LiveSession> {
   const result = await requestJson<{ session: LiveSession }>(
@@ -144,13 +157,13 @@ export async function expandChatInput(text: string): Promise<ExpandedChatInput> 
 
 export async function requestNewChat(
   liveSessionId: string,
-  modelProfileId: string | null = null,
+  profileId: string | null = null,
 ): Promise<LiveSession> {
   const result = await requestJson<{ session: LiveSession }>(
     `/api/chat/session/${liveSessionId}/new-chat`,
     {
       method: "POST",
-      body: JSON.stringify({ model_profile_id: modelProfileId }),
+      body: JSON.stringify({ profile_id: profileId }),
     },
   );
   return result.session;
@@ -165,7 +178,7 @@ export async function createTask(
   payload: Partial<TaskRecord> & {
     title: string;
     prompt: string;
-    model_profile_id?: string | null;
+    profile_id?: string | null;
   },
 ): Promise<TaskRecord> {
   const result = await requestJson<{ task: TaskRecord }>("/api/tasks", {
@@ -306,10 +319,10 @@ export async function deleteModelProfile(
 export async function setActiveModelProfile(
   modelProfileId: string | null,
   configRevision: string,
-): Promise<{ active_model_profile: string | null; config_revision: string }> {
+): Promise<{ active_profile_id: string | null; config_revision: string }> {
   return requestJson("/api/config/active-model-profile", {
     method: "PUT",
     headers: { "If-Match": configRevision },
-    body: JSON.stringify({ model_profile_id: modelProfileId }),
+    body: JSON.stringify({ profile_id: modelProfileId }),
   });
 }

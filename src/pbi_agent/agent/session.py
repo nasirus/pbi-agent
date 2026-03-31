@@ -18,7 +18,7 @@ from pbi_agent.agent.sub_agent_discovery import (
     get_project_sub_agent_by_name,
 )
 from pbi_agent.agent.skill_discovery import format_project_skills_markdown
-from pbi_agent.config import Settings
+from pbi_agent.config import ResolvedRuntime, Settings, resolve_runtime_for_profile_id
 from pbi_agent.media import load_workspace_image
 from pbi_agent.mcp import format_project_mcp_servers_markdown
 from pbi_agent.models.messages import (
@@ -81,15 +81,30 @@ def _bind_session(display: DisplayProtocol, session_id: str | None) -> None:
         binder(session_id)
 
 
+def _coerce_runtime(value: Settings | ResolvedRuntime) -> ResolvedRuntime:
+    if isinstance(value, ResolvedRuntime):
+        return value
+    return ResolvedRuntime(
+        settings=value,
+        provider_id="",
+        profile_id="",
+    )
+
+
 def run_single_turn(
     prompt: str,
-    settings: Settings,
+    settings: Settings | ResolvedRuntime,
     display: DisplayProtocol,
     *,
     single_turn_hint: str | None = None,
     resume_session_id: str | None = None,
     image_paths: list[str] | None = None,
 ) -> AgentOutcome:
+    runtime = _coerce_runtime(settings)
+    store = _open_store(runtime.settings)
+    if resume_session_id is not None:
+        runtime = _runtime_for_saved_session(store, resume_session_id, runtime)
+    settings = runtime.settings
     display.welcome(
         interactive=False,
         model=_selected_model(settings),
@@ -110,9 +125,9 @@ def run_single_turn(
         settings=settings,
     )
     user_turn_history_text = _user_turn_history_text(user_input)
-    store, session_id = _open_session_store(
-        settings,
-        resume_session_id=resume_session_id,
+    session_id = resume_session_id or _create_session(
+        store,
+        runtime,
         title=_session_title_for_user_turn(user_input),
     )
 
@@ -124,6 +139,7 @@ def run_single_turn(
             provider=provider,
             store=store,
             session_id=resume_session_id,
+            runtime=runtime,
             session_usage=session_usage,
             display=display,
         )
@@ -145,10 +161,20 @@ def run_single_turn(
             session_id=session_id,
             current_user_turn_text=user_turn_history_text,
         )
-        _add_message(store, session_id, "user", user_turn_history_text)
-        _add_message(store, session_id, "assistant", response.text)
+        _add_message(
+            store,
+            session_id,
+            runtime,
+            "user",
+            user_turn_history_text,
+        )
+        _add_message(store, session_id, runtime, "assistant", response.text)
         _update_session_after_turn(
-            store, session_id, response.response_id, session_usage
+            store,
+            session_id,
+            runtime,
+            _conversation_checkpoint_for_resume(provider, response.response_id),
+            session_usage,
         )
         elapsed = time.monotonic() - session_start
         display.turn_usage(turn_usage, elapsed)
@@ -163,23 +189,25 @@ def run_single_turn(
 
 
 def run_chat_loop(
-    settings: Settings,
+    settings: Settings | ResolvedRuntime,
     display: DisplayProtocol,
     *,
     resume_session_id: str | None = None,
 ) -> int:
-    store = _open_store(settings)
+    current_runtime = _coerce_runtime(settings)
+    store = _open_store(current_runtime.settings)
     session_id: str | None = resume_session_id
     title_set = bool(resume_session_id)
-    current_settings = settings
     resume_session_to_restore = resume_session_id
+    replay_history_on_restore = resume_session_id is not None
     should_exit = False
 
     def _reset_session(
-        active_settings: Settings, *, clear_display: bool = False
+        active_runtime: ResolvedRuntime, *, clear_display: bool = False
     ) -> TokenUsage:
         if clear_display:
             display.reset_chat()
+        active_settings = active_runtime.settings
         display.welcome(
             model=_selected_model(active_settings),
             reasoning_effort=active_settings.reasoning_effort,
@@ -191,12 +219,18 @@ def run_chat_loop(
         display.session_usage(new_usage)
         return new_usage
 
-    session_usage = _reset_session(current_settings)
+    if resume_session_id is not None:
+        current_runtime = _runtime_for_saved_session(
+            store,
+            resume_session_id,
+            current_runtime,
+        )
+    session_usage = _reset_session(current_runtime)
     _bind_session(display, session_id)
     had_tool_errors = False
     while not should_exit:
         with _open_runtime_provider(
-            current_settings,
+            current_runtime.settings,
             excluded_tools=get_custom_excluded_tools(),
         ) as provider:
             if resume_session_to_restore is not None:
@@ -204,26 +238,32 @@ def run_chat_loop(
                     provider=provider,
                     store=store,
                     session_id=resume_session_to_restore,
+                    runtime=current_runtime,
                     session_usage=session_usage,
                     display=display,
+                    replay_history=replay_history_on_restore,
                 )
                 resume_session_to_restore = None
+                replay_history_on_restore = False
             while True:
                 queued_input = display.user_prompt()
                 image_paths: list[str] = []
                 queued_images: list[ImageAttachment] = []
                 message_image_attachments: list[MessageImageAttachment] = []
                 if isinstance(queued_input, QueuedRuntimeChange):
-                    current_settings = queued_input.settings
-                    session_usage = _reset_session(
-                        current_settings,
-                        clear_display=True,
+                    current_runtime = queued_input.runtime
+                    _persist_runtime_change(
+                        store,
+                        session_id,
+                        current_runtime,
                     )
-                    had_tool_errors = False
-                    session_id = None
-                    title_set = False
-                    resume_session_to_restore = None
-                    _bind_session(display, session_id)
+                    session_usage = _reset_session(
+                        current_runtime,
+                    )
+                    if session_id is not None:
+                        resume_session_to_restore = session_id
+                        replay_history_on_restore = False
+                        _bind_session(display, session_id)
                     break
                 if isinstance(queued_input, QueuedInput):
                     user_input = queued_input.text.strip()
@@ -235,7 +275,7 @@ def run_chat_loop(
                 if user_input == NEW_CHAT_SENTINEL:
                     provider.reset_conversation()
                     session_usage = _reset_session(
-                        current_settings,
+                        current_runtime,
                         clear_display=True,
                     )
                     had_tool_errors = False
@@ -246,8 +286,13 @@ def run_chat_loop(
                 if user_input.startswith(RESUME_SESSION_PREFIX):
                     resume_id = user_input[len(RESUME_SESSION_PREFIX) :]
                     provider.reset_conversation()
+                    current_runtime = _runtime_for_saved_session(
+                        store,
+                        resume_id,
+                        current_runtime,
+                    )
                     session_usage = _reset_session(
-                        current_settings,
+                        current_runtime,
                         clear_display=True,
                     )
                     had_tool_errors = False
@@ -257,13 +302,9 @@ def run_chat_loop(
                         session_id = resume_id
                         title_set = True
                         _bind_session(display, session_id)
-                        _resume_session(
-                            provider=provider,
-                            store=store,
-                            session_id=resume_id,
-                            session_usage=session_usage,
-                            display=display,
-                        )
+                        resume_session_to_restore = resume_id
+                        replay_history_on_restore = True
+                        break
                     else:
                         _bind_session(display, session_id)
                     continue
@@ -293,14 +334,14 @@ def run_chat_loop(
                     text=user_input,
                     image_paths=image_paths,
                     images=queued_images,
-                    settings=current_settings,
+                    settings=current_runtime.settings,
                 )
                 turn_history_text = _user_turn_history_text(turn_input)
 
                 if session_id is None:
                     session_id = _create_session(
                         store,
-                        current_settings,
+                        current_runtime,
                         title=_session_title_for_user_turn(turn_input),
                     )
                     title_set = True
@@ -315,8 +356,8 @@ def run_chat_loop(
 
                 turn_start = time.monotonic()
                 turn_usage = TokenUsage(
-                    model=_selected_model(current_settings),
-                    service_tier=current_settings.service_tier or "",
+                    model=_selected_model(current_runtime.settings),
+                    service_tier=current_runtime.settings.service_tier or "",
                 )
                 display.assistant_start()
                 response = _request_user_turn(
@@ -329,7 +370,7 @@ def run_chat_loop(
                 response, loop_had_errors, _ = _run_tool_iterations(
                     provider=provider,
                     response=response,
-                    max_workers=current_settings.max_tool_workers,
+                    max_workers=current_runtime.settings.max_tool_workers,
                     display=display,
                     session_usage=session_usage,
                     turn_usage=turn_usage,
@@ -341,13 +382,27 @@ def run_chat_loop(
                 _add_message(
                     store,
                     session_id,
+                    current_runtime,
                     "user",
                     turn_history_text,
                     image_attachments=message_image_attachments,
                 )
-                _add_message(store, session_id, "assistant", response.text)
+                _add_message(
+                    store,
+                    session_id,
+                    current_runtime,
+                    "assistant",
+                    response.text,
+                )
                 _update_session_after_turn(
-                    store, session_id, response.response_id, session_usage
+                    store,
+                    session_id,
+                    current_runtime,
+                    _conversation_checkpoint_for_resume(
+                        provider,
+                        response.response_id,
+                    ),
+                    session_usage,
                 )
                 had_tool_errors = had_tool_errors or loop_had_errors
                 elapsed = time.monotonic() - turn_start
@@ -629,19 +684,79 @@ def _open_store(settings: Settings) -> SessionStore | None:
         return None
 
 
+def _runtime_for_saved_session(
+    store: SessionStore | None,
+    session_id: str,
+    fallback: ResolvedRuntime,
+) -> ResolvedRuntime:
+    if store is None:
+        return fallback
+    try:
+        rec = store.get_session(session_id)
+    except Exception:
+        _log.warning("Failed to load saved session runtime", exc_info=True)
+        return fallback
+    if rec is None or not rec.profile_id:
+        return fallback
+    try:
+        return resolve_runtime_for_profile_id(
+            rec.profile_id,
+            verbose=fallback.settings.verbose,
+        )
+    except Exception:
+        _log.warning("Failed to resolve saved session runtime", exc_info=True)
+        return fallback
+
+
+def _persist_runtime_change(
+    store: SessionStore | None,
+    session_id: str | None,
+    runtime: ResolvedRuntime,
+) -> None:
+    if store is None or session_id is None:
+        return
+    try:
+        store.update_session(
+            session_id,
+            provider=runtime.settings.provider,
+            provider_id=runtime.provider_id or None,
+            model=runtime.settings.model,
+            profile_id=runtime.profile_id or None,
+            clear_previous_id=True,
+        )
+    except Exception:
+        _log.warning("Failed to persist runtime change", exc_info=True)
+
+
+def _checkpoint_matches_runtime(
+    record,
+    runtime: ResolvedRuntime,
+) -> bool:
+    if not runtime.provider_id or not runtime.profile_id:
+        return True
+    return (
+        record.provider == runtime.settings.provider
+        and record.provider_id == runtime.provider_id
+        and record.profile_id == runtime.profile_id
+    )
+
+
 def _create_session(
     store: SessionStore | None,
-    settings: Settings,
+    runtime: ResolvedRuntime,
     *,
     title: str = "",
 ) -> str | None:
     if store is None:
         return None
     try:
+        settings = runtime.settings
         return store.create_session(
             directory=os.getcwd(),
             provider=settings.provider,
+            provider_id=runtime.provider_id or None,
             model=settings.model,
+            profile_id=runtime.profile_id or None,
             title=title,
         )
     except Exception:
@@ -650,23 +765,24 @@ def _create_session(
 
 
 def _open_session_store(
-    settings: Settings,
+    runtime: ResolvedRuntime,
     *,
     resume_session_id: str | None = None,
     title: str = "",
 ) -> tuple[SessionStore | None, str | None]:
-    store = _open_store(settings)
+    store = _open_store(runtime.settings)
     if store is None:
         return None, None
     if resume_session_id:
         return store, resume_session_id
-    sid = _create_session(store, settings, title=title)
+    sid = _create_session(store, runtime, title=title)
     return store, sid
 
 
 def _update_session_after_turn(
     store: SessionStore | None,
     session_id: str | None,
+    runtime: ResolvedRuntime,
     response_id: str | None,
     session_usage: TokenUsage,
 ) -> None:
@@ -676,6 +792,10 @@ def _update_session_after_turn(
         snap = session_usage.snapshot()
         store.update_session(
             session_id,
+            provider=runtime.settings.provider,
+            provider_id=runtime.provider_id or None,
+            model=runtime.settings.model,
+            profile_id=runtime.profile_id or None,
             previous_id=response_id or None,
             total_tokens=snap.total_tokens,
             input_tokens=snap.input_tokens,
@@ -684,6 +804,20 @@ def _update_session_after_turn(
         )
     except Exception:
         _log.warning("Failed to update session after turn", exc_info=True)
+
+
+def _conversation_checkpoint_for_resume(
+    provider: Provider,
+    response_id: str | None,
+) -> str | None:
+    try:
+        checkpoint = provider.get_conversation_checkpoint()
+    except Exception:
+        _log.warning(
+            "Failed to capture provider conversation checkpoint", exc_info=True
+        )
+        checkpoint = None
+    return checkpoint or response_id
 
 
 def _update_session_title(
@@ -702,6 +836,7 @@ def _update_session_title(
 def _add_message(
     store: SessionStore | None,
     session_id: str | None,
+    runtime: ResolvedRuntime,
     role: str,
     content: str,
     *,
@@ -714,6 +849,8 @@ def _add_message(
             session_id,
             role,
             content,
+            provider_id=runtime.provider_id or None,
+            profile_id=runtime.profile_id or None,
             image_attachments=image_attachments,
         )
     except Exception:
@@ -725,15 +862,19 @@ def _resume_session(
     provider: Any,
     store: SessionStore | None,
     session_id: str | None,
+    runtime: ResolvedRuntime,
     session_usage: TokenUsage,
     display: DisplayProtocol,
+    replay_history: bool = True,
 ) -> None:
     if store is None or session_id is None:
         return
     try:
         rec = store.get_session(session_id)
-        if rec and rec.previous_id:
+        if rec and rec.previous_id and _checkpoint_matches_runtime(rec, runtime):
             provider.set_previous_response_id(rec.previous_id)
+        elif rec and rec.previous_id:
+            store.update_session(session_id, clear_previous_id=True)
         if rec and (rec.input_tokens or rec.output_tokens):
             session_usage.add(
                 TokenUsage(
@@ -750,7 +891,8 @@ def _resume_session(
         messages = store.list_messages(session_id)
         if messages:
             provider.restore_messages(messages)
-            display.replay_history(messages)
+            if replay_history:
+                display.replay_history(messages)
     except Exception:
         _log.warning("Failed to restore session history", exc_info=True)
 

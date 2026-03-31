@@ -2,7 +2,9 @@ export type SessionRecord = {
   session_id: string;
   directory: string;
   provider: string;
+  provider_id: string | null;
   model: string;
+  profile_id: string | null;
   previous_id: string | null;
   title: string;
   total_tokens: number;
@@ -22,7 +24,7 @@ export type TaskRecord = {
   position: number;
   project_dir: string;
   session_id: string | null;
-  model_profile_id: string | null;
+  profile_id: string | null;
   run_status: "idle" | "running" | "completed" | "failed";
   last_result_summary: string;
   created_at: string;
@@ -34,6 +36,8 @@ export type TaskRecord = {
 
 export type RuntimeSummary = {
   provider: string;
+  provider_id: string;
+  profile_id: string;
   model: string;
   reasoning_effort: string;
 };
@@ -65,7 +69,8 @@ export type UsagePayload = {
 export type LiveSession = {
   live_session_id: string;
   resume_session_id: string | null;
-  model_profile_id: string | null;
+  provider_id: string;
+  profile_id: string;
   provider: string;
   model: string;
   reasoning_effort: string;
@@ -104,6 +109,8 @@ export type ExpandedChatInput = {
 export type BootstrapPayload = {
   workspace_root: string;
   provider: string;
+  provider_id: string;
+  profile_id: string;
   model: string;
   reasoning_effort: string;
   supports_image_inputs: boolean;
@@ -145,6 +152,8 @@ export type ConfigOptions = {
 
 export type ResolvedRuntimeView = {
   provider: string;
+  provider_id: string;
+  profile_id: string;
   model: string;
   sub_agent_model: string | null;
   reasoning_effort: string;
@@ -180,7 +189,7 @@ export type ModelProfileView = {
 export type ConfigBootstrapPayload = {
   providers: ProviderView[];
   model_profiles: ModelProfileView[];
-  active_model_profile: string | null;
+  active_profile_id: string | null;
   config_revision: string;
   options: ConfigOptions;
 };

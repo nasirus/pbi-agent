@@ -24,6 +24,7 @@ from pbi_agent.models.messages import (
     WebSearchSource,
 )
 from pbi_agent.providers.openai_provider import OpenAIProvider, _extract_retry_after
+from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.catalog import ToolCatalog, ToolCatalogEntry
 from pbi_agent.tools.types import ToolSpec
 from pbi_agent.tools.types import ToolResult
@@ -812,6 +813,93 @@ def test_openai_request_turn_retries_when_api_is_overloaded(
     assert display_spy.rate_limit_notices == []
     assert display_spy.retry_notices == [(1, 1)]
     assert display_spy.markdown_calls == ["Recovered."]
+
+
+def test_openai_request_turn_retries_with_restored_transcript_when_previous_response_is_missing(
+    monkeypatch,
+    display_spy,
+    make_http_error,
+    make_http_response,
+) -> None:
+    requests: list[dict[str, object]] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        payload = request.data.decode("utf-8") if request.data else "{}"
+        requests.append(json.loads(payload))
+        if len(requests) == 1:
+            raise make_http_error(
+                url=DEFAULT_RESPONSES_URL,
+                code=400,
+                body=(
+                    '{"error":{"type":"invalid_request_error","message":"Previous '
+                    'response with id \\"resp_parent\\" not found."},'
+                    '"request_id":"req_missing_previous"}'
+                ),
+            )
+        return make_http_response(
+            {
+                "id": "resp_recovered",
+                "model": DEFAULT_MODEL,
+                "usage": {
+                    "input_tokens": 7,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 3,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Recovered."}],
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings(max_retries=0))
+    provider.restore_messages(
+        [
+            MessageRecord(
+                id=1,
+                session_id="session-1",
+                role="user",
+                content="hello",
+                created_at="2026-03-31T00:00:00+00:00",
+            ),
+            MessageRecord(
+                id=2,
+                session_id="session-1",
+                role="assistant",
+                content="hi",
+                created_at="2026-03-31T00:00:01+00:00",
+            ),
+        ]
+    )
+    provider.set_previous_response_id("resp_parent")
+
+    response = provider.request_turn(
+        user_message="continue",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    assert response.text == "Recovered."
+    assert len(requests) == 2
+    assert requests[0]["previous_response_id"] == "resp_parent"
+    assert requests[0]["input"] == [{"role": "user", "content": "continue"}]
+    assert "previous_response_id" not in requests[1]
+    assert requests[1]["input"] == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+        {"role": "user", "content": "continue"},
+    ]
 
 
 def test_openai_request_turn_does_not_retry_insufficient_quota(

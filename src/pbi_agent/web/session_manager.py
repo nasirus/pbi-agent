@@ -18,6 +18,7 @@ from pbi_agent.config import (
     OPENAI_SERVICE_TIERS,
     PROVIDER_KINDS,
     ProviderConfig,
+    ResolvedRuntime,
     Settings,
     create_model_profile_config,
     create_provider_config,
@@ -30,7 +31,8 @@ from pbi_agent.config import (
     provider_ui_metadata,
     replace_model_profile_config,
     replace_provider_config,
-    resolve_settings_for_model_profile,
+    resolve_runtime,
+    resolve_runtime_for_profile_id,
     select_active_model_profile,
     slugify,
 )
@@ -73,7 +75,9 @@ def _serialize_session(record: SessionRecord) -> dict[str, Any]:
         "session_id": record.session_id,
         "directory": record.directory,
         "provider": record.provider,
+        "provider_id": record.provider_id,
         "model": record.model,
+        "profile_id": record.profile_id,
         "previous_id": record.previous_id,
         "title": record.title,
         "total_tokens": record.total_tokens,
@@ -85,36 +89,40 @@ def _serialize_session(record: SessionRecord) -> dict[str, Any]:
     }
 
 
-def _runtime_summary(settings: Settings) -> dict[str, str]:
+def _runtime_summary(runtime: ResolvedRuntime) -> dict[str, str]:
     return {
-        "provider": settings.provider,
-        "model": settings.model,
-        "reasoning_effort": settings.reasoning_effort,
+        "provider": runtime.settings.provider,
+        "provider_id": runtime.provider_id,
+        "profile_id": runtime.profile_id,
+        "model": runtime.settings.model,
+        "reasoning_effort": runtime.settings.reasoning_effort,
     }
 
 
-def _resolved_runtime_view(settings: Settings) -> dict[str, Any]:
+def _resolved_runtime_view(runtime: ResolvedRuntime) -> dict[str, Any]:
     return {
-        "provider": settings.provider,
-        "model": settings.model,
-        "sub_agent_model": settings.sub_agent_model,
-        "reasoning_effort": settings.reasoning_effort,
-        "max_tokens": settings.max_tokens,
-        "service_tier": settings.service_tier,
-        "web_search": settings.web_search,
-        "max_tool_workers": settings.max_tool_workers,
-        "max_retries": settings.max_retries,
-        "compact_threshold": settings.compact_threshold,
-        "responses_url": settings.responses_url,
-        "generic_api_url": settings.generic_api_url,
-        "supports_image_inputs": provider_supports_images(settings.provider),
+        "provider": runtime.settings.provider,
+        "provider_id": runtime.provider_id,
+        "profile_id": runtime.profile_id,
+        "model": runtime.settings.model,
+        "sub_agent_model": runtime.settings.sub_agent_model,
+        "reasoning_effort": runtime.settings.reasoning_effort,
+        "max_tokens": runtime.settings.max_tokens,
+        "service_tier": runtime.settings.service_tier,
+        "web_search": runtime.settings.web_search,
+        "max_tool_workers": runtime.settings.max_tool_workers,
+        "max_retries": runtime.settings.max_retries,
+        "compact_threshold": runtime.settings.compact_threshold,
+        "responses_url": runtime.settings.responses_url,
+        "generic_api_url": runtime.settings.generic_api_url,
+        "supports_image_inputs": provider_supports_images(runtime.settings.provider),
     }
 
 
 def _serialize_task(
     record: KanbanTaskRecord,
     *,
-    settings: Settings,
+    runtime: ResolvedRuntime,
 ) -> dict[str, Any]:
     return {
         "task_id": record.task_id,
@@ -125,14 +133,14 @@ def _serialize_task(
         "position": record.position,
         "project_dir": record.project_dir,
         "session_id": record.session_id,
-        "model_profile_id": record.model_profile_id,
+        "profile_id": record.model_profile_id,
         "run_status": record.run_status,
         "last_result_summary": record.last_result_summary,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
         "last_run_started_at": record.last_run_started_at,
         "last_run_finished_at": record.last_run_finished_at,
-        "runtime_summary": _runtime_summary(settings),
+        "runtime_summary": _runtime_summary(runtime),
     }
 
 
@@ -214,8 +222,7 @@ class LiveChatSession:
     event_stream: EventStream
     display: WebDisplay
     worker: threading.Thread
-    settings: Settings
-    model_profile_id: str | None
+    runtime: ResolvedRuntime
     resume_session_id: str | None
     created_at: str
     status: str = "starting"
@@ -227,11 +234,15 @@ class LiveChatSession:
 class WebSessionManager:
     def __init__(
         self,
-        settings: Settings,
+        settings: Settings | ResolvedRuntime,
         *,
         runtime_args: argparse.Namespace | None = None,
     ) -> None:
-        self._default_settings = settings
+        self._default_runtime = (
+            settings
+            if isinstance(settings, ResolvedRuntime)
+            else ResolvedRuntime(settings=settings, provider_id="", profile_id="")
+        )
         self._runtime_args = runtime_args
         self._workspace_root = Path.cwd().resolve()
         self._mention_index = WorkspaceFileIndex(self._workspace_root)
@@ -249,7 +260,7 @@ class WebSessionManager:
 
     @property
     def settings(self) -> Settings:
-        return self._default_settings
+        return self._default_runtime.settings
 
     def warm_file_mentions_cache(self) -> None:
         self._mention_index.warm_cache()
@@ -263,14 +274,16 @@ class WebSessionManager:
         return self._mention_index.search(query, limit=limit)
 
     def bootstrap(self) -> dict[str, Any]:
-        default_settings = self._resolve_settings_or_default(None)
+        default_runtime = self._resolve_runtime_or_default(None)
         return {
             "workspace_root": str(self._workspace_root),
-            "provider": default_settings.provider,
-            "model": default_settings.model,
-            "reasoning_effort": default_settings.reasoning_effort,
+            "provider": default_runtime.settings.provider,
+            "provider_id": default_runtime.provider_id,
+            "profile_id": default_runtime.profile_id,
+            "model": default_runtime.settings.model,
+            "reasoning_effort": default_runtime.settings.reasoning_effort,
             "supports_image_inputs": provider_supports_images(
-                default_settings.provider
+                default_runtime.settings.provider
             ),
             "sessions": self.list_sessions(),
             "tasks": self.list_tasks(),
@@ -302,7 +315,7 @@ class WebSessionManager:
                     key=lambda item: _config_sort_key(item.name, item.id),
                 )
             ],
-            "active_model_profile": config.active_model_profile,
+            "active_profile_id": config.active_model_profile,
             "config_revision": revision,
             "options": {
                 "provider_kinds": list(PROVIDER_KINDS),
@@ -329,7 +342,7 @@ class WebSessionManager:
         return [
             _serialize_task(
                 record,
-                settings=self._resolve_settings_or_default(record.model_profile_id),
+                runtime=self._resolve_runtime_or_default(record.model_profile_id),
             )
             for record in records
         ]
@@ -339,9 +352,14 @@ class WebSessionManager:
         *,
         resume_session_id: str | None = None,
         live_session_id: str | None = None,
-        model_profile_id: str | None = None,
+        profile_id: str | None = None,
     ) -> dict[str, Any]:
-        resolved_settings = self._resolve_settings(model_profile_id)
+        runtime = self._resolve_runtime(profile_id)
+        if resume_session_id is not None:
+            runtime = self._resolve_saved_session_runtime(
+                resume_session_id,
+                fallback=runtime,
+            )
         with self._lock:
             if live_session_id and live_session_id in self._chat_sessions:
                 return self._serialize_live_session(
@@ -352,9 +370,9 @@ class WebSessionManager:
             event_stream = EventStream()
             display = WebDisplay(
                 publish_event=event_stream.publish,
-                verbose=resolved_settings.verbose,
-                model=resolved_settings.model,
-                reasoning_effort=resolved_settings.reasoning_effort,
+                verbose=runtime.settings.verbose,
+                model=runtime.settings.model,
+                reasoning_effort=runtime.settings.reasoning_effort,
                 bind_session=lambda bound_session_id, current=session_id: (
                     self._bind_live_session(
                         current,
@@ -373,8 +391,7 @@ class WebSessionManager:
                 event_stream=event_stream,
                 display=display,
                 worker=worker,
-                settings=resolved_settings,
-                model_profile_id=model_profile_id,
+                runtime=runtime,
                 resume_session_id=resume_session_id,
                 created_at=_now_iso(),
             )
@@ -435,7 +452,7 @@ class WebSessionManager:
         live_session = self._require_live_session(live_session_id)
         if live_session.status == "ended":
             raise RuntimeError("Live chat session has already ended.")
-        if not provider_supports_images(live_session.settings.provider):
+        if not provider_supports_images(live_session.runtime.settings.provider):
             raise ValueError("Image inputs are not supported by the current provider.")
 
         attachments: list[dict[str, Any]] = []
@@ -457,16 +474,17 @@ class WebSessionManager:
         file_paths: list[str] | None = None,
         image_paths: list[str] | None = None,
         image_upload_ids: list[str] | None = None,
-        model_profile_id: str | None = None,
+        profile_id: str | None = None,
     ) -> dict[str, Any]:
         live_session = self._require_live_session(live_session_id)
         if live_session.status == "ended":
             raise RuntimeError("Live chat session has already ended.")
-        if model_profile_id != live_session.model_profile_id:
-            self._queue_runtime_change(live_session, model_profile_id)
+        requested_runtime = self._resolve_runtime(profile_id)
+        if requested_runtime.profile_id != live_session.runtime.profile_id:
+            self._queue_runtime_change(live_session, profile_id)
         message_text = text.strip()
         if (image_paths or image_upload_ids) and not provider_supports_images(
-            live_session.settings.provider
+            live_session.runtime.settings.provider
         ):
             raise ValueError("Image inputs are not supported by the current provider.")
         resolved_images: list[ImageAttachment] = []
@@ -508,13 +526,14 @@ class WebSessionManager:
         self,
         live_session_id: str,
         *,
-        model_profile_id: str | None = None,
+        profile_id: str | None = None,
     ) -> dict[str, Any]:
         live_session = self._require_live_session(live_session_id)
         if live_session.status == "ended":
             raise RuntimeError("Live chat session has already ended.")
-        if model_profile_id != live_session.model_profile_id:
-            self._queue_runtime_change(live_session, model_profile_id)
+        requested_runtime = self._resolve_runtime(profile_id)
+        if requested_runtime.profile_id != live_session.runtime.profile_id:
+            self._queue_runtime_change(live_session, profile_id)
         live_session.display.request_new_chat()
         return self._serialize_live_session(live_session)
 
@@ -534,11 +553,11 @@ class WebSessionManager:
         stage: str = KANBAN_STAGE_BACKLOG,
         project_dir: str = ".",
         session_id: str | None = None,
-        model_profile_id: str | None = None,
+        profile_id: str | None = None,
     ) -> dict[str, Any]:
         self._validate_project_dir(project_dir)
-        if model_profile_id is not None:
-            self._resolve_settings(model_profile_id)
+        if profile_id is not None:
+            self._resolve_runtime(profile_id)
         with SessionStore() as store:
             record = store.create_kanban_task(
                 directory=self._directory_key,
@@ -547,7 +566,7 @@ class WebSessionManager:
                 stage=stage,
                 project_dir=project_dir,
                 session_id=session_id,
-                model_profile_id=model_profile_id,
+                model_profile_id=profile_id,
             )
         return self._publish_task_updated(record)
 
@@ -562,13 +581,13 @@ class WebSessionManager:
         project_dir: str | None = None,
         session_id: str | None = None,
         session_id_present: bool = False,
-        model_profile_id: str | None = None,
-        model_profile_id_present: bool = False,
+        profile_id: str | None = None,
+        profile_id_present: bool = False,
     ) -> dict[str, Any]:
         if project_dir is not None:
             self._validate_project_dir(project_dir)
-        if model_profile_id_present and model_profile_id is not None:
-            self._resolve_settings(model_profile_id)
+        if profile_id_present and profile_id is not None:
+            self._resolve_runtime(profile_id)
         with SessionStore() as store:
             current = store.get_kanban_task(task_id)
             if current is None or current.directory != self._directory_key:
@@ -587,10 +606,8 @@ class WebSessionManager:
                 project_dir=project_dir,
                 session_id=session_id,
                 clear_session_id=session_id_present and session_id is None,
-                model_profile_id=model_profile_id,
-                clear_model_profile_id=(
-                    model_profile_id_present and model_profile_id is None
-                ),
+                model_profile_id=profile_id,
+                clear_model_profile_id=(profile_id_present and profile_id is None),
             )
         if updated is None:
             raise KeyError(task_id)
@@ -621,7 +638,7 @@ class WebSessionManager:
                     self._running_task_ids.discard(task_id)
                 raise KeyError(task_id)
             if record.model_profile_id is not None:
-                self._resolve_settings(record.model_profile_id)
+                self._resolve_runtime(record.model_profile_id)
             running_record = store.set_kanban_task_running(task_id)
         if running_record is None:
             with self._lock:
@@ -799,7 +816,7 @@ class WebSessionManager:
         config = load_internal_config()
         profile = self._profile_map(config).get(slugify(profile_id))
         if profile is None:
-            raise ConfigError(f"Unknown model profile ID '{profile_id}'.")
+            raise ConfigError(f"Unknown profile ID '{profile_id}'.")
         next_provider_id = (
             slugify(provider_id)
             if "provider_id" in fields_set and provider_id is not None
@@ -864,15 +881,15 @@ class WebSessionManager:
 
     def set_active_model_profile(
         self,
-        model_profile_id: str | None,
+        profile_id: str | None,
         *,
         expected_revision: str,
     ) -> dict[str, Any]:
         active_id, revision = select_active_model_profile(
-            model_profile_id, expected_revision=expected_revision
+            profile_id, expected_revision=expected_revision
         )
         return {
-            "active_model_profile": active_id,
+            "active_profile_id": active_id,
             "config_revision": revision,
         }
 
@@ -896,7 +913,7 @@ class WebSessionManager:
         )
         try:
             exit_code = run_chat_loop(
-                live_session.settings,
+                live_session.runtime,
                 live_session.display,
                 resume_session_id=live_session.resume_session_id,
             )
@@ -942,15 +959,13 @@ class WebSessionManager:
             if record is None:
                 raise KeyError(task_id)
 
-            runtime_settings = self._resolve_settings_or_default(
-                record.model_profile_id
-            )
+            runtime = self._resolve_runtime_or_default(record.model_profile_id)
             outcome = run_single_turn_in_directory(
                 record.prompt,
-                runtime_settings,
+                runtime,
                 KanbanTaskDisplay(
                     publish_summary=publish_summary,
-                    verbose=runtime_settings.verbose,
+                    verbose=runtime.settings.verbose,
                 ),
                 project_dir=record.project_dir,
                 workspace_root=self._workspace_root,
@@ -1008,10 +1023,11 @@ class WebSessionManager:
         return {
             "live_session_id": live_session.live_session_id,
             "resume_session_id": live_session.resume_session_id,
-            "model_profile_id": live_session.model_profile_id,
-            "provider": live_session.settings.provider,
-            "model": live_session.settings.model,
-            "reasoning_effort": live_session.settings.reasoning_effort,
+            "provider_id": live_session.runtime.provider_id,
+            "profile_id": live_session.runtime.profile_id,
+            "provider": live_session.runtime.settings.provider,
+            "model": live_session.runtime.settings.model,
+            "reasoning_effort": live_session.runtime.settings.reasoning_effort,
             "created_at": live_session.created_at,
             "status": live_session.status,
             "exit_code": live_session.exit_code,
@@ -1022,7 +1038,7 @@ class WebSessionManager:
     def _serialize_task_record(self, record: KanbanTaskRecord) -> dict[str, Any]:
         return _serialize_task(
             record,
-            settings=self._resolve_settings_or_default(record.model_profile_id),
+            runtime=self._resolve_runtime_or_default(record.model_profile_id),
         )
 
     def _require_live_session(self, live_session_id: str) -> LiveChatSession:
@@ -1040,33 +1056,61 @@ class WebSessionManager:
         if not target.is_dir():
             raise NotADirectoryError(f"Project path is not a directory: {target}")
 
-    def _resolve_settings(self, model_profile_id: str | None) -> Settings:
-        if self._runtime_args is None:
-            if model_profile_id is not None:
-                raise ConfigError(
-                    "Model profile resolution is unavailable for this app instance."
-                )
-            return self._default_settings
-        return resolve_settings_for_model_profile(self._runtime_args, model_profile_id)
+    def _resolve_runtime(self, profile_id: str | None) -> ResolvedRuntime:
+        if profile_id is None:
+            if self._runtime_args is None:
+                return self._default_runtime
+            return resolve_runtime(self._runtime_args)
+        return resolve_runtime_for_profile_id(
+            profile_id,
+            verbose=self._default_runtime.settings.verbose,
+        )
 
-    def _resolve_settings_or_default(self, model_profile_id: str | None) -> Settings:
+    def _resolve_runtime_or_default(
+        self,
+        profile_id: str | None,
+    ) -> ResolvedRuntime:
         try:
-            return self._resolve_settings(model_profile_id)
+            return self._resolve_runtime(profile_id)
         except ConfigError:
-            return self._default_settings
+            return self._default_runtime
+
+    def _resolve_saved_session_runtime(
+        self,
+        session_id: str,
+        *,
+        fallback: ResolvedRuntime,
+    ) -> ResolvedRuntime:
+        try:
+            with SessionStore() as store:
+                record = store.get_session(session_id)
+        except Exception:
+            return fallback
+        if record is None or record.directory != self._directory_key:
+            return fallback
+        if record.profile_id:
+            return self._resolve_runtime_or_default(record.profile_id)
+        settings = replace(
+            fallback.settings,
+            provider=record.provider or fallback.settings.provider,
+            model=record.model or fallback.settings.model,
+        )
+        return ResolvedRuntime(
+            settings=settings,
+            provider_id=record.provider_id or fallback.provider_id,
+            profile_id="",
+        )
 
     def _queue_runtime_change(
         self,
         live_session: LiveChatSession,
-        model_profile_id: str | None,
+        profile_id: str | None,
     ) -> None:
-        resolved_settings = self._resolve_settings(model_profile_id)
-        live_session.settings = resolved_settings
-        live_session.model_profile_id = model_profile_id
-        live_session.resume_session_id = None
+        runtime = self._resolve_runtime(profile_id)
+        live_session.runtime = runtime
         live_session.display.request_runtime_change(
-            settings=resolved_settings,
-            model_profile_id=model_profile_id,
+            runtime=runtime,
+            profile_id=runtime.profile_id,
         )
         self._publish_live_session_runtime(live_session)
 
@@ -1075,10 +1119,11 @@ class WebSessionManager:
             "session_runtime_updated",
             {
                 "live_session_id": live_session.live_session_id,
-                "model_profile_id": live_session.model_profile_id,
-                "provider": live_session.settings.provider,
-                "model": live_session.settings.model,
-                "reasoning_effort": live_session.settings.reasoning_effort,
+                "provider_id": live_session.runtime.provider_id,
+                "profile_id": live_session.runtime.profile_id,
+                "provider": live_session.runtime.settings.provider,
+                "model": live_session.runtime.settings.model,
+                "reasoning_effort": live_session.runtime.settings.reasoning_effort,
             },
         )
 
@@ -1101,7 +1146,7 @@ class WebSessionManager:
         provider: ProviderConfig,
         active_profile_id: str | None,
     ) -> dict[str, Any]:
-        settings = self._resolve_settings_or_default(profile.id)
+        runtime = self._resolve_runtime_or_default(profile.id)
         return {
             "id": profile.id,
             "name": profile.name,
@@ -1121,7 +1166,7 @@ class WebSessionManager:
             "max_retries": profile.max_retries,
             "compact_threshold": profile.compact_threshold,
             "is_active_default": profile.id == active_profile_id,
-            "resolved_runtime": _resolved_runtime_view(settings),
+            "resolved_runtime": _resolved_runtime_view(runtime),
         }
 
     def _provider_map(self, config: InternalConfig) -> dict[str, ProviderConfig]:

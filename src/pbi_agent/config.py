@@ -37,9 +37,11 @@ PROVIDER_API_KEY_ENVS = {
 }
 PROVIDER_KINDS = tuple(PROVIDER_API_KEY_ENVS)
 INTERNAL_CONFIG_PATH_ENV = "PBI_AGENT_INTERNAL_CONFIG_PATH"
-MODEL_PROFILE_ENV = "PBI_AGENT_MODEL_PROFILE"
+PROFILE_ID_ENV = "PBI_AGENT_PROFILE_ID"
 DEFAULT_INTERNAL_CONFIG_PATH = Path.home() / ".pbi-agent" / "config.json"
 SLUG_RE = re.compile(r"[^a-z0-9]+")
+AUTO_PROVIDER_ID_PREFIX = "auto-provider"
+AUTO_PROFILE_ID_PREFIX = "auto-profile"
 
 
 class ConfigError(ValueError):
@@ -208,6 +210,19 @@ class InternalConfig:
     active_model_profile: str | None = None
 
 
+@dataclass(slots=True)
+class ResolvedRuntime:
+    settings: Settings
+    provider_id: str
+    profile_id: str
+
+
+@dataclass(slots=True)
+class _ResolvedSecret:
+    api_key: str
+    api_key_env: str | None = None
+
+
 def redact_secret(value: str) -> str:
     if not value:
         return ""
@@ -308,13 +323,38 @@ def internal_config_revision(config: InternalConfig) -> str:
     ).hexdigest()
 
 
-def resolve_settings_for_model_profile(
-    args: argparse.Namespace,
-    model_profile_id: str | None,
+def resolve_runtime_for_profile_id(
+    profile_id: str,
+    *,
+    verbose: bool = False,
+) -> ResolvedRuntime:
+    load_dotenv()
+    config = load_internal_config()
+    profile = _profile_map(config).get(slugify(profile_id))
+    if profile is None:
+        raise ConfigError(f"Unknown profile ID '{profile_id}'.")
+    provider = _require_provider(_provider_map(config), profile.provider_id)
+    settings = _settings_from_runtime_parts(
+        provider=provider,
+        profile=profile,
+        verbose=verbose,
+    )
+    return ResolvedRuntime(
+        settings=settings,
+        provider_id=provider.id,
+        profile_id=profile.id,
+    )
+
+
+def resolve_settings_for_profile_id(
+    profile_id: str,
+    *,
+    verbose: bool = False,
 ) -> Settings:
-    cloned_args = argparse.Namespace(**vars(args))
-    cloned_args.model_profile = model_profile_id
-    return resolve_settings(cloned_args)
+    return resolve_runtime_for_profile_id(
+        profile_id,
+        verbose=verbose,
+    ).settings
 
 
 def load_internal_config() -> InternalConfig:
@@ -508,7 +548,7 @@ def create_model_profile_config(
     )
     profiles = _profile_map(config)
     if profile.id in profiles:
-        raise ConfigError(f"Model profile '{profile.id}' already exists.")
+        raise ConfigError(f"Profile '{profile.id}' already exists.")
     config.model_profiles.append(profile)
     config.model_profiles.sort(key=_config_sort_key)
     revision = save_internal_config_with_revision(
@@ -526,7 +566,7 @@ def replace_model_profile_config(
     """Replace an existing model profile with a fully-built updated config."""
     config = load_internal_config()
     if _profile_map(config).get(slugify(profile_id)) is None:
-        raise ConfigError(f"Unknown model profile ID '{profile_id}'.")
+        raise ConfigError(f"Unknown profile ID '{profile_id}'.")
     providers = _provider_map(config)
     provider = _require_provider(providers, updated.provider_id)
     updated.validate(provider_kind=provider.kind)
@@ -561,7 +601,7 @@ def update_model_profile_config(
     profiles = _profile_map(config)
     profile = profiles.get(slugify(profile_id))
     if profile is None:
-        raise ConfigError(f"Unknown model profile ID '{profile_id}'.")
+        raise ConfigError(f"Unknown profile ID '{profile_id}'.")
     next_provider_id = provider_id if provider_id is not None else profile.provider_id
     updated = replace(
         profile,
@@ -607,7 +647,7 @@ def delete_model_profile_config(
     normalized_id = slugify(profile_id)
     profile = _profile_map(config).get(normalized_id)
     if profile is None:
-        raise ConfigError(f"Unknown model profile ID '{profile_id}'.")
+        raise ConfigError(f"Unknown profile ID '{profile_id}'.")
     config.model_profiles = [
         existing for existing in config.model_profiles if existing.id != normalized_id
     ]
@@ -629,7 +669,7 @@ def select_active_model_profile(
     else:
         profile = _profile_map(config).get(slugify(profile_id))
         if profile is None:
-            raise ConfigError(f"Unknown model profile ID '{profile_id}'.")
+            raise ConfigError(f"Unknown profile ID '{profile_id}'.")
         config.active_model_profile = profile.id
     revision = save_internal_config_with_revision(
         config, expected_revision=expected_revision
@@ -637,55 +677,43 @@ def select_active_model_profile(
     return config.active_model_profile, revision
 
 
-def resolve_settings(args: argparse.Namespace) -> Settings:
+def resolve_runtime(args: argparse.Namespace) -> ResolvedRuntime:
     load_dotenv()
 
-    internal_config = load_internal_config()
-    selected_profile_id = (
-        getattr(args, "model_profile", None)
-        or os.getenv(MODEL_PROFILE_ENV)
-        or internal_config.active_model_profile
+    config = load_internal_config()
+    providers = _provider_map(config)
+    profiles = _profile_map(config)
+    selected_profile_ref = (
+        getattr(args, "profile_id", None)
+        or os.getenv(PROFILE_ID_ENV)
+        or config.active_model_profile
     )
 
     selected_profile: ModelProfileConfig | None = None
     selected_provider: ProviderConfig | None = None
-    if selected_profile_id:
-        normalized_profile_id = slugify(selected_profile_id)
-        selected_profile = _profile_map(internal_config).get(normalized_profile_id)
+    if selected_profile_ref:
+        normalized_profile_id = slugify(selected_profile_ref)
+        selected_profile = profiles.get(normalized_profile_id)
         if selected_profile is None:
-            raise ConfigError(f"Unknown model profile ID '{selected_profile_id}'.")
-        selected_provider = _provider_map(internal_config).get(
-            selected_profile.provider_id
-        )
+            raise ConfigError(f"Unknown profile ID '{selected_profile_ref}'.")
+        selected_provider = providers.get(selected_profile.provider_id)
         if selected_provider is None:
             raise ConfigError(
-                f"Model profile '{selected_profile.id}' references missing provider "
+                f"Profile '{selected_profile.id}' references missing provider "
                 f"'{selected_profile.provider_id}'."
             )
 
-    explicit_provider = getattr(args, "provider", None) or os.getenv(
-        "PBI_AGENT_PROVIDER"
+    provider_kind = (
+        getattr(args, "provider", None)
+        or os.getenv("PBI_AGENT_PROVIDER")
+        or (selected_provider.kind if selected_provider else "openai")
     )
-    provider = explicit_provider or (
-        selected_provider.kind if selected_provider else "openai"
-    )
-
-    api_key = (
-        getattr(args, "api_key", None)
-        or os.getenv("PBI_AGENT_API_KEY", "")
-        or os.getenv(PROVIDER_API_KEY_ENVS.get(provider, ""), "")
-        or (
-            os.getenv(selected_provider.api_key_env, "")
-            if selected_provider and selected_provider.api_key_env
-            else ""
-        )
-        or (selected_provider.api_key if selected_provider else "")
-    )
+    provider_secret = _resolve_secret(args, provider_kind, selected_provider)
     responses_url = (
         getattr(args, "responses_url", None)
         or os.getenv("PBI_AGENT_RESPONSES_URL")
         or (selected_provider.responses_url if selected_provider else None)
-        or _default_responses_url(provider)
+        or _default_responses_url(provider_kind)
     )
     generic_api_url = (
         getattr(args, "generic_api_url", None)
@@ -693,97 +721,67 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         or (selected_provider.generic_api_url if selected_provider else None)
         or DEFAULT_GENERIC_API_URL
     )
+
+    provider = _resolve_provider_identity(
+        config,
+        selected_provider=selected_provider,
+        provider_kind=provider_kind,
+        responses_url=responses_url,
+        generic_api_url=generic_api_url,
+        secret=provider_secret,
+    )
+
     model = (
         getattr(args, "model", None)
         or os.getenv("PBI_AGENT_MODEL")
         or (selected_profile.model if selected_profile else None)
-        or _default_model(provider)
+        or _default_model(provider.kind)
     )
     sub_agent_model = (
         getattr(args, "sub_agent_model", None)
         or os.getenv("PBI_AGENT_SUB_AGENT_MODEL")
         or (selected_profile.sub_agent_model if selected_profile else None)
-        or _default_sub_agent_model(provider)
+        or _default_sub_agent_model(provider.kind)
     )
-    max_tool_workers = getattr(args, "max_tool_workers", None)
-    if max_tool_workers is None:
-        max_tool_workers = int(
-            os.getenv(
-                "PBI_AGENT_MAX_TOOL_WORKERS",
-                str(
-                    selected_profile.max_tool_workers
-                    if selected_profile
-                    and selected_profile.max_tool_workers is not None
-                    else 4
-                ),
-            )
-        )
-    max_retries = getattr(args, "max_retries", None)
-    if max_retries is None:
-        max_retries = int(
-            os.getenv(
-                "PBI_AGENT_MAX_RETRIES",
-                str(
-                    selected_profile.max_retries
-                    if selected_profile and selected_profile.max_retries is not None
-                    else 3
-                ),
-            )
-        )
-    default_effort = "xhigh" if provider == "openai" else "high"
+    max_tool_workers = _resolve_int_setting(
+        cli_value=getattr(args, "max_tool_workers", None),
+        env_name="PBI_AGENT_MAX_TOOL_WORKERS",
+        profile_value=selected_profile.max_tool_workers if selected_profile else None,
+        default=4,
+    )
+    max_retries = _resolve_int_setting(
+        cli_value=getattr(args, "max_retries", None),
+        env_name="PBI_AGENT_MAX_RETRIES",
+        profile_value=selected_profile.max_retries if selected_profile else None,
+        default=3,
+    )
     reasoning_effort = (
         getattr(args, "reasoning_effort", None)
         or os.getenv("PBI_AGENT_REASONING_EFFORT")
         or (selected_profile.reasoning_effort if selected_profile else None)
-        or default_effort
+        or _default_reasoning_effort(provider.kind)
     )
-    compact_threshold = getattr(args, "compact_threshold", None)
-    if compact_threshold is None:
-        compact_threshold = int(
-            os.getenv(
-                "PBI_AGENT_COMPACT_THRESHOLD",
-                str(
-                    selected_profile.compact_threshold
-                    if selected_profile
-                    and selected_profile.compact_threshold is not None
-                    else 150000
-                ),
-            )
-        )
-    max_tokens_raw = getattr(args, "max_tokens", None)
-    if max_tokens_raw is None:
-        max_tokens = int(
-            os.getenv(
-                "PBI_AGENT_MAX_TOKENS",
-                str(
-                    selected_profile.max_tokens
-                    if selected_profile and selected_profile.max_tokens is not None
-                    else DEFAULT_MAX_TOKENS
-                ),
-            )
-        )
-    else:
-        max_tokens = int(max_tokens_raw)
-
+    compact_threshold = _resolve_int_setting(
+        cli_value=getattr(args, "compact_threshold", None),
+        env_name="PBI_AGENT_COMPACT_THRESHOLD",
+        profile_value=selected_profile.compact_threshold if selected_profile else None,
+        default=150000,
+    )
+    max_tokens = _resolve_int_setting(
+        cli_value=getattr(args, "max_tokens", None),
+        env_name="PBI_AGENT_MAX_TOKENS",
+        profile_value=selected_profile.max_tokens if selected_profile else None,
+        default=DEFAULT_MAX_TOKENS,
+    )
     service_tier = (
         getattr(args, "service_tier", None)
         or os.getenv("PBI_AGENT_SERVICE_TIER")
         or (selected_profile.service_tier if selected_profile else None)
     )
+    web_search = _resolve_web_search(args, selected_profile)
 
-    no_web_search = getattr(args, "no_web_search", False)
-    web_search_env = os.getenv("PBI_AGENT_WEB_SEARCH")
-    if no_web_search:
-        web_search = False
-    elif web_search_env is not None:
-        web_search = web_search_env.lower() not in ("0", "false", "no")
-    elif selected_profile and selected_profile.web_search is not None:
-        web_search = selected_profile.web_search
-    else:
-        web_search = True
-
-    return Settings(
-        api_key=api_key,
+    settings = Settings(
+        api_key=provider_secret.api_key,
         responses_url=responses_url,
         generic_api_url=generic_api_url,
         model=model,
@@ -794,10 +792,408 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
         max_retries=max_retries,
         reasoning_effort=reasoning_effort,
         compact_threshold=compact_threshold,
-        provider=provider,
+        provider=provider.kind,
         service_tier=service_tier,
         web_search=web_search,
     )
+
+    profile = _resolve_profile_identity(
+        config,
+        provider=provider,
+        selected_profile=selected_profile,
+        settings=settings,
+    )
+    return ResolvedRuntime(
+        settings=settings,
+        provider_id=provider.id,
+        profile_id=profile.id,
+    )
+
+
+def resolve_settings(args: argparse.Namespace) -> Settings:
+    return resolve_runtime(args).settings
+
+
+def _coalesce[T](value: T | None, default: T) -> T:
+    return default if value is None else value
+
+
+def _resolve_int_setting(
+    *,
+    cli_value: int | None,
+    env_name: str,
+    profile_value: int | None,
+    default: int,
+) -> int:
+    if cli_value is not None:
+        return int(cli_value)
+    env_value = os.getenv(env_name)
+    if env_value is not None:
+        return int(env_value)
+    if profile_value is not None:
+        return int(profile_value)
+    return default
+
+
+def _default_reasoning_effort(provider_kind: str) -> str:
+    return "xhigh" if provider_kind == "openai" else "high"
+
+
+def _resolve_web_search(
+    args: argparse.Namespace,
+    profile: ModelProfileConfig | None,
+) -> bool:
+    if getattr(args, "no_web_search", False):
+        return False
+    web_search_env = os.getenv("PBI_AGENT_WEB_SEARCH")
+    if web_search_env is not None:
+        return web_search_env.lower() not in {"0", "false", "no"}
+    if profile is not None and profile.web_search is not None:
+        return profile.web_search
+    return True
+
+
+def _resolve_secret(
+    args: argparse.Namespace,
+    provider_kind: str,
+    selected_provider: ProviderConfig | None,
+) -> _ResolvedSecret:
+    cli_api_key = getattr(args, "api_key", None)
+    if cli_api_key:
+        return _ResolvedSecret(api_key=cli_api_key)
+
+    runtime_api_key = os.getenv("PBI_AGENT_API_KEY")
+    if runtime_api_key:
+        return _ResolvedSecret(api_key=runtime_api_key)
+
+    provider_env = PROVIDER_API_KEY_ENVS.get(provider_kind)
+    if provider_env and os.getenv(provider_env):
+        return _ResolvedSecret(
+            api_key=os.getenv(provider_env, ""),
+            api_key_env=provider_env,
+        )
+
+    if selected_provider and selected_provider.api_key_env:
+        env_key = os.getenv(selected_provider.api_key_env, "")
+        if env_key:
+            return _ResolvedSecret(
+                api_key=env_key,
+                api_key_env=selected_provider.api_key_env,
+            )
+
+    if selected_provider and selected_provider.api_key:
+        return _ResolvedSecret(api_key=selected_provider.api_key)
+    return _ResolvedSecret(api_key="")
+
+
+def _settings_from_runtime_parts(
+    *,
+    provider: ProviderConfig,
+    profile: ModelProfileConfig,
+    verbose: bool,
+) -> Settings:
+    secret = _ResolvedSecret(api_key="")
+    if provider.api_key_env and os.getenv(provider.api_key_env):
+        secret = _ResolvedSecret(
+            api_key=os.getenv(provider.api_key_env, ""),
+            api_key_env=provider.api_key_env,
+        )
+    elif provider.api_key:
+        secret = _ResolvedSecret(api_key=provider.api_key)
+
+    return Settings(
+        api_key=secret.api_key,
+        responses_url=provider.responses_url or _default_responses_url(provider.kind),
+        generic_api_url=provider.generic_api_url or DEFAULT_GENERIC_API_URL,
+        model=_coalesce(profile.model, _default_model(provider.kind)),
+        sub_agent_model=_coalesce(
+            profile.sub_agent_model,
+            _default_sub_agent_model(provider.kind),
+        ),
+        max_tokens=_coalesce(profile.max_tokens, DEFAULT_MAX_TOKENS),
+        verbose=verbose,
+        max_tool_workers=_coalesce(profile.max_tool_workers, 4),
+        max_retries=_coalesce(profile.max_retries, 3),
+        reasoning_effort=_coalesce(
+            profile.reasoning_effort,
+            _default_reasoning_effort(provider.kind),
+        ),
+        compact_threshold=profile.compact_threshold or 150000,
+        provider=provider.kind,
+        service_tier=profile.service_tier,
+        web_search=True if profile.web_search is None else profile.web_search,
+    )
+
+
+def _resolve_provider_identity(
+    config: InternalConfig,
+    *,
+    selected_provider: ProviderConfig | None,
+    provider_kind: str,
+    responses_url: str,
+    generic_api_url: str,
+    secret: _ResolvedSecret,
+) -> ProviderConfig:
+    if (
+        selected_provider is not None
+        and selected_provider.kind == provider_kind
+        and (selected_provider.responses_url or _default_responses_url(provider_kind))
+        == responses_url
+        and (selected_provider.generic_api_url or DEFAULT_GENERIC_API_URL)
+        == generic_api_url
+    ):
+        return selected_provider
+
+    provider_id = _managed_provider_id(
+        provider_kind,
+        responses_url=responses_url,
+        generic_api_url=generic_api_url,
+    )
+    provider = ProviderConfig(
+        id=provider_id,
+        name=_managed_provider_name(
+            provider_kind,
+            responses_url=responses_url,
+            generic_api_url=generic_api_url,
+        ),
+        kind=provider_kind,
+        api_key="" if secret.api_key_env else secret.api_key,
+        api_key_env=secret.api_key_env,
+        responses_url=None
+        if responses_url == _default_responses_url(provider_kind)
+        else responses_url,
+        generic_api_url=None
+        if provider_kind != "generic" and generic_api_url == DEFAULT_GENERIC_API_URL
+        else generic_api_url,
+    )
+    return _upsert_provider(config, provider)
+
+
+def _resolve_profile_identity(
+    config: InternalConfig,
+    *,
+    provider: ProviderConfig,
+    selected_profile: ModelProfileConfig | None,
+    settings: Settings,
+) -> ModelProfileConfig:
+    concrete_profile = _concrete_profile_for_settings(settings, provider_id=provider.id)
+    if (
+        selected_profile is not None
+        and selected_profile.provider_id == provider.id
+        and _concrete_profile_for_saved_profile(
+            selected_profile,
+            provider_kind=provider.kind,
+        )
+        == concrete_profile
+    ):
+        return selected_profile
+
+    default_profile = _default_concrete_profile(provider.kind, provider_id=provider.id)
+    if concrete_profile == default_profile:
+        managed = replace(
+            concrete_profile,
+            id=_managed_default_profile_id(provider.id),
+            name=_managed_default_profile_name(provider),
+        )
+    else:
+        managed = replace(
+            concrete_profile,
+            id=_derived_profile_id(concrete_profile),
+            name=_derived_profile_name(provider, concrete_profile),
+        )
+    return _upsert_profile(config, managed)
+
+
+def _concrete_profile_for_saved_profile(
+    profile: ModelProfileConfig,
+    *,
+    provider_kind: str,
+) -> ModelProfileConfig:
+    return ModelProfileConfig(
+        id=profile.id,
+        name=profile.name,
+        provider_id=profile.provider_id,
+        model=_coalesce(profile.model, _default_model(provider_kind)),
+        sub_agent_model=_coalesce(
+            profile.sub_agent_model,
+            _default_sub_agent_model(provider_kind),
+        ),
+        reasoning_effort=_coalesce(
+            profile.reasoning_effort,
+            _default_reasoning_effort(provider_kind),
+        ),
+        max_tokens=_coalesce(profile.max_tokens, DEFAULT_MAX_TOKENS),
+        service_tier=profile.service_tier,
+        web_search=True if profile.web_search is None else profile.web_search,
+        max_tool_workers=_coalesce(profile.max_tool_workers, 4),
+        max_retries=_coalesce(profile.max_retries, 3),
+        compact_threshold=_coalesce(profile.compact_threshold, 150000),
+    )
+
+
+def _concrete_profile_for_settings(
+    settings: Settings,
+    *,
+    provider_id: str,
+) -> ModelProfileConfig:
+    return ModelProfileConfig(
+        id="resolved",
+        name="Resolved",
+        provider_id=provider_id,
+        model=settings.model,
+        sub_agent_model=settings.sub_agent_model,
+        reasoning_effort=settings.reasoning_effort,
+        max_tokens=settings.max_tokens,
+        service_tier=settings.service_tier,
+        web_search=settings.web_search,
+        max_tool_workers=settings.max_tool_workers,
+        max_retries=settings.max_retries,
+        compact_threshold=settings.compact_threshold,
+    )
+
+
+def _default_concrete_profile(
+    provider_kind: str,
+    *,
+    provider_id: str,
+) -> ModelProfileConfig:
+    return ModelProfileConfig(
+        id="default",
+        name="Default",
+        provider_id=provider_id,
+        model=_default_model(provider_kind),
+        sub_agent_model=_default_sub_agent_model(provider_kind),
+        reasoning_effort=_default_reasoning_effort(provider_kind),
+        max_tokens=DEFAULT_MAX_TOKENS,
+        service_tier=None,
+        web_search=True,
+        max_tool_workers=4,
+        max_retries=3,
+        compact_threshold=150000,
+    )
+
+
+def _managed_provider_id(
+    provider_kind: str,
+    *,
+    responses_url: str,
+    generic_api_url: str,
+) -> str:
+    payload = {
+        "kind": provider_kind,
+        "responses_url": responses_url,
+        "generic_api_url": generic_api_url if provider_kind == "generic" else None,
+    }
+    default_payload = {
+        "kind": provider_kind,
+        "responses_url": _default_responses_url(provider_kind),
+        "generic_api_url": DEFAULT_GENERIC_API_URL
+        if provider_kind == "generic"
+        else None,
+    }
+    if payload == default_payload:
+        return f"{AUTO_PROVIDER_ID_PREFIX}-{provider_kind}"
+    return f"{AUTO_PROVIDER_ID_PREFIX}-{provider_kind}-{_stable_suffix(payload)}"
+
+
+def _managed_provider_name(
+    provider_kind: str,
+    *,
+    responses_url: str,
+    generic_api_url: str,
+) -> str:
+    label = provider_kind.capitalize()
+    if responses_url == _default_responses_url(provider_kind) and (
+        provider_kind != "generic" or generic_api_url == DEFAULT_GENERIC_API_URL
+    ):
+        return f"{label} Default"
+    return f"{label} Default ({_stable_suffix({'responses_url': responses_url, 'generic_api_url': generic_api_url})})"
+
+
+def _managed_default_profile_id(provider_id: str) -> str:
+    return f"{AUTO_PROFILE_ID_PREFIX}-default-{provider_id}"
+
+
+def _managed_default_profile_name(provider: ProviderConfig) -> str:
+    return f"{provider.name} Default"
+
+
+def _derived_profile_id(profile: ModelProfileConfig) -> str:
+    return (
+        f"{AUTO_PROFILE_ID_PREFIX}-derived-"
+        f"{profile.provider_id}-{_stable_suffix(_profile_identity_payload(profile))}"
+    )
+
+
+def _derived_profile_name(
+    provider: ProviderConfig,
+    profile: ModelProfileConfig,
+) -> str:
+    model = profile.model or _default_model(provider.kind)
+    return f"{provider.name} Derived ({model})"
+
+
+def _profile_identity_payload(profile: ModelProfileConfig) -> dict[str, Any]:
+    return {
+        "provider_id": profile.provider_id,
+        "model": profile.model,
+        "sub_agent_model": profile.sub_agent_model,
+        "reasoning_effort": profile.reasoning_effort,
+        "max_tokens": profile.max_tokens,
+        "service_tier": profile.service_tier,
+        "web_search": profile.web_search,
+        "max_tool_workers": profile.max_tool_workers,
+        "max_retries": profile.max_retries,
+        "compact_threshold": profile.compact_threshold,
+    }
+
+
+def _stable_suffix(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:10]
+
+
+def _upsert_provider(
+    config: InternalConfig, provider: ProviderConfig
+) -> ProviderConfig:
+    provider.validate()
+    providers = _provider_map(config)
+    existing = providers.get(provider.id)
+    if existing == provider:
+        return existing
+    if existing is None:
+        config.providers.append(provider)
+    else:
+        config.providers = [
+            provider if item.id == provider.id else item for item in config.providers
+        ]
+    config.providers.sort(key=_config_sort_key)
+    save_internal_config(config)
+    return provider
+
+
+def _upsert_profile(
+    config: InternalConfig,
+    profile: ModelProfileConfig,
+) -> ModelProfileConfig:
+    providers = _provider_map(config)
+    profile.validate(
+        provider_kind=_require_provider(providers, profile.provider_id).kind
+    )
+    profiles = _profile_map(config)
+    existing = profiles.get(profile.id)
+    if existing == profile:
+        return existing
+    if existing is None:
+        config.model_profiles.append(profile)
+    else:
+        config.model_profiles = [
+            profile if item.id == profile.id else item for item in config.model_profiles
+        ]
+    config.model_profiles.sort(key=_config_sort_key)
+    save_internal_config(config)
+    return profile
 
 
 def _internal_config_path() -> Path:

@@ -271,6 +271,37 @@ def test_run_single_turn_executes_tool_loop_and_aggregates_usage(monkeypatch) ->
     ]
 
 
+def test_run_single_turn_persists_provider_checkpoint_for_resume(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("PBI_AGENT_SESSION_DB_PATH", str(db_path))
+
+    provider = _ProviderStub()
+    provider.conversation_checkpoint = "resp_resume"
+    display = _DisplaySpy()
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=3)
+    monotonic_values = iter([10.0, 13.5])
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+
+    outcome = run_single_turn("Inspect the workspace", settings, display)
+
+    with SessionStore(db_path=db_path) as store:
+        session = store.get_session(outcome.session_id)
+
+    assert session is not None
+    assert session.previous_id == "resp_resume"
+
+
 class _ChatDisplaySpy(_DisplaySpy):
     def __init__(self, prompts: list[str | QueuedInput]) -> None:
         super().__init__()
