@@ -573,11 +573,11 @@ class WebDisplay(_EventDisplayBase):
 
     def user_prompt(self) -> str | QueuedInput | QueuedRuntimeChange:
         while True:
-            if self._shutdown.is_set():
-                return "exit"
             try:
                 value = self._input_queue.get_nowait()
             except queue.Empty:
+                if self._shutdown.is_set():
+                    return "exit"
                 self._publish("input_state", {"enabled": True})
                 self._input_event.wait(timeout=0.5)
                 self._input_event.clear()
