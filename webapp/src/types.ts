@@ -66,14 +66,17 @@ export type UsagePayload = {
   service_tier: string;
 };
 
-export type LiveSession = {
-  live_session_id: string;
-  resume_session_id: string | null;
+export type LiveSessionRuntime = {
   provider_id: string;
   profile_id: string;
   provider: string;
   model: string;
   reasoning_effort: string;
+};
+
+export type LiveSession = LiveSessionRuntime & {
+  live_session_id: string;
+  resume_session_id: string | null;
   created_at: string;
   status: "starting" | "running" | "ended";
   exit_code: number | null;

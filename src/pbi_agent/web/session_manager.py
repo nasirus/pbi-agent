@@ -585,6 +585,20 @@ class WebSessionManager:
         live_session.display.request_new_chat()
         return self._serialize_live_session(live_session)
 
+    def set_live_chat_profile(
+        self,
+        live_session_id: str,
+        *,
+        profile_id: str | None = None,
+    ) -> dict[str, Any]:
+        live_session = self._require_live_session(live_session_id)
+        if live_session.status == "ended":
+            raise RuntimeError("Live chat session has already ended.")
+        requested_runtime = self._resolve_runtime(profile_id)
+        if requested_runtime.profile_id != live_session.runtime.profile_id:
+            self._queue_runtime_change(live_session, profile_id)
+        return self._serialize_live_session(live_session)
+
     def get_event_stream(self, stream_id: str) -> EventStream:
         if stream_id == APP_EVENT_STREAM_ID:
             return self._app_stream

@@ -179,6 +179,20 @@ export async function requestNewChat(
   return result.session;
 }
 
+export async function setChatSessionProfile(
+  liveSessionId: string,
+  profileId: string | null,
+): Promise<LiveSession> {
+  const result = await requestJson<{ session: LiveSession }>(
+    `/api/chat/session/${liveSessionId}/profile`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ profile_id: profileId }),
+    },
+  );
+  return result.session;
+}
+
 export async function fetchTasks(): Promise<TaskRecord[]> {
   const result = await requestJson<{ tasks: TaskRecord[] }>("/api/tasks");
   return result.tasks;

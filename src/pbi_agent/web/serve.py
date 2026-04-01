@@ -877,6 +877,31 @@ def request_new_chat(
     )
 
 
+@chat_router.put(
+    "/session/{live_session_id}/profile",
+    response_model=ChatSessionResponse,
+)
+def set_chat_session_profile(
+    live_session_id: LiveSessionIdPath,
+    request: ActiveProfileRequest,
+    manager: SessionManagerDep,
+) -> ChatSessionResponse:
+    try:
+        session = manager.set_live_chat_profile(
+            live_session_id,
+            profile_id=request.profile_id,
+        )
+    except KeyError as exc:
+        raise _not_found("Live session not found.") from exc
+    except ConfigError as exc:
+        raise _config_http_error(exc) from exc
+    except Exception as exc:
+        raise _bad_request(str(exc)) from exc
+    return ChatSessionResponse(
+        session=_model_from_payload(LiveSessionModel, session),
+    )
+
+
 @chat_router.get("/uploads/{upload_id}")
 def get_uploaded_chat_image(upload_id: UploadIdPath) -> Response:
     try:

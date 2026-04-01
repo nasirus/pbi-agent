@@ -1,8 +1,10 @@
 import { lazy, Suspense } from "react";
-import { Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useShallow } from "zustand/react/shallow";
 import { fetchBootstrap } from "../api";
 import { useTaskEvents } from "../hooks/useTaskEvents";
+import { useChatStore } from "../store";
 import { LoadingSpinner } from "./shared/LoadingSpinner";
 
 const ChatPage = lazy(() =>
@@ -17,6 +19,13 @@ const SettingsPage = lazy(() =>
 
 export function AppShell() {
   useTaskEvents();
+  const location = useLocation();
+  const { runtime, liveSessionId } = useChatStore(
+    useShallow((state) => ({
+      runtime: state.runtime,
+      liveSessionId: state.liveSessionId,
+    })),
+  );
 
   const bootstrapQuery = useQuery({
     queryKey: ["bootstrap"],
@@ -28,6 +37,13 @@ export function AppShell() {
   const folderLabel = bootstrap?.workspace_root
     ? bootstrap.workspace_root.split(/[/\\]/).filter(Boolean).slice(-2).join("/")
     : null;
+  const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+  const displayedProvider = isChatRoute && liveSessionId && runtime?.provider
+    ? runtime.provider
+    : (bootstrap?.provider ?? "...");
+  const displayedModel = isChatRoute && liveSessionId && runtime?.model
+    ? runtime.model
+    : (bootstrap?.model ?? "...");
 
   return (
     <div className="app-shell">
@@ -44,8 +60,8 @@ export function AppShell() {
           <NavLink to="/settings">Settings</NavLink>
         </nav>
         <div className="runtime-meta">
-          <span className="runtime-meta__pill">{bootstrap?.provider ?? "..."}</span>
-          <span className="runtime-meta__pill">{bootstrap?.model ?? "..."}</span>
+          <span className="runtime-meta__pill">{displayedProvider}</span>
+          <span className="runtime-meta__pill">{displayedModel}</span>
         </div>
       </header>
 

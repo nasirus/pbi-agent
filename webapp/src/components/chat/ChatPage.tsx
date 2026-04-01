@@ -7,13 +7,16 @@ import {
   createChatSession,
   deleteSession,
   expandChatInput,
+  fetchConfigBootstrap,
   fetchSessionDetail,
   fetchSessions,
   requestNewChat,
+  setActiveModelProfile,
+  setChatSessionProfile,
   submitChatInput,
   uploadChatImages,
 } from "../../api";
-import type { HistoryItem, SessionRecord, TimelineItem } from "../../types";
+import type { HistoryItem, ModelProfileView, SessionRecord, TimelineItem } from "../../types";
 import { useChatStore } from "../../store";
 import { useLiveChatEvents } from "../../hooks/useLiveChatEvents";
 import { ConnectionBadge } from "./ConnectionBadge";
@@ -41,10 +44,12 @@ export function ChatPage({
   const hydratedRouteKeyRef = useRef<string | null>(null);
   const liveRequestRouteKeyRef = useRef<string | null>(null);
   const [awaitingBlankChat, setAwaitingBlankChat] = useState(false);
+  const [pendingProfileId, setPendingProfileId] = useState<string | null>(null);
 
   const {
     liveSessionId,
     resumeSessionId,
+    runtime,
     connection,
     inputEnabled,
     sessionUsage,
@@ -58,6 +63,7 @@ export function ChatPage({
     useShallow((state) => ({
       liveSessionId: state.liveSessionId,
       resumeSessionId: state.resumeSessionId,
+      runtime: state.runtime,
       connection: state.connection,
       inputEnabled: state.inputEnabled,
       sessionUsage: state.sessionUsage,
@@ -72,6 +78,7 @@ export function ChatPage({
 
   const setRouteState = useChatStore((state) => state.setRouteState);
   const attachLiveSession = useChatStore((state) => state.attachLiveSession);
+  const updateRuntimeFromSession = useChatStore((state) => state.updateRuntimeFromSession);
 
   const sessionsQuery = useQuery({
     queryKey: ["sessions"],
@@ -86,14 +93,16 @@ export function ChatPage({
     retry: false,
   });
 
+  const configQuery = useQuery({
+    queryKey: ["config-bootstrap"],
+    queryFn: fetchConfigBootstrap,
+    staleTime: 30_000,
+  });
+
   const createSessionMutation = useMutation({
     mutationFn: createChatSession,
     onSuccess: (session, variables) =>
-      attachLiveSession(
-        session.live_session_id,
-        session.resume_session_id,
-        Boolean(variables.resume_session_id),
-      ),
+      attachLiveSession(session, Boolean(variables.resume_session_id)),
   });
   const createSession = createSessionMutation.mutate;
   const createSessionAsync = createSessionMutation.mutateAsync;
@@ -104,10 +113,12 @@ export function ChatPage({
       file_paths: string[];
       image_paths: string[];
       image_upload_ids: string[];
+      profile_id?: string | null;
     }) => {
       if (!liveSessionId) throw new Error("No live session available.");
       return submitChatInput(liveSessionId, payload);
     },
+    onSuccess: (session) => updateRuntimeFromSession(session),
   });
 
   const deleteSessionMutation = useMutation({
@@ -124,6 +135,39 @@ export function ChatPage({
     }) => requestNewChat(liveSessionId, profileId),
   });
 
+  const setChatProfileMutation = useMutation({
+    mutationFn: ({
+      liveSessionId,
+      profileId,
+    }: {
+      liveSessionId: string;
+      profileId: string | null;
+    }) => setChatSessionProfile(liveSessionId, profileId),
+    onSuccess: (session) => {
+      updateRuntimeFromSession(session);
+      client.invalidateQueries({ queryKey: ["sessions"] });
+      if (resumeSessionId) {
+        client.invalidateQueries({ queryKey: ["session", resumeSessionId] });
+      }
+    },
+  });
+
+  const setActiveProfileMutation = useMutation({
+    mutationFn: ({
+      profileId,
+      configRevision,
+    }: {
+      profileId: string | null;
+      configRevision: string;
+    }) => setActiveModelProfile(profileId, configRevision),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["config-bootstrap"] }),
+        client.invalidateQueries({ queryKey: ["bootstrap"] }),
+      ]);
+    },
+  });
+
   useLiveChatEvents(liveSessionId);
 
   useEffect(() => {
@@ -131,6 +175,16 @@ export function ChatPage({
       setAwaitingBlankChat(false);
     }
   }, [awaitingBlankChat, resumeSessionId]);
+
+  useEffect(() => {
+    if (pendingProfileId && runtime?.profile_id === pendingProfileId) {
+      setPendingProfileId(null);
+    }
+  }, [pendingProfileId, runtime?.profile_id]);
+
+  useEffect(() => {
+    setPendingProfileId(null);
+  }, [routeSessionId]);
 
   useEffect(() => {
     // While a new-blank-chat transition is in flight, hold off — prevents the
@@ -192,13 +246,26 @@ export function ChatPage({
     }
 
     if (liveRequestRouteKeyRef.current !== routeKey) {
-      createSession({});
+      if (configQuery.isPending) {
+        return;
+      }
+      const nextProfileId = resolveSavedProfileId(
+        pendingProfileId
+        ?? configQuery.data?.active_profile_id
+        ?? configQuery.data?.model_profiles[0]?.id
+        ?? null,
+        configQuery.data?.model_profiles ?? [],
+      );
+      createSession(nextProfileId ? { profile_id: nextProfileId } : {});
       liveRequestRouteKeyRef.current = routeKey;
     }
   }, [
     awaitingBlankChat,
     createSession,
+    configQuery.data,
+    configQuery.isPending,
     liveSessionId,
+    pendingProfileId,
     resumeSessionId,
     routeSessionId,
     sessionDetailQuery.data,
@@ -258,6 +325,29 @@ export function ChatPage({
       })
     : null;
 
+  const modelProfiles = configQuery.data?.model_profiles ?? [];
+  const routeProfileId = routeSessionId ? (activeSessionRecord?.profile_id ?? "") : "";
+  const runtimeProfileId = runtime?.profile_id ?? "";
+  const initialBlankProfileId =
+    configQuery.data?.active_profile_id ?? modelProfiles[0]?.id ?? "";
+  const selectedProfileId = pendingProfileId
+    ?? (runtimeProfileId || (routeSessionId ? routeProfileId : initialBlankProfileId));
+  const providerSupportsImages =
+    runtime?.provider
+      ? (configQuery.data?.options.provider_metadata[runtime.provider]?.supports_image_inputs
+        ?? supportsImageInputs)
+      : supportsImageInputs;
+  const selectedSavedProfileId = resolveSavedProfileId(selectedProfileId, modelProfiles);
+  const profileSelectorDisabled =
+    modelProfiles.length === 0
+    || !liveSessionId
+    || !inputEnabled
+    || sessionEnded
+    || createSessionMutation.isPending
+    || requestNewChatMutation.isPending
+    || setChatProfileMutation.isPending
+    || setActiveProfileMutation.isPending;
+
   const handleSubmit = async (payload: { text: string; images: File[] }) => {
     const { text, images } = payload;
     setInputWarnings([]);
@@ -267,6 +357,7 @@ export function ChatPage({
         file_paths: [],
         image_paths: [],
         image_upload_ids: [],
+        profile_id: selectedSavedProfileId,
       });
       return;
     }
@@ -290,15 +381,18 @@ export function ChatPage({
       file_paths: expanded.file_paths,
       image_paths: mergedImagePaths,
       image_upload_ids: uploadedImageIds,
+      profile_id: selectedSavedProfileId,
     });
   };
 
   const openBlankChat = async ({
     replace = false,
     awaitCreate = false,
+    profileId = null,
   }: {
     replace?: boolean;
     awaitCreate?: boolean;
+    profileId?: string | null;
   } = {}) => {
     const routeKey = "__new__";
     setAwaitingBlankChat(false);
@@ -307,10 +401,10 @@ export function ChatPage({
     setRouteState(null, []);
     hydratedRouteKeyRef.current = routeKey;
     if (awaitCreate) {
-      await createSessionAsync({});
+      await createSessionAsync(profileId ? { profile_id: profileId } : {});
       return;
     }
-    createSession({});
+    createSession(profileId ? { profile_id: profileId } : {});
   };
 
   const transitionToBlankChat = async ({
@@ -321,21 +415,48 @@ export function ChatPage({
     awaitCreate?: boolean;
   } = {}) => {
     const currentLiveSessionId = liveSessionId;
+    const nextProfileId = resolveSavedProfileId(selectedProfileId, modelProfiles);
     setAwaitingBlankChat(true);
 
     if (currentLiveSessionId && !sessionEnded) {
       try {
-        await requestNewChatMutation.mutateAsync({ liveSessionId: currentLiveSessionId });
-        attachLiveSession(currentLiveSessionId, null, false);
+        const session = await requestNewChatMutation.mutateAsync({
+          liveSessionId: currentLiveSessionId,
+          profileId: nextProfileId,
+        });
+        attachLiveSession({ ...session, resume_session_id: null }, false);
         navigate("/chat", { replace });
       } catch {
-        await openBlankChat({ replace, awaitCreate });
+        await openBlankChat({ replace, awaitCreate, profileId: nextProfileId });
       }
     } else {
-      await openBlankChat({ replace, awaitCreate });
+      await openBlankChat({ replace, awaitCreate, profileId: nextProfileId });
     }
 
     window.setTimeout(() => composerRef.current?.focus(), 100);
+  };
+
+  const handleProfileChange = async (nextProfileId: string) => {
+    setPendingProfileId(nextProfileId);
+    try {
+      const nextConfigRevision = configQuery.data?.config_revision;
+      if (!nextConfigRevision) {
+        throw new Error("Settings are not loaded yet.");
+      }
+      await setActiveProfileMutation.mutateAsync({
+        profileId: nextProfileId,
+        configRevision: nextConfigRevision,
+      });
+      if (liveSessionId) {
+        await setChatProfileMutation.mutateAsync({
+          liveSessionId,
+          profileId: nextProfileId,
+        });
+      }
+      setPendingProfileId(null);
+    } catch {
+      setPendingProfileId(null);
+    }
   };
 
   const handleNewSession = async () => {
@@ -400,7 +521,26 @@ export function ChatPage({
 
       <div className="chat-panel">
         <div className="chat-topbar">
-          <ConnectionBadge connection={connection} />
+          <div className="chat-topbar__leading">
+            <ConnectionBadge connection={connection} />
+            <label className="chat-profile-selector">
+              <span className="chat-profile-selector__label">Profile</span>
+              <select
+                className="chat-profile-selector__select"
+                value={selectedProfileId}
+                onChange={(event) => {
+                  void handleProfileChange(event.target.value);
+                }}
+                disabled={profileSelectorDisabled}
+              >
+                {renderProfileSelectorOptions({
+                  selectedProfileId,
+                  modelProfiles,
+                  isLoading: configQuery.isPending,
+                })}
+              </select>
+            </label>
+          </div>
           <div className="chat-topbar__actions">
             <UsageBar sessionUsage={sessionUsage} turnUsage={turnUsage} />
             {canDeleteActiveSession ? (
@@ -431,6 +571,12 @@ export function ChatPage({
         {fatalError ? <div className="banner banner--error">{fatalError}</div> : null}
         {createSessionMutation.error ? (
           <div className="banner banner--error">{createSessionMutation.error.message}</div>
+        ) : null}
+        {setChatProfileMutation.error ? (
+          <div className="banner banner--error">{setChatProfileMutation.error.message}</div>
+        ) : null}
+        {setActiveProfileMutation.error ? (
+          <div className="banner banner--error">{setActiveProfileMutation.error.message}</div>
         ) : null}
         {sessionDetailLoadError ? (
           <div className="banner banner--error">{sessionDetailLoadError}</div>
@@ -464,7 +610,7 @@ export function ChatPage({
               inputEnabled={inputEnabled}
               sessionEnded={sessionEnded}
               liveSessionId={liveSessionId}
-              supportsImageInputs={supportsImageInputs}
+              supportsImageInputs={providerSupportsImages}
               isSubmitting={sendInputMutation.isPending}
               onSubmit={handleSubmit}
             />
@@ -499,4 +645,56 @@ function mapHistoryItem(item: HistoryItem): TimelineItem {
     imageAttachments: item.image_attachments,
     markdown: item.markdown,
   };
+}
+
+function resolveSavedProfileId(
+  profileId: string | null | undefined,
+  modelProfiles: ModelProfileView[],
+): string | null {
+  if (!profileId) {
+    return null;
+  }
+  return modelProfiles.some((profile) => profile.id === profileId) ? profileId : null;
+}
+
+function renderProfileSelectorOptions({
+  selectedProfileId,
+  modelProfiles,
+  isLoading,
+}: {
+  selectedProfileId: string;
+  modelProfiles: ModelProfileView[];
+  isLoading: boolean;
+}) {
+  const hasSelectedProfile = Boolean(
+    selectedProfileId
+    && modelProfiles.some((profile) => profile.id === selectedProfileId),
+  );
+
+  if (isLoading && modelProfiles.length === 0) {
+    return <option value="">Loading profiles...</option>;
+  }
+
+  if (modelProfiles.length === 0) {
+    return <option value="">No model profiles configured</option>;
+  }
+
+  return (
+    <>
+      {!hasSelectedProfile ? (
+        <option value={selectedProfileId} disabled>
+          {selectedProfileId ? "Current profile unavailable" : "Current runtime has no saved profile"}
+        </option>
+      ) : null}
+      {modelProfiles.map((profile) => (
+        <option key={profile.id} value={profile.id}>
+          {formatProfileOptionLabel(profile)}
+        </option>
+      ))}
+    </>
+  );
+}
+
+function formatProfileOptionLabel(profile: ModelProfileView): string {
+  return profile.name;
 }

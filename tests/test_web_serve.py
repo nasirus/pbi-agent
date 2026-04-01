@@ -499,6 +499,60 @@ def test_chat_input_profile_override_emits_runtime_update(monkeypatch) -> None:
     assert runtime_events[-1]["payload"]["profile_id"] == "analysis"
 
 
+def test_set_chat_session_profile_emits_runtime_update(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "saved-openai-key")
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key_env="OPENAI_API_KEY",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="gpt-5.4-2026-03-05",
+            reasoning_effort="xhigh",
+        )
+    )
+    runtime_args = _runtime_args("web")
+    queued_values: list[object] = []
+
+    def fake_run_chat_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        queued_values.append(display.user_prompt())
+        queued_values.append(display.user_prompt())
+        return 0
+
+    with patch("pbi_agent.web.session_manager.run_chat_loop", fake_run_chat_loop):
+        app = create_app(resolve_runtime(runtime_args), runtime_args=runtime_args)
+
+        with TestClient(app) as client:
+            response = client.post("/api/chat/session", json={})
+            assert response.status_code == 200
+            live_session_id = response.json()["session"]["live_session_id"]
+
+            update_response = client.put(
+                f"/api/chat/session/{live_session_id}/profile",
+                json={"profile_id": "analysis"},
+            )
+            assert update_response.status_code == 200
+            payload = update_response.json()["session"]
+            assert payload["profile_id"] == "analysis"
+            assert payload["model"] == "gpt-5.4-2026-03-05"
+
+            events = app.state.manager.get_event_stream(live_session_id).snapshot()
+
+    assert isinstance(queued_values[0], QueuedRuntimeChange)
+    runtime_events = [
+        event for event in events if event["type"] == "session_runtime_updated"
+    ]
+    assert runtime_events[-1]["payload"]["profile_id"] == "analysis"
+
+
 def test_chat_session_resume_uses_saved_session_runtime(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
