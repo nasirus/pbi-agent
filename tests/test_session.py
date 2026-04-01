@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import json
 import os
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -22,6 +25,7 @@ from pbi_agent.models.messages import (
     ToolCall,
     UserTurnInput,
 )
+from pbi_agent.providers.openai_provider import OpenAIProvider
 from pbi_agent.session_store import SessionStore
 from pbi_agent.display.protocol import QueuedInput
 
@@ -308,6 +312,9 @@ class _ChatDisplaySpy(_DisplaySpy):
         self.prompts = prompts
         self.prompt_calls = 0
         self.assistant_start_calls = 0
+        self.bound_session_ids: list[str | None] = []
+        self.replayed_history = []
+        self.retry_notices: list[tuple[int, int]] = []
 
     def user_prompt(self) -> str | QueuedInput:
         value = self.prompts[self.prompt_calls]
@@ -316,6 +323,79 @@ class _ChatDisplaySpy(_DisplaySpy):
 
     def assistant_start(self) -> None:
         self.assistant_start_calls += 1
+
+    def bind_session(self, session_id: str | None) -> None:
+        self.bound_session_ids.append(session_id)
+
+    def replay_history(self, messages) -> None:
+        self.replayed_history = list(messages)
+
+    def wait_start(self, message: str = "") -> None:
+        self.last_wait_message = message
+
+    def wait_stop(self) -> None:
+        return None
+
+    def retry_notice(self, attempt: int, max_retries: int) -> None:
+        self.retry_notices.append((attempt, max_retries))
+
+    def rate_limit_notice(
+        self,
+        *,
+        wait_seconds: float,
+        attempt: int,
+        max_retries: int,
+    ) -> None:
+        self.rate_limit_notice_call = (wait_seconds, attempt, max_retries)
+
+    def overload_notice(
+        self,
+        *,
+        wait_seconds: float,
+        attempt: int,
+        max_retries: int,
+    ) -> None:
+        self.overload_notice_call = (wait_seconds, attempt, max_retries)
+
+    def render_thinking(
+        self,
+        text: str | None = None,
+        *,
+        title: str | None = None,
+        replace_existing: bool = False,
+        widget_id: str | None = None,
+    ) -> str | None:
+        self.thinking = {
+            "text": text,
+            "title": title,
+            "replace_existing": replace_existing,
+            "widget_id": widget_id,
+        }
+        return widget_id
+
+    def function_start(self, count: int) -> None:
+        self.function_count = count
+
+    def function_result(
+        self,
+        *,
+        name: str,
+        success: bool,
+        call_id: str,
+        arguments: object,
+    ) -> None:
+        self.last_function_result = {
+            "name": name,
+            "success": success,
+            "call_id": call_id,
+            "arguments": arguments,
+        }
+
+    def tool_group_end(self) -> None:
+        self.tool_group_closed = True
+
+    def web_search_sources(self, sources) -> None:
+        self.last_web_search_sources = list(sources)
 
 
 class _ChatProviderStub:
@@ -670,3 +750,204 @@ def test_run_single_turn_passes_parent_context_snapshot_to_tool_execution(
         "It routes commands in cli.py.",
     ]
     assert parent_context.current_user_turn == "Inspect the sub-agent path"
+
+
+def test_run_single_turn_resumed_session_bootstraps_from_history_without_previous_id(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("PBI_AGENT_SESSION_DB_PATH", str(db_path))
+
+    with SessionStore(db_path=db_path) as store:
+        session_id = store.create_session(
+            directory=os.getcwd(),
+            provider="openai",
+            model=DEFAULT_MODEL,
+            title="existing",
+        )
+        store.update_session(session_id, previous_id="resp_parent")
+        store.add_message(session_id, "user", "hello")
+        store.add_message(session_id, "assistant", "hi")
+
+    provider = OpenAIProvider(Settings(api_key="test-key", provider="openai"))
+    display = _ChatDisplaySpy([])
+    requests: list[dict[str, object]] = []
+    monotonic_values = iter([10.0, 12.5])
+
+    class _FakeHTTPResponse:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self) -> _FakeHTTPResponse:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        payload = request.data.decode("utf-8") if request.data else "{}"
+        requests.append(json.loads(payload))
+        return _FakeHTTPResponse(
+            {
+                "id": "resp_recovered",
+                "model": DEFAULT_MODEL,
+                "usage": {
+                    "input_tokens": 7,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 3,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Recovered."}],
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    outcome = run_single_turn(
+        "continue",
+        Settings(api_key="test-key", provider="openai"),
+        display,
+        resume_session_id=session_id,
+    )
+
+    assert outcome.response_id == "resp_recovered"
+    assert len(requests) == 1
+    assert "previous_response_id" not in requests[0]
+    assert requests[0]["input"] == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+        {"role": "user", "content": "continue"},
+    ]
+
+
+def test_run_chat_loop_resumed_session_bootstraps_once_then_uses_previous_response_id(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("PBI_AGENT_SESSION_DB_PATH", str(db_path))
+
+    with SessionStore(db_path=db_path) as store:
+        session_id = store.create_session(
+            directory=os.getcwd(),
+            provider="openai",
+            model=DEFAULT_MODEL,
+            title="existing",
+        )
+        store.update_session(session_id, previous_id="resp_parent")
+        store.add_message(session_id, "user", "hello")
+        store.add_message(session_id, "assistant", "hi")
+
+    provider = OpenAIProvider(Settings(api_key="test-key", provider="openai"))
+    display = _ChatDisplaySpy(["continue", "more", "quit"])
+    requests: list[dict[str, object]] = []
+    monotonic_values = iter([5.0, 6.0, 10.0, 11.0])
+
+    class _FakeHTTPResponse:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self) -> _FakeHTTPResponse:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        payload = request.data.decode("utf-8") if request.data else "{}"
+        requests.append(json.loads(payload))
+        if len(requests) == 1:
+            return _FakeHTTPResponse(
+                {
+                    "id": "resp_recovered",
+                    "model": DEFAULT_MODEL,
+                    "usage": {
+                        "input_tokens": 7,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 3,
+                        "output_tokens_details": {"reasoning_tokens": 0},
+                    },
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "Recovered."}],
+                        }
+                    ],
+                }
+            )
+        return _FakeHTTPResponse(
+            {
+                "id": "resp_next",
+                "model": DEFAULT_MODEL,
+                "usage": {
+                    "input_tokens": 8,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 2,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Next."}],
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    exit_code = run_chat_loop(
+        Settings(api_key="test-key", provider="openai"),
+        display,
+        resume_session_id=session_id,
+    )
+
+    assert exit_code == 0
+    assert len(requests) == 2
+    assert "previous_response_id" not in requests[0]
+    assert requests[0]["input"] == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+        {"role": "user", "content": "continue"},
+    ]
+    assert requests[1]["previous_response_id"] == "resp_recovered"
+    assert requests[1]["input"] == [{"role": "user", "content": "more"}]

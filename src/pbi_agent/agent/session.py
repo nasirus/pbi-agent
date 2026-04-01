@@ -139,7 +139,6 @@ def run_single_turn(
             provider=provider,
             store=store,
             session_id=resume_session_id,
-            runtime=runtime,
             session_usage=session_usage,
             display=display,
         )
@@ -238,7 +237,6 @@ def run_chat_loop(
                     provider=provider,
                     store=store,
                     session_id=resume_session_to_restore,
-                    runtime=current_runtime,
                     session_usage=session_usage,
                     display=display,
                     replay_history=replay_history_on_restore,
@@ -728,19 +726,6 @@ def _persist_runtime_change(
         _log.warning("Failed to persist runtime change", exc_info=True)
 
 
-def _checkpoint_matches_runtime(
-    record,
-    runtime: ResolvedRuntime,
-) -> bool:
-    if not runtime.provider_id or not runtime.profile_id:
-        return True
-    return (
-        record.provider == runtime.settings.provider
-        and record.provider_id == runtime.provider_id
-        and record.profile_id == runtime.profile_id
-    )
-
-
 def _create_session(
     store: SessionStore | None,
     runtime: ResolvedRuntime,
@@ -862,19 +847,20 @@ def _resume_session(
     provider: Any,
     store: SessionStore | None,
     session_id: str | None,
-    runtime: ResolvedRuntime,
     session_usage: TokenUsage,
     display: DisplayProtocol,
     replay_history: bool = True,
 ) -> None:
     if store is None or session_id is None:
         return
+    messages = []
+    try:
+        messages = store.list_messages(session_id)
+    except Exception:
+        _log.warning("Failed to restore session history", exc_info=True)
+
     try:
         rec = store.get_session(session_id)
-        if rec and rec.previous_id and _checkpoint_matches_runtime(rec, runtime):
-            provider.set_previous_response_id(rec.previous_id)
-        elif rec and rec.previous_id:
-            store.update_session(session_id, clear_previous_id=True)
         if rec and (rec.input_tokens or rec.output_tokens):
             session_usage.add(
                 TokenUsage(
@@ -887,14 +873,13 @@ def _resume_session(
             display.session_usage(session_usage)
     except Exception:
         _log.warning("Failed to restore session state", exc_info=True)
-    try:
-        messages = store.list_messages(session_id)
-        if messages:
+    if messages:
+        try:
             provider.restore_messages(messages)
             if replay_history:
                 display.replay_history(messages)
-    except Exception:
-        _log.warning("Failed to restore session history", exc_info=True)
+        except Exception:
+            _log.warning("Failed to apply restored session history", exc_info=True)
 
 
 def _build_parent_context_snapshot(
