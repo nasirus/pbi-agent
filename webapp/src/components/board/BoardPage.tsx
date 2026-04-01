@@ -91,8 +91,7 @@ export function BoardPage() {
           prompt: editingTask.prompt,
           stage: editingTask.stage,
           project_dir: editingTask.projectDir,
-          session_id: editingTask.sessionId || undefined,
-          clear_session_id: editingTask.sessionId.trim() === "",
+          session_id: editingTask.sessionId.trim() === "" ? null : editingTask.sessionId,
         },
       });
     } else {

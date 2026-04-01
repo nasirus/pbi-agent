@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_id    TEXT PRIMARY KEY,
     directory     TEXT NOT NULL,
     provider      TEXT NOT NULL,
+    provider_id   TEXT,
     model         TEXT NOT NULL DEFAULT '',
+    profile_id    TEXT,
     previous_id   TEXT,
     title         TEXT NOT NULL DEFAULT '',
     total_tokens  INTEGER NOT NULL DEFAULT 0,
@@ -54,6 +56,9 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id             TEXT NOT NULL REFERENCES sessions(session_id),
     role                   TEXT NOT NULL,
     content                TEXT NOT NULL DEFAULT '',
+    provider_id            TEXT,
+    profile_id             TEXT,
+    file_paths_json        TEXT NOT NULL DEFAULT '[]',
     image_attachments_json TEXT NOT NULL DEFAULT '[]',
     created_at             TEXT NOT NULL
 );
@@ -68,6 +73,7 @@ CREATE TABLE IF NOT EXISTS kanban_tasks (
     position              INTEGER NOT NULL DEFAULT 0,
     project_dir           TEXT NOT NULL DEFAULT '.',
     session_id            TEXT,
+    model_profile_id      TEXT,
     run_status            TEXT NOT NULL DEFAULT 'idle',
     last_result_summary   TEXT NOT NULL DEFAULT '',
     created_at            TEXT NOT NULL,
@@ -85,7 +91,9 @@ class SessionRecord:
     session_id: str
     directory: str
     provider: str
+    provider_id: str | None
     model: str
+    profile_id: str | None
     previous_id: str | None
     title: str
     total_tokens: int
@@ -103,6 +111,9 @@ class MessageRecord:
     role: str
     content: str
     created_at: str
+    provider_id: str | None = None
+    profile_id: str | None = None
+    file_paths: list[str] = field(default_factory=list)
     image_attachments: list["MessageImageAttachment"] = field(default_factory=list)
 
 
@@ -125,6 +136,7 @@ class KanbanTaskRecord:
     position: int
     project_dir: str
     session_id: str | None
+    model_profile_id: str | None
     run_status: str
     last_result_summary: str
     created_at: str
@@ -161,6 +173,24 @@ def _serialize_image_attachments(
             for attachment in image_attachments
         ]
     )
+
+
+def _serialize_file_paths(file_paths: list[str] | None) -> str:
+    if not file_paths:
+        return "[]"
+    return json.dumps([path for path in file_paths if isinstance(path, str)])
+
+
+def _deserialize_file_paths(raw_value: object) -> list[str]:
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return []
+    try:
+        payload = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, str)]
 
 
 def _deserialize_image_attachments(raw_value: object) -> list[MessageImageAttachment]:
@@ -227,16 +257,34 @@ class SessionStore:
         self._conn.close()
 
     def _ensure_schema(self) -> None:
+        session_columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        if "provider_id" not in session_columns:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN provider_id TEXT")
+        if "profile_id" not in session_columns:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN profile_id TEXT")
+
         message_columns = {
             row["name"]
             for row in self._conn.execute("PRAGMA table_info(messages)").fetchall()
         }
+        if "provider_id" not in message_columns:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN provider_id TEXT")
+        if "profile_id" not in message_columns:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN profile_id TEXT")
+        if "file_paths_json" not in message_columns:
+            self._conn.execute(
+                "ALTER TABLE messages "
+                "ADD COLUMN file_paths_json TEXT NOT NULL DEFAULT '[]'"
+            )
         if "image_attachments_json" not in message_columns:
             self._conn.execute(
                 "ALTER TABLE messages "
                 "ADD COLUMN image_attachments_json TEXT NOT NULL DEFAULT '[]'"
             )
-            self._conn.commit()
+        self._conn.commit()
 
     def create_session(
         self,
@@ -244,17 +292,30 @@ class SessionStore:
         provider: str,
         model: str,
         title: str = "",
+        *,
+        provider_id: str | None = None,
+        profile_id: str | None = None,
     ) -> str:
         session_id = uuid.uuid4().hex
         now = _now_iso()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO sessions "
-                "(session_id, directory, provider, model, previous_id, title, "
+                "(session_id, directory, provider, provider_id, model, profile_id, previous_id, title, "
                 "total_tokens, input_tokens, output_tokens, cost_usd, "
                 "created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, NULL, ?, 0, 0, 0, 0.0, ?, ?)",
-                (session_id, directory, provider, model, title, now, now),
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, 0, 0, 0.0, ?, ?)",
+                (
+                    session_id,
+                    directory,
+                    provider,
+                    provider_id,
+                    model,
+                    profile_id,
+                    title,
+                    now,
+                    now,
+                ),
             )
             self._conn.commit()
         return session_id
@@ -264,20 +325,39 @@ class SessionStore:
         session_id: str,
         *,
         previous_id: str | None = None,
+        clear_previous_id: bool = False,
         title: str | None = None,
+        provider: str | None = None,
+        provider_id: str | None = None,
         total_tokens: int | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         cost_usd: float | None = None,
+        model: str | None = None,
+        profile_id: str | None = None,
     ) -> None:
         clauses: list[str] = []
         params: list[object] = []
-        if previous_id is not None:
+        if clear_previous_id:
+            clauses.append("previous_id = NULL")
+        elif previous_id is not None:
             clauses.append("previous_id = ?")
             params.append(previous_id)
         if title is not None:
             clauses.append("title = ?")
             params.append(title)
+        if provider is not None:
+            clauses.append("provider = ?")
+            params.append(provider)
+        if provider_id is not None:
+            clauses.append("provider_id = ?")
+            params.append(provider_id)
+        if model is not None:
+            clauses.append("model = ?")
+            params.append(model)
+        if profile_id is not None:
+            clauses.append("profile_id = ?")
+            params.append(profile_id)
         if total_tokens is not None:
             clauses += [
                 "total_tokens = ?",
@@ -359,18 +439,24 @@ class SessionStore:
         role: str,
         content: str,
         *,
+        file_paths: list[str] | None = None,
+        provider_id: str | None = None,
+        profile_id: str | None = None,
         image_attachments: list[MessageImageAttachment] | None = None,
     ) -> int:
         now = _now_iso()
         with self._lock:
             cursor = self._conn.execute(
                 "INSERT INTO messages "
-                "(session_id, role, content, image_attachments_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(session_id, role, content, provider_id, profile_id, file_paths_json, image_attachments_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     session_id,
                     role,
                     content,
+                    provider_id,
+                    profile_id,
+                    _serialize_file_paths(file_paths),
                     _serialize_image_attachments(image_attachments),
                     now,
                 ),
@@ -393,6 +479,9 @@ class SessionStore:
                     session_id=data["session_id"],
                     role=data["role"],
                     content=data["content"],
+                    provider_id=data.get("provider_id"),
+                    profile_id=data.get("profile_id"),
+                    file_paths=_deserialize_file_paths(data.get("file_paths_json")),
                     image_attachments=_deserialize_image_attachments(
                         data.get("image_attachments_json")
                     ),
@@ -412,6 +501,7 @@ class SessionStore:
         stage: str = KANBAN_STAGE_BACKLOG,
         project_dir: str = ".",
         session_id: str | None = None,
+        model_profile_id: str | None = None,
     ) -> KanbanTaskRecord:
         if stage not in KANBAN_STAGES:
             raise ValueError(f"unsupported kanban stage: {stage}")
@@ -423,9 +513,9 @@ class SessionStore:
             self._conn.execute(
                 "INSERT INTO kanban_tasks "
                 "(task_id, directory, title, prompt, stage, position, project_dir, "
-                "session_id, run_status, last_result_summary, created_at, updated_at, "
+                "session_id, model_profile_id, run_status, last_result_summary, created_at, updated_at, "
                 "last_run_started_at, last_run_finished_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 (
                     task_id,
                     directory,
@@ -435,6 +525,7 @@ class SessionStore:
                     position,
                     project_dir_value,
                     session_id,
+                    model_profile_id,
                     KANBAN_RUN_STATUS_IDLE,
                     "",
                     now,
@@ -490,6 +581,8 @@ class SessionStore:
         project_dir: str | None = None,
         session_id: str | None = None,
         clear_session_id: bool = False,
+        model_profile_id: str | None = None,
+        clear_model_profile_id: bool = False,
         run_status: str | None = None,
         last_result_summary: str | None = None,
         last_run_started_at: str | None = None,
@@ -516,6 +609,11 @@ class SessionStore:
         elif session_id is not None:
             clauses.append("session_id = ?")
             params.append(session_id)
+        if clear_model_profile_id:
+            clauses.append("model_profile_id = NULL")
+        elif model_profile_id is not None:
+            clauses.append("model_profile_id = ?")
+            params.append(model_profile_id)
         if run_status is not None:
             clauses.append("run_status = ?")
             params.append(run_status)

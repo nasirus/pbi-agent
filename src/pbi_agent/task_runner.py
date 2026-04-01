@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pbi_agent.config import Settings
+from pbi_agent.config import ResolvedRuntime, Settings
 from pbi_agent.display.protocol import DisplayProtocol
 
 
 def run_single_turn_in_directory(
     prompt: str,
-    settings: Settings,
+    settings: Settings | ResolvedRuntime,
     display: DisplayProtocol,
     *,
     project_dir: str | Path = ".",

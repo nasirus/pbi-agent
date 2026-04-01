@@ -1,0 +1,286 @@
+/* ── Settings Page ──────────────────────────────────────────────────── */
+
+.settings-page {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-6);
+}
+
+.settings-page__inner {
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+/* ── Panel ── */
+
+.settings-panel {
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+
+.settings-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--sp-4);
+}
+
+.settings-panel__title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semi);
+  color: var(--color-text);
+}
+
+.settings-panel__subtitle {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+.settings-panel__body {
+  padding: var(--sp-4) var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* ── Item cards ── */
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--duration-fast);
+}
+
+.settings-item:hover {
+  border-color: var(--color-border-focus);
+}
+
+.settings-item__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-item__name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  margin-bottom: 2px;
+}
+
+.settings-item__id {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+.settings-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+
+.settings-item__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+}
+
+.settings-item__tag--accent {
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+  border-color: var(--color-accent-border);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-item__tag--success {
+  color: var(--color-success);
+  background: var(--color-success-muted);
+  border-color: transparent;
+}
+
+.settings-item__actions {
+  display: flex;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+/* ── Button overrides for settings context ── */
+/* .btn, .btn--primary, .btn--ghost, .btn--danger are defined globally in
+   chat.css and intentionally reused. Only add what settings needs on top. */
+
+/* Give all buttons in the settings page a transparent border slot so that
+   the ghost variant can show a real border without layout shift. */
+.settings-page .btn {
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settings-page .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-page .btn--ghost {
+  border-color: var(--color-border);
+}
+
+.settings-page .btn--ghost:hover:not(:disabled) {
+  border-color: var(--color-border-focus);
+}
+
+/* Ghost-danger: used on item card delete buttons in settings only. */
+.settings-page .btn--ghost-danger {
+  color: var(--color-error);
+  border-color: transparent;
+}
+
+.settings-page .btn--ghost-danger:hover:not(:disabled) {
+  background: var(--color-error-muted);
+  border-color: var(--color-error);
+}
+
+/* ── Page-level error banner ── */
+
+.settings-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--color-error-muted);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-lg);
+  color: var(--color-error);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+/* ── Form helpers (used in settings modals) ── */
+
+.task-form__hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+.task-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+
+.task-form__error {
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--color-error);
+  border-radius: var(--radius-md);
+  background: var(--color-error-muted);
+  color: var(--color-error);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* ── Secret mode tab selector ── */
+
+.secret-mode-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.secret-mode-tab {
+  flex: 1;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  border-radius: calc(var(--radius-md) - 2px);
+  transition: background var(--duration-fast), color var(--duration-fast);
+  text-align: center;
+  cursor: pointer;
+}
+
+.secret-mode-tab.active {
+  background: var(--color-surface-0);
+  color: var(--color-text);
+}
+
+/* ── Active default profile control ── */
+
+.active-profile-control {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.active-profile-control__label {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semi);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.active-profile-control__select {
+  flex: 1;
+  padding: var(--sp-1) var(--sp-8) var(--sp-1) var(--sp-3);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  transition: border-color var(--duration-fast);
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238080a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+.active-profile-control__select:focus {
+  border-color: var(--color-accent-border);
+}
+
+/* ── Resolved runtime summary in profile card ── */
+
+.runtime-summary {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  margin-top: var(--sp-1);
+}

@@ -8,14 +8,26 @@ from fastapi.testclient import TestClient
 from rich.console import Console
 
 from pbi_agent.branding import PBI_AGENT_NAME, PBI_AGENT_TAGLINE
-from pbi_agent.config import Settings
+from pbi_agent.cli import build_parser
+from pbi_agent.config import (
+    ModelProfileConfig,
+    ProviderConfig,
+    resolve_runtime,
+    Settings,
+    create_model_profile_config,
+    create_provider_config,
+)
 from pbi_agent.session_store import SESSION_DB_PATH_ENV, SessionStore
-from pbi_agent.display.protocol import QueuedInput
+from pbi_agent.display.protocol import QueuedInput, QueuedRuntimeChange
 from pbi_agent.web.serve import PBIWebServer, create_app
 
 
 def _settings() -> Settings:
     return Settings(api_key="test-key", provider="openai", model="gpt-5.4")
+
+
+def _runtime_args(*argv: str):
+    return build_parser().parse_args(list(argv))
 
 
 def test_web_server_prints_banner_and_starts_uvicorn() -> None:
@@ -46,6 +58,130 @@ def test_bootstrap_endpoint_returns_workspace_metadata() -> None:
     assert payload["supports_image_inputs"] is True
     assert "workspace_root" in payload
     assert payload["board_stages"] == ["backlog", "plan", "processing", "review"]
+
+
+def test_config_bootstrap_and_crud_endpoints_round_trip(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "env-openai-key")
+    runtime_args = _runtime_args("web")
+    app = create_app(resolve_runtime(runtime_args), runtime_args=runtime_args)
+
+    with TestClient(app) as client:
+        bootstrap_response = client.get("/api/config/bootstrap")
+        assert bootstrap_response.status_code == 200
+        bootstrap_payload = bootstrap_response.json()
+        assert len(bootstrap_payload["providers"]) == 1
+        assert bootstrap_payload["providers"][0]["id"] == "auto-provider-openai"
+        assert len(bootstrap_payload["model_profiles"]) == 1
+        assert (
+            bootstrap_payload["model_profiles"][0]["provider_id"]
+            == "auto-provider-openai"
+        )
+        assert "config_revision" in bootstrap_payload
+        revision = bootstrap_payload["config_revision"]
+
+        create_provider_response = client.post(
+            "/api/config/providers",
+            headers={"If-Match": revision},
+            json={
+                "name": "OpenAI Main",
+                "kind": "openai",
+                "api_key_env": "OPENAI_API_KEY",
+            },
+        )
+        assert create_provider_response.status_code == 200
+        provider_payload = create_provider_response.json()
+        assert provider_payload["provider"]["id"] == "openai-main"
+        assert provider_payload["provider"]["secret_source"] == "env_var"
+        assert provider_payload["provider"]["has_secret"] is True
+        revision = provider_payload["config_revision"]
+
+        create_profile_response = client.post(
+            "/api/config/model-profiles",
+            headers={"If-Match": revision},
+            json={
+                "name": "Analysis",
+                "provider_id": "openai-main",
+                "model": "gpt-5.4-2026-03-05",
+                "reasoning_effort": "xhigh",
+            },
+        )
+        assert create_profile_response.status_code == 200
+        profile_payload = create_profile_response.json()
+        assert profile_payload["model_profile"]["id"] == "analysis"
+        assert (
+            profile_payload["model_profile"]["resolved_runtime"]["profile_id"]
+            == "analysis"
+        )
+        assert (
+            profile_payload["model_profile"]["resolved_runtime"]["model"]
+            == "gpt-5.4-2026-03-05"
+        )
+        revision = profile_payload["config_revision"]
+
+        select_response = client.put(
+            "/api/config/active-model-profile",
+            headers={"If-Match": revision},
+            json={"profile_id": "analysis"},
+        )
+        assert select_response.status_code == 200
+        revision = select_response.json()["config_revision"]
+
+        refreshed = client.get("/api/config/bootstrap")
+        assert refreshed.status_code == 200
+        refreshed_payload = refreshed.json()
+        assert refreshed_payload["active_profile_id"] == "analysis"
+        assert {item["id"] for item in refreshed_payload["providers"]} == {
+            "auto-provider-openai",
+            "openai-main",
+        }
+        analysis_profile = next(
+            item
+            for item in refreshed_payload["model_profiles"]
+            if item["id"] == "analysis"
+        )
+        assert analysis_profile["is_active_default"] is True
+        assert refreshed_payload["config_revision"] == revision
+
+
+def test_config_writes_require_current_revision() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        stale_revision = client.get("/api/config/bootstrap").json()["config_revision"]
+        create_response = client.post(
+            "/api/config/providers",
+            headers={"If-Match": stale_revision},
+            json={"name": "OpenAI Main", "kind": "openai", "api_key": "test-key"},
+        )
+        assert create_response.status_code == 200
+
+        stale_update = client.post(
+            "/api/config/providers",
+            headers={"If-Match": stale_revision},
+            json={"name": "xAI Main", "kind": "xai", "api_key": "x-key"},
+        )
+        assert stale_update.status_code == 409
+
+
+def test_provider_update_rejects_dual_secret_mutation() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        revision = client.get("/api/config/bootstrap").json()["config_revision"]
+        create_response = client.post(
+            "/api/config/providers",
+            headers={"If-Match": revision},
+            json={"name": "OpenAI Main", "kind": "openai", "api_key": "test-key"},
+        )
+        assert create_response.status_code == 200
+        revision = create_response.json()["config_revision"]
+
+        update_response = client.patch(
+            "/api/config/providers/openai-main",
+            headers={"If-Match": revision},
+            json={"api_key": "next-key", "api_key_env": "OPENAI_API_KEY"},
+        )
+        assert update_response.status_code == 400
 
 
 def test_file_search_endpoint_returns_workspace_matches(tmp_path, monkeypatch) -> None:
@@ -177,6 +313,66 @@ def test_task_creation_rejects_blank_title() -> None:
     assert response.status_code == 422
 
 
+def test_task_contract_includes_model_profile_binding_and_null_patch_semantics(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "saved-openai-key")
+    runtime_args = _runtime_args("web")
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key_env="OPENAI_API_KEY",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="gpt-5.4-2026-03-05",
+            reasoning_effort="xhigh",
+        )
+    )
+    app = create_app(resolve_runtime(runtime_args), runtime_args=runtime_args)
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4-2026-03-05",
+            "Saved chat",
+        )
+
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/api/tasks",
+            json={
+                "title": "Task A",
+                "prompt": "Investigate",
+                "session_id": session_id,
+                "profile_id": "analysis",
+            },
+        )
+        assert create_response.status_code == 200
+        payload = create_response.json()["task"]
+        assert payload["profile_id"] == "analysis"
+        assert payload["runtime_summary"]["profile_id"] == "analysis"
+        assert payload["runtime_summary"]["model"] == "gpt-5.4-2026-03-05"
+        task_id = payload["task_id"]
+
+        update_response = client.patch(
+            f"/api/tasks/{task_id}",
+            json={"session_id": None, "profile_id": None},
+        )
+        assert update_response.status_code == 200
+        updated = update_response.json()["task"]
+        assert updated["session_id"] is None
+        assert updated["profile_id"] is None
+
+
 def test_chat_session_stream_replays_state_events() -> None:
     with patch("pbi_agent.web.session_manager.run_chat_loop", return_value=0):
         app = create_app(_settings())
@@ -189,11 +385,335 @@ def test_chat_session_stream_replays_state_events() -> None:
             with client.websocket_connect(
                 f"/api/events/{live_session_id}"
             ) as websocket:
-                events = [websocket.receive_json(), websocket.receive_json()]
+                events = [websocket.receive_json() for _ in range(3)]
 
-    assert all(event["type"] == "session_state" for event in events)
-    assert {event["payload"]["state"] for event in events}.issuperset({"starting"})
-    assert {event["payload"]["state"] for event in events} & {"running", "ended"}
+    state_events = [event for event in events if event["type"] == "session_state"]
+    assert state_events
+    assert {event["payload"]["state"] for event in state_events}.issuperset(
+        {"starting"}
+    )
+    assert {event["payload"]["state"] for event in state_events} & {"running", "ended"}
+
+
+def test_chat_session_creation_with_model_profile_exposes_runtime_binding(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "saved-openai-key")
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key_env="OPENAI_API_KEY",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="gpt-5.4-2026-03-05",
+            reasoning_effort="xhigh",
+        )
+    )
+    runtime_args = _runtime_args("web")
+
+    with patch("pbi_agent.web.session_manager.run_chat_loop", return_value=0):
+        app = create_app(resolve_runtime(runtime_args), runtime_args=runtime_args)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/chat/session",
+                json={"profile_id": "analysis"},
+            )
+            assert response.status_code == 200
+            payload = response.json()["session"]
+            assert payload["profile_id"] == "analysis"
+            assert payload["model"] == "gpt-5.4-2026-03-05"
+
+            live_session_id = payload["live_session_id"]
+            events = app.state.manager.get_event_stream(live_session_id).snapshot()
+
+    runtime_events = [
+        event for event in events if event["type"] == "session_runtime_updated"
+    ]
+    assert runtime_events
+    assert runtime_events[0]["payload"]["profile_id"] == "analysis"
+    assert runtime_events[0]["payload"]["model"] == "gpt-5.4-2026-03-05"
+
+
+def test_chat_input_profile_override_emits_runtime_update(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "saved-openai-key")
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key_env="OPENAI_API_KEY",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="gpt-5.4-2026-03-05",
+            reasoning_effort="xhigh",
+        )
+    )
+    runtime_args = _runtime_args("web")
+    queued_values: list[object] = []
+
+    def fake_run_chat_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        queued_values.append(display.user_prompt())
+        queued_values.append(display.user_prompt())
+        return 0
+
+    with patch("pbi_agent.web.session_manager.run_chat_loop", fake_run_chat_loop):
+        app = create_app(resolve_runtime(runtime_args), runtime_args=runtime_args)
+
+        with TestClient(app) as client:
+            response = client.post("/api/chat/session", json={})
+            assert response.status_code == 200
+            live_session_id = response.json()["session"]["live_session_id"]
+
+            submit_response = client.post(
+                f"/api/chat/session/{live_session_id}/input",
+                json={
+                    "text": "hello",
+                    "file_paths": [],
+                    "image_paths": [],
+                    "image_upload_ids": [],
+                    "profile_id": "analysis",
+                },
+            )
+            assert submit_response.status_code == 200
+            events = app.state.manager.get_event_stream(live_session_id).snapshot()
+
+    assert isinstance(queued_values[0], QueuedRuntimeChange)
+    assert queued_values[1] == "hello"
+    runtime_events = [
+        event for event in events if event["type"] == "session_runtime_updated"
+    ]
+    assert runtime_events[-1]["payload"]["profile_id"] == "analysis"
+
+
+def test_set_chat_session_profile_emits_runtime_update(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "saved-openai-key")
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key_env="OPENAI_API_KEY",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="gpt-5.4-2026-03-05",
+            reasoning_effort="xhigh",
+        )
+    )
+    runtime_args = _runtime_args("web")
+    queued_values: list[object] = []
+
+    def fake_run_chat_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        queued_values.append(display.user_prompt())
+        queued_values.append(display.user_prompt())
+        return 0
+
+    with patch("pbi_agent.web.session_manager.run_chat_loop", fake_run_chat_loop):
+        app = create_app(resolve_runtime(runtime_args), runtime_args=runtime_args)
+
+        with TestClient(app) as client:
+            response = client.post("/api/chat/session", json={})
+            assert response.status_code == 200
+            live_session_id = response.json()["session"]["live_session_id"]
+
+            update_response = client.put(
+                f"/api/chat/session/{live_session_id}/profile",
+                json={"profile_id": "analysis"},
+            )
+            assert update_response.status_code == 200
+            payload = update_response.json()["session"]
+            assert payload["profile_id"] == "analysis"
+            assert payload["model"] == "gpt-5.4-2026-03-05"
+
+            events = app.state.manager.get_event_stream(live_session_id).snapshot()
+
+    assert isinstance(queued_values[0], QueuedRuntimeChange)
+    runtime_events = [
+        event for event in events if event["type"] == "session_runtime_updated"
+    ]
+    assert runtime_events[-1]["payload"]["profile_id"] == "analysis"
+
+
+def test_chat_session_resume_uses_saved_session_runtime(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    monkeypatch.setenv("OPENAI_API_KEY", "env-openai-key")
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key_env="OPENAI_API_KEY",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="gpt-5.4-2026-03-05",
+            reasoning_effort="xhigh",
+        )
+    )
+    runtime_args = _runtime_args("web")
+    observed_runtime = None
+
+    def fake_run_chat_loop(_settings, display, *, resume_session_id=None):
+        nonlocal observed_runtime
+        del display, resume_session_id
+        observed_runtime = _settings
+        return 0
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4-2026-03-05",
+            "saved chat",
+            provider_id="openai-main",
+            profile_id="analysis",
+        )
+
+    with patch("pbi_agent.web.session_manager.run_chat_loop", fake_run_chat_loop):
+        app = create_app(resolve_runtime(runtime_args), runtime_args=runtime_args)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/chat/session",
+                json={"resume_session_id": session_id},
+            )
+
+    assert response.status_code == 200
+    assert observed_runtime is not None
+    assert observed_runtime.profile_id == "analysis"
+    assert observed_runtime.provider_id == "openai-main"
+    assert observed_runtime.settings.model == "gpt-5.4-2026-03-05"
+
+
+def test_get_session_detail_returns_saved_history(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Saved chat",
+        )
+        store.add_message(session_id, "user", "Hello", file_paths=["notes.md"])
+        store.add_message(session_id, "assistant", "Hi there")
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/sessions/{session_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session"]["session_id"] == session_id
+    assert payload["history_items"] == [
+        {
+            "item_id": "history-1",
+            "role": "user",
+            "content": "Hello",
+            "file_paths": ["notes.md"],
+            "image_attachments": [],
+            "markdown": False,
+            "historical": True,
+            "created_at": payload["history_items"][0]["created_at"],
+        },
+        {
+            "item_id": "history-2",
+            "role": "assistant",
+            "content": "Hi there",
+            "file_paths": [],
+            "image_attachments": [],
+            "markdown": True,
+            "historical": True,
+            "created_at": payload["history_items"][1]["created_at"],
+        },
+    ]
+    assert payload["live_session"] is None
+
+
+def test_get_session_detail_returns_not_found_for_unknown_session() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.get("/api/sessions/missing-session")
+
+    assert response.status_code == 404
+
+
+def test_create_chat_session_rejects_unknown_resume_session() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/chat/session",
+            json={"resume_session_id": "missing-session"},
+        )
+
+    assert response.status_code == 404
+
+
+def test_create_chat_session_reuses_active_live_session_for_saved_chat(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+
+    def fake_run_chat_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        display.user_prompt()
+        return 0
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Saved chat",
+        )
+
+    with patch("pbi_agent.web.session_manager.run_chat_loop", fake_run_chat_loop):
+        app = create_app(_settings())
+
+        with TestClient(app) as client:
+            first_response = client.post(
+                "/api/chat/session",
+                json={"resume_session_id": session_id},
+            )
+            second_response = client.post(
+                "/api/chat/session",
+                json={"resume_session_id": session_id},
+            )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert (
+        first_response.json()["session"]["live_session_id"]
+        == second_response.json()["session"]["live_session_id"]
+    )
 
 
 def test_chat_session_stream_replays_session_identity_event() -> None:
@@ -366,7 +886,7 @@ def test_delete_session_endpoint_removes_session_and_clears_task_links(
     assert tasks_response.json()["tasks"][0]["session_id"] is None
 
 
-def test_delete_session_endpoint_rejects_provider_mismatch(
+def test_delete_session_endpoint_accepts_saved_sessions_from_any_provider(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -384,7 +904,7 @@ def test_delete_session_endpoint_rejects_provider_mismatch(
     with TestClient(app) as client:
         response = client.delete(f"/api/sessions/{session_id}")
 
-    assert response.status_code == 404
+    assert response.status_code == 204
 
 
 def test_event_stream_treats_cancelled_error_as_clean_disconnect() -> None:

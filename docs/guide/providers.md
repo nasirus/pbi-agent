@@ -5,11 +5,74 @@ description: 'Provider selection, key resolution, endpoint overrides, history mo
 
 # Provider Configuration
 
-Provider selection resolves in this order: `--provider`, then `PBI_AGENT_PROVIDER`, then the last-used provider from internal config, then the default `openai`.
+Saved configuration is split into two entities:
 
-For provider-scoped settings such as API key, model, retry limits, and token limits, resolution prefers CLI flags, then environment variables, then the saved config for the selected provider, then provider defaults. API keys still fall back to the provider-specific environment variable before saved config.
+- Provider: connection-only settings such as provider kind, API key, and endpoint overrides.
+- Model Profile: runnable model/runtime settings tied to one saved Provider.
+
+Runtime resolution now happens in two phases:
+
+1. Select a base model profile from `--model-profile`, then `PBI_AGENT_MODEL_PROFILE`, then the saved `active_model_profile`.
+2. Compile that profile and its provider into runtime `Settings`, then overlay explicit CLI and environment overrides.
+
+If no saved profile is selected, runtime settings fall back directly to CLI flags, environment variables, and provider defaults. The old provider-scoped saved runtime snapshot is no longer used, and runtime commands do not rewrite saved config.
+
+API key precedence remains: `--api-key`, then `PBI_AGENT_API_KEY`, then the provider-specific fallback env var, then the saved Provider API key.
 
 `sub_agent` uses the same provider as the parent session. Its sub-model defaults to a provider-specific sub-agent model from `config.py`, and you can override it independently with `--sub-agent-model` or `PBI_AGENT_SUB_AGENT_MODEL`.
+
+## Saved Config Workflow
+
+```bash
+uv run pbi-agent config providers create \
+  --name "OpenAI Main" \
+  --kind openai \
+  --api-key sk-...
+
+uv run pbi-agent config profiles create \
+  --name analysis \
+  --provider-id openai-main \
+  --model gpt-5.4 \
+  --sub-agent-model gpt-5.4-mini \
+  --reasoning-effort xhigh
+
+uv run pbi-agent config profiles select analysis
+uv run pbi-agent web
+```
+
+## Internal Config Shape
+
+```json
+{
+  "providers": [
+    {
+      "id": "openai-main",
+      "name": "OpenAI Main",
+      "kind": "openai",
+      "api_key": "sk-...",
+      "responses_url": "https://api.openai.com/v1/responses",
+      "generic_api_url": null
+    }
+  ],
+  "model_profiles": [
+    {
+      "id": "analysis",
+      "name": "Analysis",
+      "provider_id": "openai-main",
+      "model": "gpt-5.4",
+      "sub_agent_model": "gpt-5.4-mini",
+      "reasoning_effort": "xhigh",
+      "max_tokens": 16384,
+      "service_tier": null,
+      "web_search": true,
+      "max_tool_workers": 4,
+      "max_retries": 3,
+      "compact_threshold": 150000
+    }
+  ],
+  "active_model_profile": "analysis"
+}
+```
 
 ## Provider Matrix
 

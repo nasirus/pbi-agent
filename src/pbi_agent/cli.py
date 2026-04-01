@@ -17,10 +17,23 @@ from urllib.parse import urlparse
 
 from pbi_agent.config import (
     ConfigError,
+    ModelProfileConfig,
     OPENAI_SERVICE_TIERS,
+    PROVIDER_KINDS,
+    ProviderConfig,
+    ResolvedRuntime,
     Settings,
-    resolve_settings,
-    save_internal_config,
+    create_model_profile_config,
+    create_provider_config,
+    delete_model_profile_config,
+    delete_provider_config,
+    list_model_profile_configs,
+    list_provider_configs,
+    resolve_runtime,
+    select_active_model_profile,
+    slugify,
+    update_model_profile_config,
+    update_provider_config,
 )
 from pbi_agent.init_command import init_report
 from pbi_agent.log_config import configure_logging
@@ -106,6 +119,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     model_group = parser.add_argument_group("Model behavior")
+    model_group.add_argument(
+        "--profile-id",
+        dest="profile_id",
+        default=None,
+        help="Select a saved profile ID before applying explicit overrides.",
+    )
     model_group.add_argument(
         "--model",
         help="Override the provider model; omit this for generic default routing.",
@@ -290,6 +309,196 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing files if they already exist.",
     )
 
+    config_parser = add_command_parser(
+        "config", "Manage saved providers and model profiles."
+    )
+    config_subparsers = config_parser.add_subparsers(
+        dest="config_scope",
+        required=True,
+        metavar="<scope>",
+    )
+
+    providers_parser = config_subparsers.add_parser(
+        "providers",
+        prog="pbi-agent config providers",
+        description="Manage saved provider connection settings.",
+        help="Manage saved providers.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_actions = providers_parser.add_subparsers(
+        dest="config_action",
+        required=True,
+        metavar="<action>",
+    )
+    providers_actions.add_parser(
+        "list",
+        prog="pbi-agent config providers list",
+        description="List saved providers.",
+        help="List saved providers.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_create = providers_actions.add_parser(
+        "create",
+        prog="pbi-agent config providers create",
+        description="Create a saved provider.",
+        help="Create a saved provider.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_create.add_argument("--name", required=True, help="Display name.")
+    providers_create.add_argument(
+        "--id",
+        default=None,
+        help="Stable provider ID slug. Defaults to a slug derived from --name.",
+    )
+    providers_create.add_argument(
+        "--kind",
+        choices=list(PROVIDER_KINDS),
+        required=True,
+        help="Provider backend kind.",
+    )
+    providers_create.add_argument("--api-key", dest="provider_api_key")
+    providers_create.add_argument("--responses-url")
+    providers_create.add_argument("--generic-api-url")
+
+    providers_update = providers_actions.add_parser(
+        "update",
+        prog="pbi-agent config providers update",
+        description="Update a saved provider.",
+        help="Update a saved provider.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_update.add_argument("provider_id", help="Provider ID.")
+    providers_update.add_argument("--name", default=None, help="Display name.")
+    providers_update.add_argument(
+        "--kind",
+        choices=list(PROVIDER_KINDS),
+        default=None,
+        help="Provider backend kind.",
+    )
+    providers_update.add_argument("--api-key", dest="provider_api_key", default=None)
+    providers_update.add_argument("--responses-url", default=None)
+    providers_update.add_argument("--generic-api-url", default=None)
+
+    providers_delete = providers_actions.add_parser(
+        "delete",
+        prog="pbi-agent config providers delete",
+        description="Delete a saved provider.",
+        help="Delete a saved provider.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_delete.add_argument("provider_id", help="Provider ID.")
+
+    profiles_parser = config_subparsers.add_parser(
+        "profiles",
+        prog="pbi-agent config profiles",
+        description="Manage saved model profiles.",
+        help="Manage saved model profiles.",
+        formatter_class=CleanHelpFormatter,
+    )
+    profiles_actions = profiles_parser.add_subparsers(
+        dest="config_action",
+        required=True,
+        metavar="<action>",
+    )
+    profiles_actions.add_parser(
+        "list",
+        prog="pbi-agent config profiles list",
+        description="List saved model profiles.",
+        help="List saved model profiles.",
+        formatter_class=CleanHelpFormatter,
+    )
+
+    def add_profile_options(
+        target: argparse.ArgumentParser, *, require_provider_id: bool
+    ) -> None:
+        target.add_argument(
+            "--provider-id",
+            required=require_provider_id,
+            default=None,
+            help="Saved provider ID backing this profile.",
+        )
+        target.add_argument("--model", default=None, help="Main model.")
+        target.add_argument(
+            "--sub-agent-model",
+            dest="sub_agent_model",
+            default=None,
+            help="Sub-agent model override.",
+        )
+        target.add_argument(
+            "--reasoning-effort",
+            choices=["low", "medium", "high", "xhigh"],
+            default=None,
+            help="Requested reasoning effort.",
+        )
+        target.add_argument("--max-tokens", type=int, default=None)
+        target.add_argument(
+            "--service-tier",
+            choices=list(OPENAI_SERVICE_TIERS),
+            default=None,
+            help="OpenAI service tier.",
+        )
+        web_search_group = target.add_mutually_exclusive_group()
+        web_search_group.add_argument(
+            "--web-search",
+            dest="web_search",
+            action="store_true",
+            default=None,
+            help="Enable native web search for this profile.",
+        )
+        web_search_group.add_argument(
+            "--no-web-search",
+            dest="web_search",
+            action="store_false",
+            help="Disable native web search for this profile.",
+        )
+        target.add_argument("--max-tool-workers", type=int, default=None)
+        target.add_argument("--max-retries", type=int, default=None)
+        target.add_argument("--compact-threshold", type=int, default=None)
+
+    profiles_create = profiles_actions.add_parser(
+        "create",
+        prog="pbi-agent config profiles create",
+        description="Create a saved model profile.",
+        help="Create a saved model profile.",
+        formatter_class=CleanHelpFormatter,
+    )
+    profiles_create.add_argument("--name", required=True, help="Display name.")
+    profiles_create.add_argument(
+        "--id",
+        default=None,
+        help="Stable model profile ID slug. Defaults to a slug derived from --name.",
+    )
+    add_profile_options(profiles_create, require_provider_id=True)
+
+    profiles_update = profiles_actions.add_parser(
+        "update",
+        prog="pbi-agent config profiles update",
+        description="Update a saved model profile.",
+        help="Update a saved model profile.",
+        formatter_class=CleanHelpFormatter,
+    )
+    profiles_update.add_argument("profile_id", help="Model profile ID.")
+    profiles_update.add_argument("--name", default=None, help="Display name.")
+    add_profile_options(profiles_update, require_provider_id=False)
+
+    profiles_delete = profiles_actions.add_parser(
+        "delete",
+        prog="pbi-agent config profiles delete",
+        description="Delete a saved model profile.",
+        help="Delete a saved model profile.",
+        formatter_class=CleanHelpFormatter,
+    )
+    profiles_delete.add_argument("profile_id", help="Model profile ID.")
+
+    profiles_select = profiles_actions.add_parser(
+        "select",
+        prog="pbi-agent config profiles select",
+        description="Set the active saved model profile.",
+        help="Select the active model profile.",
+        formatter_class=CleanHelpFormatter,
+    )
+    profiles_select.add_argument("profile_id", help="Model profile ID.")
+
     return parser
 
 
@@ -372,19 +581,30 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "sessions":
         return _handle_sessions_command(args)
 
+    if args.command == "config":
+        try:
+            return _handle_config_command(args)
+        except ConfigError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+
     if args.command == "run" and args.session_id:
         _run_session = _load_session_record(args.session_id)
         if _run_session is None:
             return 1
         args.project_dir = _run_session.directory
-        args.provider = _run_session.provider
-        if not args.model:
+        if _run_session.profile_id:
+            args.profile_id = _run_session.profile_id
+        else:
+            args.provider = _run_session.provider
+        if not args.model and not _run_session.profile_id:
             args.model = _run_session.model
 
     # ---- resolve settings for commands that need a provider ----
 
     try:
-        settings = resolve_settings(args)
+        runtime = resolve_runtime(args)
+        settings = runtime.settings
         configure_logging(settings.verbose)
         settings.validate()
     except ConfigError as exc:
@@ -392,19 +612,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     LOGGER.debug("Resolved settings: %s", settings.redacted())
-    try:
-        save_internal_config(settings)
-    except OSError as exc:
-        LOGGER.warning("Unable to persist internal config: %s", exc)
 
     if args.command == "run":
-        return _handle_run_command(args, settings)
+        return _handle_run_command(args, runtime)
 
     if args.command == "audit":
-        return _handle_audit_command(args, settings)
+        return _handle_audit_command(args, runtime)
 
     if args.command == "web":
-        return _handle_web_command(args, settings)
+        return _handle_web_command(args, runtime)
 
     parser.error("Unknown command.")
     return 1
@@ -413,6 +629,165 @@ def main(argv: list[str] | None = None) -> int:
 # ---------------------------------------------------------------------------
 # Command handlers
 # ---------------------------------------------------------------------------
+
+
+def _handle_config_command(args: argparse.Namespace) -> int:
+    if args.config_scope == "providers":
+        return _handle_config_providers_command(args)
+    if args.config_scope == "profiles":
+        return _handle_config_profiles_command(args)
+    raise ConfigError(f"Unknown config scope '{args.config_scope}'.")
+
+
+def _handle_config_providers_command(args: argparse.Namespace) -> int:
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+
+    if args.config_action == "list":
+        providers = list_provider_configs()
+        if not providers:
+            console.print("[dim]No saved providers.[/dim]")
+            return 0
+        table = Table(title="Saved Providers", title_style="bold cyan")
+        table.add_column("ID", style="green")
+        table.add_column("Name")
+        table.add_column("Kind", style="yellow")
+        table.add_column("API Key")
+        table.add_column("Responses URL")
+        table.add_column("Generic API URL")
+        for provider in providers:
+            table.add_row(
+                provider.id,
+                provider.name,
+                provider.kind,
+                _display_secret(provider.api_key),
+                provider.responses_url or "",
+                provider.generic_api_url or "",
+            )
+        console.print(table)
+        return 0
+
+    if args.config_action == "create":
+        provider, _ = create_provider_config(
+            ProviderConfig(
+                id=slugify(args.id or args.name),
+                name=args.name,
+                kind=args.kind,
+                api_key=args.provider_api_key or "",
+                responses_url=args.responses_url,
+                generic_api_url=args.generic_api_url,
+            )
+        )
+        print(f"Created provider '{provider.id}'.")
+        return 0
+
+    if args.config_action == "update":
+        provider, _ = update_provider_config(
+            args.provider_id,
+            name=args.name,
+            kind=args.kind,
+            api_key=args.provider_api_key,
+            responses_url=args.responses_url,
+            generic_api_url=args.generic_api_url,
+        )
+        print(f"Updated provider '{provider.id}'.")
+        return 0
+
+    if args.config_action == "delete":
+        delete_provider_config(args.provider_id)
+        print(f"Deleted provider '{slugify(args.provider_id)}'.")
+        return 0
+
+    raise ConfigError(f"Unknown providers action '{args.config_action}'.")
+
+
+def _handle_config_profiles_command(args: argparse.Namespace) -> int:
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+
+    if args.config_action == "list":
+        profiles, active_profile_id = list_model_profile_configs()
+        if not profiles:
+            console.print("[dim]No saved model profiles.[/dim]")
+            return 0
+        table = Table(title="Saved Model Profiles", title_style="bold cyan")
+        table.add_column("ID", style="green")
+        table.add_column("Active", style="yellow")
+        table.add_column("Name")
+        table.add_column("Provider", style="yellow")
+        table.add_column("Model")
+        table.add_column("Sub-Agent")
+        table.add_column("Reasoning")
+        for profile in profiles:
+            table.add_row(
+                profile.id,
+                "yes" if profile.id == active_profile_id else "",
+                profile.name,
+                profile.provider_id,
+                profile.model or "",
+                profile.sub_agent_model or "",
+                profile.reasoning_effort or "",
+            )
+        console.print(table)
+        return 0
+
+    if args.config_action == "create":
+        profile, _ = create_model_profile_config(
+            ModelProfileConfig(
+                id=slugify(args.id or args.name),
+                name=args.name,
+                provider_id=args.provider_id,
+                model=args.model,
+                sub_agent_model=args.sub_agent_model,
+                reasoning_effort=args.reasoning_effort,
+                max_tokens=args.max_tokens,
+                service_tier=args.service_tier,
+                web_search=args.web_search,
+                max_tool_workers=args.max_tool_workers,
+                max_retries=args.max_retries,
+                compact_threshold=args.compact_threshold,
+            )
+        )
+        print(f"Created model profile '{profile.id}'.")
+        return 0
+
+    if args.config_action == "update":
+        profile, _ = update_model_profile_config(
+            args.profile_id,
+            name=args.name,
+            provider_id=args.provider_id,
+            model=args.model,
+            sub_agent_model=args.sub_agent_model,
+            reasoning_effort=args.reasoning_effort,
+            max_tokens=args.max_tokens,
+            service_tier=args.service_tier,
+            web_search=args.web_search,
+            max_tool_workers=args.max_tool_workers,
+            max_retries=args.max_retries,
+            compact_threshold=args.compact_threshold,
+        )
+        print(f"Updated model profile '{profile.id}'.")
+        return 0
+
+    if args.config_action == "delete":
+        delete_model_profile_config(args.profile_id)
+        print(f"Deleted model profile '{slugify(args.profile_id)}'.")
+        return 0
+
+    if args.config_action == "select":
+        active_id, _ = select_active_model_profile(args.profile_id)
+        print(f"Selected model profile '{active_id}'.")
+        return 0
+
+    raise ConfigError(f"Unknown profiles action '{args.config_action}'.")
+
+
+def _display_secret(value: str) -> str:
+    return value and f"{value[:4]}...{value[-4:]}" if value else ""
 
 
 def _handle_skills_flag(args: argparse.Namespace) -> int:
@@ -503,7 +878,17 @@ def _workspace_directory_for_args(args: argparse.Namespace) -> Path:
     return Path.cwd().resolve()
 
 
-def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
+def _coerce_runtime(settings: Settings | ResolvedRuntime) -> ResolvedRuntime:
+    if isinstance(settings, ResolvedRuntime):
+        return settings
+    return ResolvedRuntime(settings=settings, provider_id="", profile_id="")
+
+
+def _handle_run_command(
+    args: argparse.Namespace,
+    settings: Settings | ResolvedRuntime,
+) -> int:
+    runtime = _coerce_runtime(settings)
     project_dir = (Path.cwd() / args.project_dir).resolve()
 
     if not project_dir.exists():
@@ -524,7 +909,7 @@ def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
         os.chdir(project_dir)
         return _run_single_turn_command(
             prompt=args.prompt,
-            settings=settings,
+            settings=runtime,
             image_paths=list(args.images or []),
             resume_session_id=args.session_id,
         )
@@ -532,7 +917,11 @@ def _handle_run_command(args: argparse.Namespace, settings: Settings) -> int:
         os.chdir(original_cwd)
 
 
-def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
+def _handle_audit_command(
+    args: argparse.Namespace,
+    settings: Settings | ResolvedRuntime,
+) -> int:
+    runtime = _coerce_runtime(settings)
     from pbi_agent.agent.error_formatting import format_user_facing_error
     from pbi_agent.agent.audit_prompt import (
         AUDIT_REPORT_FILENAME,
@@ -557,7 +946,7 @@ def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
         copy_audit_todo(report_dir)
         exit_code = _run_single_turn_command(
             prompt=build_audit_prompt(),
-            settings=settings,
+            settings=runtime,
             single_turn_hint=(
                 f"Audit mode: Evaluating report and writing "
                 f"{AUDIT_TODO_FILENAME} progress tracker and "
@@ -591,7 +980,7 @@ def _handle_audit_command(args: argparse.Namespace, settings: Settings) -> int:
 def _run_single_turn_command(
     *,
     prompt: str,
-    settings: Settings,
+    settings: Settings | ResolvedRuntime,
     single_turn_hint: str | None = None,
     image_paths: list[str] | None = None,
     resume_session_id: str | None = None,
@@ -600,12 +989,13 @@ def _run_single_turn_command(
     from pbi_agent.agent.session import run_single_turn
     from pbi_agent.display.console_display import ConsoleDisplay
 
-    display = ConsoleDisplay(verbose=settings.verbose)
+    runtime = _coerce_runtime(settings)
+    display = ConsoleDisplay(verbose=runtime.settings.verbose)
 
     try:
         outcome = run_single_turn(
             prompt,
-            settings,
+            runtime,
             display,
             single_turn_hint=single_turn_hint,
             image_paths=image_paths,
@@ -665,7 +1055,11 @@ def _temporary_env_overrides(env_updates: dict[str, str]):
                 os.environ[key] = old_value
 
 
-def _handle_web_command(args: argparse.Namespace, settings: Settings) -> int:
+def _handle_web_command(
+    args: argparse.Namespace,
+    settings: Settings | ResolvedRuntime,
+) -> int:
+    runtime = _coerce_runtime(settings)
     if args.port < 1 or args.port > 65535:
         print("Error: --port must be between 1 and 65535.", file=sys.stderr)
         return 2
@@ -676,10 +1070,10 @@ def _handle_web_command(args: argparse.Namespace, settings: Settings) -> int:
 
     server = _create_web_server(
         args,
-        settings,
+        runtime,
     )
     try:
-        with _temporary_env_overrides(_settings_env(settings)):
+        with _temporary_env_overrides(_settings_env(runtime.settings)):
             server.serve(debug=args.dev)
             return 0
     except KeyboardInterrupt:
@@ -792,11 +1186,17 @@ def _open_url_in_windows_browser(browser_url: str) -> bool:
     return False
 
 
-def _create_web_server(args: argparse.Namespace, settings: Settings) -> object:
+def _create_web_server(
+    args: argparse.Namespace,
+    settings: Settings | ResolvedRuntime,
+) -> object:
     from pbi_agent.web.serve import PBIWebServer
 
+    runtime = _coerce_runtime(settings)
+
     return PBIWebServer(
-        settings=settings,
+        settings=runtime,
+        runtime_args=args,
         host=args.host,
         port=args.port,
         title=args.title,

@@ -25,6 +25,7 @@ from pbi_agent.models.messages import (
     WebSearchSource,
 )
 from pbi_agent.providers.base import Provider
+from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.catalog import ToolCatalog
 from pbi_agent.tools.types import ParentContextSnapshot, ToolContext
 from pbi_agent.display.protocol import DisplayProtocol
@@ -77,6 +78,7 @@ class GoogleProvider(Provider):
         self._instructions = system_prompt or get_system_prompt()
         self._previous_interaction_id: str | None = None
         self._branch_interaction_id: str | None = None
+        self._restored_input: list[dict[str, Any]] = []
 
     @property
     def settings(self) -> Settings:
@@ -99,6 +101,7 @@ class GoogleProvider(Provider):
     def reset_conversation(self) -> None:
         self._previous_interaction_id = None
         self._branch_interaction_id = None
+        self._restored_input.clear()
 
     def set_system_prompt(self, system_prompt: str) -> None:
         self._instructions = system_prompt
@@ -110,6 +113,19 @@ class GoogleProvider(Provider):
         )
         if self._settings.web_search:
             self._tools.append({"type": "google_search"})
+
+    def restore_messages(self, messages: list[MessageRecord]) -> None:
+        restored_input: list[dict[str, Any]] = []
+        for message in messages:
+            if message.role not in {"user", "assistant"} or not message.content:
+                continue
+            restored_input.append(
+                {
+                    "role": "model" if message.role == "assistant" else "user",
+                    "content": message.content,
+                }
+            )
+        self._restored_input = restored_input
 
     def request_turn(
         self,
@@ -356,9 +372,25 @@ class GoogleProvider(Provider):
         input_value: str | list[dict[str, Any]],
         instructions: str | None,
     ) -> dict[str, Any]:
+        request_input = (
+            [*self._restored_input, *input_value]
+            if isinstance(input_value, list)
+            and self._restored_input
+            and not self._previous_interaction_id
+            else input_value
+        )
+        if (
+            isinstance(input_value, str)
+            and self._restored_input
+            and not self._previous_interaction_id
+        ):
+            request_input = [
+                *self._restored_input,
+                {"role": "user", "content": input_value},
+            ]
         body: dict[str, Any] = {
             "model": self._settings.model,
-            "input": input_value,
+            "input": request_input,
             "tools": self._tools,
             "stream": False,
             "store": True,

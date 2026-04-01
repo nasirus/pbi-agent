@@ -1,6 +1,13 @@
 import { create } from "zustand";
 
-import type { ImageAttachment, TimelineItem, UsagePayload, WebEvent } from "./types";
+import type {
+  ImageAttachment,
+  LiveSession,
+  LiveSessionRuntime,
+  TimelineItem,
+  UsagePayload,
+  WebEvent,
+} from "./types";
 
 type ConnectionState = "disconnected" | "connecting" | "connected";
 
@@ -12,6 +19,7 @@ type SubAgentState = {
 type ChatState = {
   liveSessionId: string | null;
   resumeSessionId: string | null;
+  runtime: LiveSessionRuntime | null;
   connection: ConnectionState;
   inputEnabled: boolean;
   waitMessage: string | null;
@@ -23,16 +31,23 @@ type ChatState = {
   itemsVersion: number;
   subAgents: Record<string, SubAgentState>;
   lastEventSeq: number;
-  switchLiveSession: (liveSessionId: string, resumeSessionId?: string | null) => void;
+  setRouteState: (resumeSessionId: string | null, items?: TimelineItem[]) => void;
+  attachLiveSession: (session: LiveSession, preserveItems?: boolean) => void;
+  updateRuntimeFromSession: (session: LiveSession) => void;
   setConnection: (connection: ConnectionState) => void;
   clearTimeline: () => void;
   applyEvent: (event: WebEvent) => void;
 };
 
-const storedLiveSessionId =
-  typeof window === "undefined"
-    ? null
-    : window.localStorage.getItem("pbi-agent-live-session-id");
+function runtimeFromSession(session: LiveSession): LiveSessionRuntime {
+  return {
+    provider_id: session.provider_id,
+    profile_id: session.profile_id,
+    provider: session.provider,
+    model: session.model,
+    reasoning_effort: session.reasoning_effort,
+  };
+}
 
 function upsertItem(items: TimelineItem[], nextItem: TimelineItem): TimelineItem[] {
   const index = items.findIndex((item) => item.itemId === nextItem.itemId);
@@ -45,8 +60,9 @@ function upsertItem(items: TimelineItem[], nextItem: TimelineItem): TimelineItem
 }
 
 export const useChatStore = create<ChatState>((set) => ({
-  liveSessionId: storedLiveSessionId,
+  liveSessionId: null,
   resumeSessionId: null,
+  runtime: null,
   connection: "disconnected",
   inputEnabled: false,
   waitMessage: null,
@@ -58,11 +74,11 @@ export const useChatStore = create<ChatState>((set) => ({
   itemsVersion: 0,
   subAgents: {},
   lastEventSeq: 0,
-  switchLiveSession: (liveSessionId, resumeSessionId = null) => {
-    window.localStorage.setItem("pbi-agent-live-session-id", liveSessionId);
+  setRouteState: (resumeSessionId, items = []) =>
     set({
-      liveSessionId,
+      liveSessionId: null,
       resumeSessionId,
+      runtime: null,
       connection: "disconnected",
       inputEnabled: false,
       waitMessage: null,
@@ -70,12 +86,32 @@ export const useChatStore = create<ChatState>((set) => ({
       turnUsage: null,
       sessionEnded: false,
       fatalError: null,
-      items: [],
-      itemsVersion: 0,
+      items,
+      itemsVersion: items.length,
       subAgents: {},
       lastEventSeq: 0,
-    });
-  },
+    }),
+  attachLiveSession: (session, preserveItems = false) =>
+    set((state) => ({
+      liveSessionId: session.live_session_id,
+      resumeSessionId: session.resume_session_id,
+      runtime: runtimeFromSession(session),
+      connection: state.connection,
+      inputEnabled: false,
+      waitMessage: null,
+      sessionUsage: null,
+      turnUsage: null,
+      sessionEnded: false,
+      fatalError: null,
+      items: preserveItems ? state.items : [],
+      itemsVersion: preserveItems ? state.itemsVersion : 0,
+      subAgents: {},
+      lastEventSeq: 0,
+    })),
+  updateRuntimeFromSession: (session) =>
+    set({
+      runtime: runtimeFromSession(session),
+    }),
   setConnection: (connection) => set({ connection }),
   clearTimeline: () =>
     set({
@@ -227,6 +263,23 @@ export const useChatStore = create<ChatState>((set) => ({
           } else {
             nextState.sessionEnded = false;
             nextState.fatalError = null;
+          }
+          return { ...state, ...nextState };
+        case "session_runtime_updated":
+          if (
+            typeof payload.provider_id === "string"
+            && typeof payload.profile_id === "string"
+            && typeof payload.provider === "string"
+            && typeof payload.model === "string"
+            && typeof payload.reasoning_effort === "string"
+          ) {
+            nextState.runtime = {
+              provider_id: payload.provider_id,
+              profile_id: payload.profile_id,
+              provider: payload.provider,
+              model: payload.model,
+              reasoning_effort: payload.reasoning_effort,
+            };
           }
           return { ...state, ...nextState };
         default:

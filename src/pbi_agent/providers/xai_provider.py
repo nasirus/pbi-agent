@@ -29,6 +29,7 @@ from pbi_agent.models.messages import (
     WebSearchSource,
 )
 from pbi_agent.providers.base import Provider
+from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.catalog import ToolCatalog
 from pbi_agent.tools.types import ParentContextSnapshot, ToolContext
 from pbi_agent.display.protocol import DisplayProtocol
@@ -82,6 +83,7 @@ class XAIProvider(Provider):
         self.refresh_tools()
         self._instructions = system_prompt or get_system_prompt()
         self._previous_response_id: str | None = None
+        self._restored_input_items: list[dict[str, Any]] = []
 
     @property
     def settings(self) -> Settings:
@@ -105,6 +107,7 @@ class XAIProvider(Provider):
 
     def reset_conversation(self) -> None:
         self._previous_response_id = None
+        self._restored_input_items.clear()
 
     def set_system_prompt(self, system_prompt: str) -> None:
         self._instructions = system_prompt
@@ -115,6 +118,13 @@ class XAIProvider(Provider):
         )
         if self._settings.web_search:
             self._tools.append({"type": "web_search"})
+
+    def restore_messages(self, messages: list[MessageRecord]) -> None:
+        self._restored_input_items = [
+            {"role": message.role, "content": message.content}
+            for message in messages
+            if message.role in {"user", "assistant"} and message.content
+        ]
 
     def request_turn(
         self,
@@ -329,7 +339,11 @@ class XAIProvider(Provider):
         input_items: list[dict[str, Any]],
         instructions: str | None,
     ) -> dict[str, Any]:
-        request_input_items = list(input_items)
+        request_input_items = (
+            [*self._restored_input_items, *input_items]
+            if self._restored_input_items and not self._previous_response_id
+            else list(input_items)
+        )
         if instructions and not self._previous_response_id:
             request_input_items.insert(0, _build_system_input_item(instructions))
 

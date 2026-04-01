@@ -1,13 +1,28 @@
 import type {
   BootstrapPayload,
+  ConfigBootstrapPayload,
   ExpandedChatInput,
   FileMentionItem,
+  HistoryItem,
   ImageAttachment,
   LiveSession,
+  ModelProfileView,
+  ProviderView,
+  SessionDetailPayload,
   SessionRecord,
   SlashCommandItem,
   TaskRecord,
 } from "./types";
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
@@ -15,14 +30,17 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
   const response = await fetch(path, {
-    headers,
     ...init,
+    headers, // must come after ...init so Content-Type is not overwritten
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => ({}))) as {
       detail?: string;
     };
-    throw new Error(payload.detail || `Request failed: ${response.status}`);
+    throw new ApiError(
+      payload.detail || `Request failed: ${response.status}`,
+      response.status,
+    );
   }
   if (response.status === 204) {
     return undefined as T;
@@ -39,6 +57,10 @@ export async function fetchBootstrap(): Promise<BootstrapPayload> {
   return requestJson<BootstrapPayload>("/api/bootstrap");
 }
 
+export async function fetchConfigBootstrap(): Promise<ConfigBootstrapPayload> {
+  return requestJson<ConfigBootstrapPayload>("/api/config/bootstrap");
+}
+
 export async function fetchSessions(): Promise<SessionRecord[]> {
   const result = await requestJson<{ sessions: SessionRecord[] }>("/api/sessions");
   return result.sessions;
@@ -46,6 +68,14 @@ export async function fetchSessions(): Promise<SessionRecord[]> {
 
 export async function deleteSession(sessionId: string): Promise<void> {
   await requestJson<void>(`/api/sessions/${sessionId}`, { method: "DELETE" });
+}
+
+export async function fetchSessionDetail(sessionId: string): Promise<SessionDetailPayload> {
+  return requestJson<{
+    session: SessionRecord;
+    history_items: HistoryItem[];
+    live_session: LiveSession | null;
+  }>(`/api/sessions/${sessionId}`);
 }
 
 export async function searchFileMentions(
@@ -80,6 +110,7 @@ export async function createChatSession(
   payload: Partial<{
     live_session_id: string;
     resume_session_id: string;
+    profile_id: string | null;
   }> = {},
 ): Promise<LiveSession> {
   const result = await requestJson<{ session: LiveSession }>("/api/chat/session", {
@@ -96,6 +127,7 @@ export async function submitChatInput(
     file_paths: string[];
     image_paths: string[];
     image_upload_ids: string[];
+    profile_id?: string | null;
   },
 ): Promise<LiveSession> {
   const result = await requestJson<{ session: LiveSession }>(
@@ -133,10 +165,30 @@ export async function expandChatInput(text: string): Promise<ExpandedChatInput> 
   });
 }
 
-export async function requestNewChat(liveSessionId: string): Promise<LiveSession> {
+export async function requestNewChat(
+  liveSessionId: string,
+  profileId: string | null = null,
+): Promise<LiveSession> {
   const result = await requestJson<{ session: LiveSession }>(
     `/api/chat/session/${liveSessionId}/new-chat`,
-    { method: "POST" },
+    {
+      method: "POST",
+      body: JSON.stringify({ profile_id: profileId }),
+    },
+  );
+  return result.session;
+}
+
+export async function setChatSessionProfile(
+  liveSessionId: string,
+  profileId: string | null,
+): Promise<LiveSession> {
+  const result = await requestJson<{ session: LiveSession }>(
+    `/api/chat/session/${liveSessionId}/profile`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ profile_id: profileId }),
+    },
   );
   return result.session;
 }
@@ -147,7 +199,11 @@ export async function fetchTasks(): Promise<TaskRecord[]> {
 }
 
 export async function createTask(
-  payload: Partial<TaskRecord> & { title: string; prompt: string },
+  payload: Partial<TaskRecord> & {
+    title: string;
+    prompt: string;
+    profile_id?: string | null;
+  },
 ): Promise<TaskRecord> {
   const result = await requestJson<{ task: TaskRecord }>("/api/tasks", {
     method: "POST",
@@ -158,7 +214,7 @@ export async function createTask(
 
 export async function updateTask(
   taskId: string,
-  payload: Partial<TaskRecord> & { clear_session_id?: boolean },
+  payload: Partial<TaskRecord>,
 ): Promise<TaskRecord> {
   const result = await requestJson<{ task: TaskRecord }>(`/api/tasks/${taskId}`, {
     method: "PATCH",
@@ -176,4 +232,121 @@ export async function runTask(taskId: string): Promise<TaskRecord> {
     method: "POST",
   });
   return result.task;
+}
+
+export async function createProvider(
+  payload: {
+    id?: string | null;
+    name: string;
+    kind: string;
+    api_key?: string | null;
+    api_key_env?: string | null;
+    responses_url?: string | null;
+    generic_api_url?: string | null;
+  },
+  configRevision: string,
+): Promise<{ provider: ProviderView; config_revision: string }> {
+  return requestJson("/api/config/providers", {
+    method: "POST",
+    headers: { "If-Match": configRevision },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateProvider(
+  providerId: string,
+  payload: Partial<{
+    name: string | null;
+    kind: string | null;
+    api_key: string | null;
+    api_key_env: string | null;
+    responses_url: string | null;
+    generic_api_url: string | null;
+  }>,
+  configRevision: string,
+): Promise<{ provider: ProviderView; config_revision: string }> {
+  return requestJson(`/api/config/providers/${providerId}`, {
+    method: "PATCH",
+    headers: { "If-Match": configRevision },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteProvider(
+  providerId: string,
+  configRevision: string,
+): Promise<void> {
+  await requestJson(`/api/config/providers/${providerId}`, {
+    method: "DELETE",
+    headers: { "If-Match": configRevision },
+  });
+}
+
+export async function createModelProfile(
+  payload: {
+    id?: string | null;
+    name: string;
+    provider_id: string;
+    model?: string | null;
+    sub_agent_model?: string | null;
+    reasoning_effort?: string | null;
+    max_tokens?: number | null;
+    service_tier?: string | null;
+    web_search?: boolean | null;
+    max_tool_workers?: number | null;
+    max_retries?: number | null;
+    compact_threshold?: number | null;
+  },
+  configRevision: string,
+): Promise<{ model_profile: ModelProfileView; config_revision: string }> {
+  return requestJson("/api/config/model-profiles", {
+    method: "POST",
+    headers: { "If-Match": configRevision },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateModelProfile(
+  modelProfileId: string,
+  payload: Partial<{
+    name: string | null;
+    provider_id: string | null;
+    model: string | null;
+    sub_agent_model: string | null;
+    reasoning_effort: string | null;
+    max_tokens: number | null;
+    service_tier: string | null;
+    web_search: boolean | null;
+    max_tool_workers: number | null;
+    max_retries: number | null;
+    compact_threshold: number | null;
+  }>,
+  configRevision: string,
+): Promise<{ model_profile: ModelProfileView; config_revision: string }> {
+  return requestJson(`/api/config/model-profiles/${modelProfileId}`, {
+    method: "PATCH",
+    headers: { "If-Match": configRevision },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteModelProfile(
+  modelProfileId: string,
+  configRevision: string,
+): Promise<void> {
+  await requestJson(`/api/config/model-profiles/${modelProfileId}`, {
+    method: "DELETE",
+    headers: { "If-Match": configRevision },
+  });
+}
+
+export async function setActiveModelProfile(
+  modelProfileId: string | null,
+  configRevision: string,
+): Promise<{ active_profile_id: string | null; config_revision: string }> {
+  return requestJson("/api/config/active-model-profile", {
+    method: "PUT",
+    headers: { "If-Match": configRevision },
+    body: JSON.stringify({ profile_id: modelProfileId }),
+  });
 }

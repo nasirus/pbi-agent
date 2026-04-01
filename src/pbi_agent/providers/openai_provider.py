@@ -28,6 +28,7 @@ from pbi_agent.models.messages import (
     WebSearchSource,
 )
 from pbi_agent.providers.base import Provider
+from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.catalog import ToolCatalog
 from pbi_agent.tools.types import ParentContextSnapshot, ToolContext
 from pbi_agent.display.protocol import DisplayProtocol
@@ -65,6 +66,7 @@ class OpenAIProvider(Provider):
         self._instructions = system_prompt or get_system_prompt()
         self._previous_response_id: str | None = None
         self._branch_response_id: str | None = None
+        self._restored_input_items: list[dict[str, Any]] = []
 
     @property
     def settings(self) -> Settings:
@@ -90,6 +92,7 @@ class OpenAIProvider(Provider):
     def reset_conversation(self) -> None:
         self._previous_response_id = None
         self._branch_response_id = None
+        self._restored_input_items.clear()
 
     def set_system_prompt(self, system_prompt: str) -> None:
         self._instructions = system_prompt
@@ -100,6 +103,13 @@ class OpenAIProvider(Provider):
         )
         if self._settings.web_search:
             self._tools.append({"type": "web_search"})
+
+    def restore_messages(self, messages: list[MessageRecord]) -> None:
+        self._restored_input_items = [
+            {"role": message.role, "content": message.content}
+            for message in messages
+            if message.role in {"user", "assistant"} and message.content
+        ]
 
     def request_turn(
         self,
@@ -245,6 +255,7 @@ class OpenAIProvider(Provider):
         retry_notice_max_retries = max_retries
         last_error: Exception | None = None
         last_error_message: str | None = None
+        retried_missing_previous_response = False
 
         for attempt in range(rate_limit_max_retries + 1):
             if attempt > 0:
@@ -330,6 +341,22 @@ class OpenAIProvider(Provider):
                     continue
 
                 # Client errors (4xx) -- don't retry
+                if (
+                    not retried_missing_previous_response
+                    and self._previous_response_id
+                    and self._restored_input_items
+                    and _should_retry_missing_previous_response(error_payload)
+                ):
+                    self._previous_response_id = None
+                    self._branch_response_id = None
+                    request_data = json.dumps(
+                        self._build_request_body(
+                            input_items=input_items,
+                            instructions=instructions,
+                        )
+                    ).encode("utf-8")
+                    retried_missing_previous_response = True
+                    continue
                 display.wait_stop()
                 raise RuntimeError(
                     _format_error_message("OpenAI Responses API error", error_payload)
@@ -358,7 +385,11 @@ class OpenAIProvider(Provider):
         body: dict[str, Any] = {
             "model": self._settings.model,
             "max_output_tokens": self._settings.max_tokens,
-            "input": list(input_items),
+            "input": (
+                [*self._restored_input_items, *input_items]
+                if self._restored_input_items and not self._previous_response_id
+                else list(input_items)
+            ),
             "tools": self._tools,
             "parallel_tool_calls": True,
             "store": True,
@@ -755,6 +786,17 @@ def _should_retry_rate_limit(error_payload: dict[str, Any]) -> bool:
     ):
         return False
     return True
+
+
+def _should_retry_missing_previous_response(error_payload: dict[str, Any]) -> bool:
+    error = error_payload.get("error")
+    if not isinstance(error, dict):
+        return False
+    message = error.get("message")
+    if not isinstance(message, str):
+        return False
+    normalized = message.strip().lower()
+    return "previous response with id" in normalized and "not found" in normalized
 
 
 def _extract_retry_after(exc: urllib.error.HTTPError, attempt: int) -> float:

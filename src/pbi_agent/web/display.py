@@ -9,7 +9,12 @@ from rich.text import Text
 
 from pbi_agent.models.messages import TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageRecord
-from pbi_agent.display.protocol import DisplayProtocol, PendingToolGroup, QueuedInput
+from pbi_agent.display.protocol import (
+    DisplayProtocol,
+    PendingToolGroup,
+    QueuedInput,
+    QueuedRuntimeChange,
+)
 from pbi_agent.display.formatting import (
     REDACTED_THINKING_NOTICE,
     format_wait_seconds,
@@ -61,7 +66,7 @@ def _usage_payload(usage: TokenUsage) -> dict[str, Any]:
     }
 
 
-def _history_message_content(message: MessageRecord) -> str:
+def history_message_content(message: MessageRecord) -> str:
     content = message.content
     if message.role != "user" or not message.image_attachments:
         return content
@@ -121,11 +126,12 @@ class _EventDisplayBase(DisplayProtocol):
         self,
         value: str,
         *,
+        file_paths: list[str] | None = None,
         image_paths: list[str] | None = None,
         images=None,
         image_attachments=None,
     ) -> None:
-        del value, image_paths, images, image_attachments
+        del value, file_paths, image_paths, images, image_attachments
         return None
 
     def request_new_chat(self) -> None:
@@ -472,7 +478,8 @@ class _EventDisplayBase(DisplayProtocol):
                 {
                     "item_id": f"history-{message.id}",
                     "role": message.role,
-                    "content": _history_message_content(message),
+                    "content": history_message_content(message),
+                    "file_paths": list(message.file_paths),
                     "image_attachments": [
                         {
                             "upload_id": attachment.upload_id,
@@ -500,7 +507,9 @@ class WebDisplay(_EventDisplayBase):
         bind_session: SessionBinder | None = None,
     ) -> None:
         super().__init__(publish_event=publish_event, verbose=verbose)
-        self._input_queue: queue.Queue[str | QueuedInput] = queue.Queue()
+        self._input_queue: queue.Queue[str | QueuedInput | QueuedRuntimeChange] = (
+            queue.Queue()
+        )
         self._input_event = threading.Event()
         self._shutdown = threading.Event()
         self._model = model
@@ -520,14 +529,16 @@ class WebDisplay(_EventDisplayBase):
         self,
         value: str,
         *,
+        file_paths: list[str] | None = None,
         image_paths: list[str] | None = None,
         images=None,
         image_attachments=None,
     ) -> None:
         queued: str | QueuedInput = value
-        if image_paths or images or image_attachments:
+        if file_paths or image_paths or images or image_attachments:
             queued = QueuedInput(
                 text=value,
+                file_paths=list(file_paths or []),
                 image_paths=list(image_paths or []),
                 images=list(images or []),
                 image_attachments=list(image_attachments or []),
@@ -543,13 +554,30 @@ class WebDisplay(_EventDisplayBase):
         self._input_event.set()
         self._publish("input_state", {"enabled": False})
 
-    def user_prompt(self) -> str | QueuedInput:
+    def request_runtime_change(
+        self,
+        *,
+        runtime,
+        profile_id: str | None,
+    ) -> None:
+        self._model = runtime.settings.model
+        self._reasoning_effort = runtime.settings.reasoning_effort
+        self._input_queue.put(
+            QueuedRuntimeChange(
+                runtime=runtime,
+                profile_id=profile_id,
+            )
+        )
+        self._input_event.set()
+        self._publish("input_state", {"enabled": False})
+
+    def user_prompt(self) -> str | QueuedInput | QueuedRuntimeChange:
         while True:
-            if self._shutdown.is_set():
-                return "exit"
             try:
                 value = self._input_queue.get_nowait()
             except queue.Empty:
+                if self._shutdown.is_set():
+                    return "exit"
                 self._publish("input_state", {"enabled": True})
                 self._input_event.wait(timeout=0.5)
                 self._input_event.clear()

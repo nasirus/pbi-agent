@@ -610,6 +610,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <input
         ref={fileInputRef}
         type="file"
+        name="image-upload"
         accept="image/png,image/jpeg,image/webp"
         multiple
         hidden
@@ -661,6 +662,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         <div className="composer__textarea-wrap">
           <textarea
             ref={textareaRef}
+            name="message"
             className="composer__textarea"
             value={input}
             onChange={(event) => {
