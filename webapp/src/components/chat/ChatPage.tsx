@@ -523,23 +523,13 @@ export function ChatPage({
         <div className="chat-topbar">
           <div className="chat-topbar__leading">
             <ConnectionBadge connection={connection} />
-            <label className="chat-profile-selector">
-              <span className="chat-profile-selector__label">Profile</span>
-              <select
-                className="chat-profile-selector__select"
-                value={selectedProfileId}
-                onChange={(event) => {
-                  void handleProfileChange(event.target.value);
-                }}
-                disabled={profileSelectorDisabled}
-              >
-                {renderProfileSelectorOptions({
-                  selectedProfileId,
-                  modelProfiles,
-                  isLoading: configQuery.isPending,
-                })}
-              </select>
-            </label>
+            <ProfileSelector
+              selectedProfileId={selectedProfileId}
+              modelProfiles={modelProfiles}
+              isLoading={configQuery.isPending}
+              disabled={profileSelectorDisabled}
+              onChange={(id) => { void handleProfileChange(id); }}
+            />
           </div>
           <div className="chat-topbar__actions">
             <UsageBar sessionUsage={sessionUsage} turnUsage={turnUsage} />
@@ -657,44 +647,104 @@ function resolveSavedProfileId(
   return modelProfiles.some((profile) => profile.id === profileId) ? profileId : null;
 }
 
-function renderProfileSelectorOptions({
+function ProfileSelector({
   selectedProfileId,
   modelProfiles,
   isLoading,
+  disabled,
+  onChange,
 }: {
   selectedProfileId: string;
   modelProfiles: ModelProfileView[];
   isLoading: boolean;
+  disabled: boolean;
+  onChange: (id: string) => void;
 }) {
-  const hasSelectedProfile = Boolean(
-    selectedProfileId
-    && modelProfiles.some((profile) => profile.id === selectedProfileId),
-  );
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  const selectedProfile = modelProfiles.find((p) => p.id === selectedProfileId);
+
+  let triggerLabel: string;
   if (isLoading && modelProfiles.length === 0) {
-    return <option value="">Loading profiles...</option>;
-  }
-
-  if (modelProfiles.length === 0) {
-    return <option value="">No model profiles configured</option>;
+    triggerLabel = "Loading\u2026";
+  } else if (modelProfiles.length === 0) {
+    triggerLabel = "No profiles";
+  } else if (selectedProfile) {
+    triggerLabel = selectedProfile.name;
+  } else if (selectedProfileId) {
+    triggerLabel = "Unavailable";
+  } else {
+    triggerLabel = "Select profile";
   }
 
   return (
-    <>
-      {!hasSelectedProfile ? (
-        <option value={selectedProfileId} disabled>
-          {selectedProfileId ? "Current profile unavailable" : "Current runtime has no saved profile"}
-        </option>
-      ) : null}
-      {modelProfiles.map((profile) => (
-        <option key={profile.id} value={profile.id}>
-          {formatProfileOptionLabel(profile)}
-        </option>
-      ))}
-    </>
-  );
-}
+    <div className={`profile-selector${open ? " is-open" : ""}`} ref={containerRef}>
+      <button
+        type="button"
+        className="profile-selector__trigger"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Model profile: ${triggerLabel}`}
+      >
+        <svg className="profile-selector__icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <rect x="9" y="9" width="6" height="6" />
+          <line x1="9" y1="2" x2="9" y2="4" />
+          <line x1="15" y1="2" x2="15" y2="4" />
+          <line x1="9" y1="20" x2="9" y2="22" />
+          <line x1="15" y1="20" x2="15" y2="22" />
+          <line x1="2" y1="9" x2="4" y2="9" />
+          <line x1="2" y1="15" x2="4" y2="15" />
+          <line x1="20" y1="9" x2="22" y2="9" />
+          <line x1="20" y1="15" x2="22" y2="15" />
+        </svg>
+        <span className="profile-selector__name">{triggerLabel}</span>
+        <svg className="profile-selector__chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
 
-function formatProfileOptionLabel(profile: ModelProfileView): string {
-  return profile.name;
+      {open && modelProfiles.length > 0 && (
+        <div className="profile-selector__dropdown" role="listbox" aria-label="Model profiles">
+          {modelProfiles.map((profile) => {
+            const isSelected = profile.id === selectedProfileId;
+            return (
+              <button
+                key={profile.id}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                className={`profile-selector__option${isSelected ? " is-selected" : ""}`}
+                onClick={() => {
+                  onChange(profile.id);
+                  setOpen(false);
+                }}
+              >
+                {isSelected && (
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="profile-selector__check" aria-hidden="true">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+                <span>{profile.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
