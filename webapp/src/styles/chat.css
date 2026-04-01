@@ -442,6 +442,56 @@
   color: var(--color-accent);
 }
 
+.profile-selector__option-check {
+  flex-shrink: 0;
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-selector__option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.profile-selector__option-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-selector__option-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-selector__option.is-selected .profile-selector__option-meta {
+  color: color-mix(in srgb, var(--color-accent) 60%, var(--color-text-tertiary));
+}
+
+.profile-selector__option:hover .profile-selector__option-meta {
+  color: var(--color-text-secondary);
+}
+
+.profile-selector__option.is-selected:hover .profile-selector__option-meta {
+  color: color-mix(in srgb, var(--color-accent) 70%, var(--color-text-secondary));
+}
+
+.profile-selector__dot {
+  color: var(--color-border);
+  user-select: none;
+}
+
 /* ── Timeline ── */
 .timeline {
   padding: var(--sp-5) var(--sp-8);

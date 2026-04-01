@@ -189,6 +189,7 @@ export function ModelProfileModal({
           <div className="task-form__field">
             <label className="task-form__label">Name</label>
             <input
+              name="profile-name"
               className="task-form__input"
               value={form.name}
               onChange={(e) => set({ name: e.target.value })}
@@ -202,6 +203,7 @@ export function ModelProfileModal({
             <div className="task-form__field">
               <label className="task-form__label">ID (optional)</label>
               <input
+                name="profile-id"
                 className="task-form__input"
                 value={form.id}
                 onChange={(e) => set({ id: e.target.value })}
@@ -216,6 +218,7 @@ export function ModelProfileModal({
           <div className="task-form__field">
             <label className="task-form__label">Provider</label>
             <select
+              name="provider-id"
               className="task-form__select"
               value={form.provider_id}
               onChange={(e) => handleProviderChange(e.target.value)}
@@ -238,6 +241,7 @@ export function ModelProfileModal({
             <div className="task-form__field">
               <label className="task-form__label">Model</label>
               <input
+                name="model"
                 className="task-form__input"
                 value={form.model}
                 onChange={(e) => set({ model: e.target.value })}
@@ -247,6 +251,7 @@ export function ModelProfileModal({
             <div className="task-form__field">
               <label className="task-form__label">Sub-agent model</label>
               <input
+                name="sub-agent-model"
                 className="task-form__input"
                 value={form.sub_agent_model}
                 onChange={(e) => set({ sub_agent_model: e.target.value })}
@@ -261,6 +266,7 @@ export function ModelProfileModal({
             <div className="task-form__field">
               <label className="task-form__label">Reasoning effort</label>
               <select
+                name="reasoning-effort"
                 className="task-form__select"
                 value={form.reasoning_effort}
                 onChange={(e) => set({ reasoning_effort: e.target.value })}
@@ -276,6 +282,7 @@ export function ModelProfileModal({
             <div className="task-form__field">
               <label className="task-form__label">Max tokens</label>
               <input
+                name="max-tokens"
                 className="task-form__input"
                 type="number"
                 min="0"
@@ -291,6 +298,7 @@ export function ModelProfileModal({
               <div className="task-form__field">
                 <label className="task-form__label">Service tier</label>
                 <select
+                  name="service-tier"
                   className="task-form__select"
                   value={form.service_tier}
                   onChange={(e) => set({ service_tier: e.target.value })}
@@ -310,6 +318,7 @@ export function ModelProfileModal({
             <div className="task-form__field">
               <label className="task-form__label">Web search</label>
               <select
+                name="web-search"
                 className="task-form__select"
                 value={form.web_search}
                 onChange={(e) =>
@@ -327,6 +336,7 @@ export function ModelProfileModal({
             <div className="task-form__field">
               <label className="task-form__label">Max tool workers</label>
               <input
+                name="max-tool-workers"
                 className="task-form__input"
                 type="number"
                 min="0"
@@ -338,6 +348,7 @@ export function ModelProfileModal({
             <div className="task-form__field">
               <label className="task-form__label">Max retries</label>
               <input
+                name="max-retries"
                 className="task-form__input"
                 type="number"
                 min="0"
@@ -351,6 +362,7 @@ export function ModelProfileModal({
           <div className="task-form__field">
             <label className="task-form__label">Compact threshold</label>
             <input
+              name="compact-threshold"
               className="task-form__input"
               type="number"
               min="0"

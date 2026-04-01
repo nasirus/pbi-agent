@@ -161,6 +161,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
           <div className="task-form__field">
             <label className="task-form__label">Name</label>
             <input
+              name="provider-name"
               className="task-form__input"
               value={form.name}
               onChange={(e) => set({ name: e.target.value })}
@@ -174,6 +175,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
             <div className="task-form__field">
               <label className="task-form__label">ID (optional)</label>
               <input
+                name="provider-id"
                 className="task-form__input"
                 value={form.id}
                 onChange={(e) => set({ id: e.target.value })}
@@ -188,6 +190,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
           <div className="task-form__field">
             <label className="task-form__label">Kind</label>
             <select
+              name="provider-kind"
               className="task-form__select"
               value={form.kind}
               onChange={(e) => set({ kind: e.target.value })}
@@ -222,6 +225,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
                 Environment variable name
               </label>
               <input
+                name="api-key-env"
                 className="task-form__input"
                 value={form.api_key_env}
                 onChange={(e) => set({ api_key_env: e.target.value })}
@@ -237,6 +241,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
                 {isEdit ? " (leave blank to keep current)" : ""}
               </label>
               <input
+                name="api-key"
                 className="task-form__input"
                 type="password"
                 value={form.api_key}
@@ -253,6 +258,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
                 Responses URL override
               </label>
               <input
+                name="responses-url"
                 className="task-form__input"
                 type="text"
                 value={form.responses_url}
@@ -272,6 +278,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
             <div className="task-form__field">
               <label className="task-form__label">API base URL</label>
               <input
+                name="generic-api-url"
                 className="task-form__input"
                 type="text"
                 value={form.generic_api_url}

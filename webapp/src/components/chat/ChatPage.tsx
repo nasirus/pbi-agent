@@ -168,7 +168,13 @@ export function ChatPage({
     },
   });
 
-  useLiveChatEvents(liveSessionId);
+  // Don't open a WebSocket until the routing effect has run at least once for this
+  // mount (hydratedRouteKeyRef goes from null → routeKey). Without this guard the hook
+  // would open a socket for any stale liveSessionId still in the Zustand store, then
+  // immediately close it (CONNECTING → close) when the routing effect resets state,
+  // producing a browser "WebSocket closed before connection established" warning.
+  const effectiveLiveSessionId = hydratedRouteKeyRef.current !== null ? liveSessionId : null;
+  useLiveChatEvents(effectiveLiveSessionId);
 
   useEffect(() => {
     if (awaitingBlankChat && resumeSessionId === null) {
@@ -230,7 +236,11 @@ export function ChatPage({
     if (hydratedRouteKeyRef.current !== routeKey) {
       // Don't wipe the store if we already have an active live session waiting for a
       // new-chat response — the WebSocket is still open and will deliver session_state.
-      if (liveSessionId && resumeSessionId === null && !sessionEnded) {
+      // Only applies on re-renders within the same mount (hydratedRouteKeyRef already set),
+      // not on fresh mounts (null) where we always want to reset so a new default profile
+      // is picked up correctly.
+      const isFreshMount = hydratedRouteKeyRef.current === null;
+      if (!isFreshMount && liveSessionId && resumeSessionId === null && !sessionEnded) {
         hydratedRouteKeyRef.current = routeKey;
         liveRequestRouteKeyRef.current = routeKey;
         return;
@@ -238,6 +248,10 @@ export function ChatPage({
       setRouteState(null, []);
       hydratedRouteKeyRef.current = routeKey;
       liveRequestRouteKeyRef.current = null;
+      // Return so the effect re-runs with the fresh store values before proceeding to
+      // session creation. The stale closure would otherwise still see the old liveSessionId
+      // and trigger the early-return guard below, blocking createSession.
+      return;
     }
 
     if (liveSessionId && resumeSessionId === null && !sessionEnded) {
@@ -246,7 +260,7 @@ export function ChatPage({
     }
 
     if (liveRequestRouteKeyRef.current !== routeKey) {
-      if (configQuery.isPending) {
+      if (configQuery.isPending || configQuery.isFetching) {
         return;
       }
       const nextProfileId = resolveSavedProfileId(
@@ -263,6 +277,7 @@ export function ChatPage({
     awaitingBlankChat,
     createSession,
     configQuery.data,
+    configQuery.isFetching,
     configQuery.isPending,
     liveSessionId,
     pendingProfileId,
@@ -415,7 +430,10 @@ export function ChatPage({
     awaitCreate?: boolean;
   } = {}) => {
     const currentLiveSessionId = liveSessionId;
-    const nextProfileId = resolveSavedProfileId(selectedProfileId, modelProfiles);
+    const nextProfileId = resolveSavedProfileId(
+      configQuery.data?.active_profile_id ?? modelProfiles[0]?.id ?? null,
+      modelProfiles,
+    );
     setAwaitingBlankChat(true);
 
     if (currentLiveSessionId && !sessionEnded) {
@@ -734,12 +752,21 @@ function ProfileSelector({
                   setOpen(false);
                 }}
               >
-                {isSelected && (
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="profile-selector__check" aria-hidden="true">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                )}
-                <span>{profile.name}</span>
+                <span className="profile-selector__option-check">
+                  {isSelected && (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="profile-selector__check" aria-hidden="true">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </span>
+                <span className="profile-selector__option-body">
+                  <span className="profile-selector__option-name">{profile.name}</span>
+                  <span className="profile-selector__option-meta">
+                    <span>{profile.provider.name}</span>
+                    {profile.model && <><span className="profile-selector__dot" aria-hidden="true">·</span><span>{profile.model}</span></>}
+                    {profile.reasoning_effort && <><span className="profile-selector__dot" aria-hidden="true">·</span><span>{profile.reasoning_effort}</span></>}
+                  </span>
+                </span>
               </button>
             );
           })}

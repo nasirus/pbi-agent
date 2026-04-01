@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
-import { fetchBootstrap } from "../api";
+import { fetchBootstrap, fetchConfigBootstrap } from "../api";
 import { useTaskEvents } from "../hooks/useTaskEvents";
 import { useChatStore } from "../store";
 import { LoadingSpinner } from "./shared/LoadingSpinner";
@@ -33,17 +33,39 @@ export function AppShell() {
     staleTime: 30_000,
   });
 
+  const configBootstrapQuery = useQuery({
+    queryKey: ["config-bootstrap"],
+    queryFn: fetchConfigBootstrap,
+    staleTime: 30_000,
+  });
+
   const bootstrap = bootstrapQuery.data;
+  const configBootstrap = configBootstrapQuery.data;
+
   const folderLabel = bootstrap?.workspace_root
     ? bootstrap.workspace_root.split(/[/\\]/).filter(Boolean).slice(-2).join("/")
     : null;
+
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+
+  // Derive the default runtime display from the active profile in config-bootstrap.
+  // This query is kept fresh by settings-page mutations, so it always reflects the
+  // current active-profile selection without requiring a full page refresh.
+  const activeProfile = configBootstrap
+    ? (configBootstrap.model_profiles.find((p) => p.id === configBootstrap.active_profile_id)
+      ?? configBootstrap.model_profiles[0])
+    : null;
+  const activeRuntime = activeProfile?.resolved_runtime;
+
   const displayedProvider = isChatRoute && liveSessionId && runtime?.provider
     ? runtime.provider
-    : (bootstrap?.provider ?? "...");
+    : (activeRuntime?.provider ?? "...");
   const displayedModel = isChatRoute && liveSessionId && runtime?.model
     ? runtime.model
-    : (bootstrap?.model ?? "...");
+    : (activeRuntime?.model ?? "...");
+  const displayedReasoningEffort = isChatRoute && liveSessionId && runtime?.reasoning_effort
+    ? runtime.reasoning_effort
+    : (activeRuntime?.reasoning_effort ?? null);
 
   return (
     <div className="app-shell">
@@ -62,6 +84,9 @@ export function AppShell() {
         <div className="runtime-meta">
           <span className="runtime-meta__pill">{displayedProvider}</span>
           <span className="runtime-meta__pill">{displayedModel}</span>
+          {displayedReasoningEffort && displayedReasoningEffort !== "none" && (
+            <span className="runtime-meta__pill">{displayedReasoningEffort}</span>
+          )}
         </div>
       </header>
 

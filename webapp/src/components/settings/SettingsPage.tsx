@@ -366,6 +366,7 @@ export function SettingsPage() {
                 Active default
               </span>
               <select
+                name="active-profile"
                 className="active-profile-control__select"
                 value={active_profile_id ?? ""}
                 onChange={(e) =>
