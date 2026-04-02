@@ -369,6 +369,16 @@ export function SettingsPage() {
   return (
     <div className="settings-page">
       <div className="settings-page__inner">
+        {model_profiles.length === 0 && (
+          <div className="settings-inline-note settings-onboarding-guide">
+            <strong>First-time setup:</strong> To start using the app, complete these steps:
+            <ol>
+              <li>Add a provider with your API credentials</li>
+              <li>Create a model profile that uses that provider</li>
+            </ol>
+          </div>
+        )}
+
         {pageError && (
           <div className="settings-error-banner">{pageError}</div>
         )}
