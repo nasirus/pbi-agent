@@ -186,33 +186,58 @@ export function ChatPage({
     },
   });
 
+  // Hydrate saved chat items when session detail data arrives.
+  // Only skip when the live WebSocket is actively connected and has
+  // already populated items — the API data may lag behind (user
+  // message not yet persisted).  In all other cases (disconnected,
+  // reconnecting, navigating back to a previously viewed chat) we
+  // hydrate from the API so the UI reflects the latest DB state.
   useEffect(() => {
     if (!routeSessionId || !sessionDetailQuery.isSuccess) return;
-    hydrateSavedChat(
-      routeSessionId,
-      sessionDetailQuery.data.history_items.map(mapHistoryItem),
-    );
-    if (sessionDetailQuery.data.active_live_session) {
-      attachLiveSession(
-        getSavedChatKey(routeSessionId),
-        sessionDetailQuery.data.active_live_session,
-        { preserveItems: true },
+    const chatKey = getSavedChatKey(routeSessionId);
+    const existing = useChatStore.getState().chatsByKey[chatKey];
+    const liveAndConnected =
+      existing?.liveSessionId
+      && existing.connection === "connected"
+      && existing.items.length > 0;
+    if (!liveAndConnected) {
+      const serverSeq =
+        sessionDetailQuery.data.active_live_session?.last_event_seq;
+      hydrateSavedChat(
+        routeSessionId,
+        sessionDetailQuery.data.history_items.map(mapHistoryItem),
+        typeof serverSeq === "number" ? serverSeq : undefined,
       );
-      return;
     }
+    if (sessionDetailQuery.data.active_live_session) {
+      attachLiveSession(chatKey, sessionDetailQuery.data.active_live_session, {
+        preserveItems: true,
+      });
+    }
+  }, [
+    attachLiveSession,
+    hydrateSavedChat,
+    routeSessionId,
+    sessionDetailQuery.isSuccess,
+    sessionDetailQuery.data,
+  ]);
+
+  // Create a new live session for a saved chat when one doesn't exist yet.
+  useEffect(() => {
+    if (!routeSessionId || !sessionDetailQuery.isSuccess) return;
+    if (sessionDetailQuery.data.active_live_session) return;
     if (chatState?.liveSessionId && !chatState.sessionEnded) return;
     if (createSessionMutation.isPending) return;
     createRequestKeyRef.current = getSavedChatKey(routeSessionId);
     createSessionMutation.mutate({ session_id: routeSessionId });
   }, [
-    attachLiveSession,
     chatState?.liveSessionId,
     chatState?.sessionEnded,
-    createSessionMutation,
-    hydrateSavedChat,
+    createSessionMutation.mutate,
+    createSessionMutation.isPending,
     routeSessionId,
     sessionDetailQuery.isSuccess,
-    sessionDetailQuery.data,
+    sessionDetailQuery.data?.active_live_session,
   ]);
 
   useEffect(() => {
@@ -251,7 +276,8 @@ export function ChatPage({
     createSessionMutation.mutate(profileId ? { profile_id: profileId } : {});
   }, [
     configQuery.data,
-    createSessionMutation,
+    createSessionMutation.mutate,
+    createSessionMutation.isPending,
     pendingProfileId,
     routeLiveSessionId,
     routeSessionId,

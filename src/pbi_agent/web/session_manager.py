@@ -1346,6 +1346,7 @@ class WebSessionManager:
             "exit_code": live_session.exit_code,
             "fatal_error": live_session.fatal_error,
             "ended_at": live_session.ended_at,
+            "last_event_seq": live_session.snapshot.last_event_seq,
         }
 
     def _serialize_live_snapshot(self, live_session: LiveChatSession) -> dict[str, Any]:

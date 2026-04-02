@@ -40,7 +40,7 @@ type ChatStore = {
   liveSessionIndex: Record<string, string>;
   sessionIndex: Record<string, string>;
   setActiveChat: (chatKey: string | null) => void;
-  hydrateSavedChat: (sessionId: string, items?: TimelineItem[]) => void;
+  hydrateSavedChat: (sessionId: string, items?: TimelineItem[], lastEventSeq?: number) => void;
   attachLiveSession: (
     chatKey: string,
     session: LiveSession,
@@ -189,7 +189,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   liveSessionIndex: {},
   sessionIndex: {},
   setActiveChat: (chatKey) => set({ activeChatKey: chatKey }),
-  hydrateSavedChat: (sessionId, items = []) =>
+  hydrateSavedChat: (sessionId, items = [], lastEventSeq) =>
     set((state) => {
       const chatKey = getSavedChatKey(sessionId);
       const current = state.chatsByKey[chatKey] ?? createEmptyChatState(sessionId);
@@ -203,6 +203,22 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             items,
             itemsVersion: items.length,
             fatalError: null,
+            // Reset live-session state so revisiting a saved chat
+            // does not keep stale liveSessionId / connection / flags
+            // from a previously ended session.
+            liveSessionId: null,
+            connection: "disconnected",
+            inputEnabled: false,
+            waitMessage: null,
+            sessionEnded: false,
+            // Set lastEventSeq from the server so the WS snapshot
+            // replay skips events already covered by API history.
+            // Use the server value directly (not Math.max) because the
+            // current value may belong to a previous, ended live session
+            // whose seq space is unrelated.
+            lastEventSeq: typeof lastEventSeq === "number"
+              ? lastEventSeq
+              : 0,
           },
         },
         sessionIndex: { ...state.sessionIndex, [sessionId]: chatKey },
@@ -237,6 +253,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             items: options.preserveItems ? current.items : [],
             itemsVersion: options.preserveItems ? current.itemsVersion : 0,
             subAgents: options.preserveItems ? current.subAgents : {},
+            // When reattaching the same live session, carry forward the
+            // high-water mark so the WS snapshot replay skips events
+            // already covered by API history.  When attaching a *new*
+            // live session (seq restarts from 1), reset to the server's
+            // value so we don't suppress the new session's events.
+            lastEventSeq:
+              current.liveSessionId === session.live_session_id
+                ? Math.max(
+                    current.lastEventSeq,
+                    typeof session.last_event_seq === "number" ? session.last_event_seq : 0,
+                  )
+                : (typeof session.last_event_seq === "number" ? session.last_event_seq : 0),
           },
         },
         liveSessionIndex: {
@@ -344,6 +372,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       const current =
         nextState.chatsByKey[resolvedKey]
         ?? createEmptyChatState(nextSessionId);
+      // Skip events already processed — prevents duplicates when the
+      // WebSocket reconnects and replays its snapshot over items that
+      // were already hydrated from the API (which use different itemIds).
+      if (event.seq <= current.lastEventSeq) {
+        return nextState;
+      }
       const patch: Partial<ChatRuntimeState> = { lastEventSeq: event.seq };
 
       switch (event.type) {

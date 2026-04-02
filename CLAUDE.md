@@ -45,9 +45,13 @@ uv run pytest -m slow
 
 # Lint and format
 uv run ruff check . --fix && uv run ruff format .
+npm run lint
+npm run typecheck
 
 # Build
 uv build
+npm run web:build
+npm run docs:build
 
 # Run CLI from source
 uv run pbi-agent --help
@@ -119,7 +123,8 @@ Precedence: CLI flags > `PBI_AGENT_*` env vars > provider-specific env vars (e.g
 - Bundled PBIP template assets must stay under `src/pbi_agent/report/`; hatchling packaging relies on git tracking for non-Python assets.
 - Workspace confinement: `shell` tool rejects path traversal; all file tools validate paths against workspace boundaries.
 - `python_exec` runs trusted local Python — it is not a sandbox.
+- Frontend linting uses root `eslint.config.mjs`; run `npm run lint` for Vite/React/TypeScript code and `npm run typecheck` for TypeScript validation.
 - After every frontend edit, run the relevant npm build command and confirm it passes before finishing. Use `npm run web:build` for web app changes and `npm run docs:build` for VitePress/docs changes.
 - When changing the FastAPI web server or Vite frontend, keep the implementation aligned with the existing FastAPI + Vite/React architecture rather than introducing an alternative web framework.
-- `uv run ruff check .`, `uv run ruff format --check .`, and `uv run pytest` must all pass before merging.
+- `uv run ruff check .`, `uv run ruff format --check .`, `npm run lint`, `npm run typecheck`, and `uv run pytest` must all pass before merging.
 - **No migration or backward-compatibility logic.** The project is in early development — do not add schema migrations, version checks, deprecation shims, or any other backward-compatibility code. When something changes, just change it directly.

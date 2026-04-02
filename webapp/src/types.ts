@@ -85,6 +85,7 @@ export type LiveSession = LiveSessionRuntime & {
   exit_code: number | null;
   fatal_error: string | null;
   ended_at: string | null;
+  last_event_seq: number;
 };
 
 export type HistoryItem = {
