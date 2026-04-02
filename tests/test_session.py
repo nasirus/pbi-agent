@@ -22,9 +22,11 @@ from pbi_agent.config import (
     DEFAULT_GOOGLE_MODEL,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
+    InternalConfig,
     ModeConfig,
     Settings,
     create_mode_config,
+    save_internal_config,
 )
 from pbi_agent.models.messages import (
     CompletedResponse,
@@ -294,6 +296,7 @@ def test_run_single_turn_uses_mode_specific_instructions_for_full_turn(
     display = _DisplaySpy()
     settings = Settings(api_key="test-key", provider="openai", max_tool_workers=3)
     monotonic_values = iter([10.0, 13.5])
+    save_internal_config(InternalConfig(modes=[]))
     create_mode_config(
         ModeConfig(
             id="plan",
@@ -323,6 +326,30 @@ def test_run_single_turn_uses_mode_specific_instructions_for_full_turn(
         provider.request_calls[1]["instructions"]
         == provider.request_calls[0]["instructions"]
     )
+
+
+def test_run_single_turn_uses_seeded_plan_mode_when_modes_key_missing(
+    monkeypatch,
+) -> None:
+    provider = _ProviderStub()
+    display = _DisplaySpy()
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=3)
+    monotonic_values = iter([10.0, 13.5])
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+
+    run_single_turn("/plan inspect the workspace", settings, display)
+
+    assert provider.request_calls[0]["user_message"] == "inspect the workspace"
+    assert "<active_mode>" in str(provider.request_calls[0]["instructions"])
+    assert "Do not make code changes." in str(provider.request_calls[0]["instructions"])
 
 
 def test_run_single_turn_persists_provider_checkpoint_for_resume(
@@ -632,6 +659,7 @@ def test_run_chat_loop_strips_mode_alias_and_uses_turn_specific_instructions(
     provider = _ChatProviderStub()
     display = _ChatDisplaySpy(["/plan draft the approach", "quit"])
     settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+    save_internal_config(InternalConfig(modes=[]))
     create_mode_config(
         ModeConfig(
             id="plan",
@@ -660,6 +688,7 @@ def test_run_chat_loop_accepts_mode_only_turn(monkeypatch) -> None:
     provider = _ChatProviderStub()
     display = _ChatDisplaySpy(["/plan", "quit"])
     settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+    save_internal_config(InternalConfig(modes=[]))
     create_mode_config(
         ModeConfig(
             id="plan",
@@ -684,14 +713,6 @@ def test_run_chat_loop_keeps_local_command_precedence_over_modes(monkeypatch) ->
     provider = _ChatProviderStub()
     display = _ChatDisplaySpy([SKILLS_COMMAND, "quit"])
     settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
-    create_mode_config(
-        ModeConfig(
-            id="plan",
-            name="Plan",
-            slash_alias="/plan",
-            instructions="Plan before coding.",
-        )
-    )
 
     monkeypatch.setattr(
         "pbi_agent.agent.session._open_runtime_provider",

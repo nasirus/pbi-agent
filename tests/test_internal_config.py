@@ -52,7 +52,24 @@ def test_load_internal_config_treats_old_provider_scoped_shape_as_absent(
 
     assert config.providers == []
     assert config.model_profiles == []
+    assert [item.id for item in config.modes] == ["implement", "plan", "review"]
     assert config.active_model_profile is None
+
+
+def test_load_internal_config_seeds_default_modes_when_key_missing() -> None:
+    config = load_internal_config()
+
+    assert [item.id for item in config.modes] == ["implement", "plan", "review"]
+    assert find_mode_config_by_alias("/plan") is not None
+
+
+def test_load_internal_config_does_not_reseed_explicit_empty_modes() -> None:
+    save_internal_config(InternalConfig(modes=[]))
+
+    config = load_internal_config()
+
+    assert config.modes == []
+    assert find_mode_config_by_alias("/plan") is None
 
 
 def test_config_store_roundtrip_and_active_profile_selection(monkeypatch) -> None:
@@ -95,6 +112,7 @@ def test_config_store_roundtrip_and_active_profile_selection(monkeypatch) -> Non
 
 
 def test_config_store_roundtrip_persists_modes() -> None:
+    save_internal_config(InternalConfig(modes=[]))
     create_mode_config(
         ModeConfig(
             id="plan",
@@ -129,6 +147,27 @@ def test_mode_alias_validation_rejects_reserved_command() -> None:
 
 def test_normalize_slash_alias_adds_prefix() -> None:
     assert normalize_slash_alias("plan") == "/plan"
+
+
+def test_deleting_seeded_default_mode_persists_deletion() -> None:
+    config, revision = load_internal_config_snapshot()
+
+    assert [item.id for item in config.modes] == ["implement", "plan", "review"]
+
+    save_internal_config_with_revision(
+        InternalConfig(
+            providers=config.providers,
+            model_profiles=config.model_profiles,
+            modes=[mode for mode in config.modes if mode.id != "plan"],
+            active_model_profile=config.active_model_profile,
+        ),
+        expected_revision=revision,
+    )
+
+    config = load_internal_config()
+
+    assert [item.id for item in config.modes] == ["implement", "review"]
+    assert find_mode_config_by_alias("/plan") is None
 
 
 def test_resolve_settings_uses_active_saved_profile(monkeypatch) -> None:

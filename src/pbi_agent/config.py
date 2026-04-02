@@ -44,6 +44,44 @@ SLASH_ALIAS_RE = re.compile(r"^/[a-z0-9][a-z0-9-]*$")
 AUTO_PROVIDER_ID_PREFIX = "auto-provider"
 AUTO_PROFILE_ID_PREFIX = "auto-profile"
 RESERVED_MODE_ALIASES = frozenset({"/skills", "/mcp", "/agents", "/agents-reload"})
+DEFAULT_MODE_SPECS = (
+    {
+        "id": "plan",
+        "name": "Plan",
+        "slash_alias": "/plan",
+        "description": "Planning mode",
+        "instructions": (
+            "Inspect the current state, identify constraints, and produce a "
+            "concrete implementation plan with assumptions, edge cases, and "
+            "tests. Ask only the minimum clarifying questions needed. Do not "
+            "make code changes."
+        ),
+    },
+    {
+        "id": "implement",
+        "name": "Implement",
+        "slash_alias": "/implement",
+        "description": "Implementation mode",
+        "instructions": (
+            "Inspect the current state first, then implement the requested "
+            "changes directly end to end. Make the minimum coherent code "
+            "changes, run relevant validation, and summarize outcomes and "
+            "residual risks. Do not stop at a plan unless blocked."
+        ),
+    },
+    {
+        "id": "review",
+        "name": "Review",
+        "slash_alias": "/review",
+        "description": "Code review mode",
+        "instructions": (
+            "Perform a code review only. Do not edit files. Focus on findings "
+            "first, ordered by severity, with file and line references. If no "
+            "findings are present, state that clearly and call out residual "
+            "risks or testing gaps."
+        ),
+    },
+)
 
 
 class ConfigError(ValueError):
@@ -277,6 +315,15 @@ def normalize_slash_alias(value: str) -> str:
     return alias
 
 
+def default_mode_configs() -> list[ModeConfig]:
+    modes: list[ModeConfig] = []
+    for spec in DEFAULT_MODE_SPECS:
+        mode = ModeConfig(**spec)
+        mode.validate()
+        modes.append(mode)
+    return sorted(modes, key=_config_sort_key)
+
+
 def _config_sort_key(
     item: ProviderConfig | ModelProfileConfig | ModeConfig,
 ) -> tuple[str, str]:
@@ -402,24 +449,27 @@ def load_internal_config() -> InternalConfig:
     payload = _read_internal_config_payload()
     providers_payload = payload.get("providers")
     profiles_payload = payload.get("model_profiles")
+    modes_present = "modes" in payload
     modes_payload = payload.get("modes")
     active_payload = payload.get("active_model_profile")
+
+    seeded_modes = default_mode_configs() if not modes_present else []
 
     if providers_payload is None:
         providers_payload = []
     if profiles_payload is None:
         profiles_payload = []
-    if modes_payload is None:
+    if modes_present and modes_payload is None:
         modes_payload = []
 
     if not isinstance(providers_payload, list) or not isinstance(
         profiles_payload, list
     ):
-        return InternalConfig()
-    if not isinstance(modes_payload, list):
-        return InternalConfig()
+        return InternalConfig(modes=seeded_modes)
+    if modes_present and not isinstance(modes_payload, list):
+        return InternalConfig(modes=seeded_modes)
     if active_payload is not None and not isinstance(active_payload, str):
-        return InternalConfig()
+        return InternalConfig(modes=seeded_modes)
 
     providers: list[ProviderConfig] = []
     for item in providers_payload:
@@ -433,11 +483,14 @@ def load_internal_config() -> InternalConfig:
         if profile is not None:
             profiles.append(profile)
 
-    modes: list[ModeConfig] = []
-    for item in modes_payload:
-        mode = _mode_from_payload(item)
-        if mode is not None:
-            modes.append(mode)
+    if modes_present:
+        modes: list[ModeConfig] = []
+        for item in modes_payload:
+            mode = _mode_from_payload(item)
+            if mode is not None:
+                modes.append(mode)
+    else:
+        modes = seeded_modes
 
     active_model_profile = active_payload if isinstance(active_payload, str) else None
     return InternalConfig(

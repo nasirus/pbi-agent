@@ -10,6 +10,7 @@ from rich.console import Console
 from pbi_agent.branding import PBI_AGENT_NAME, PBI_AGENT_TAGLINE
 from pbi_agent.cli import build_parser
 from pbi_agent.config import (
+    InternalConfig,
     ModelProfileConfig,
     ModeConfig,
     ProviderConfig,
@@ -18,6 +19,7 @@ from pbi_agent.config import (
     create_model_profile_config,
     create_mode_config,
     create_provider_config,
+    save_internal_config,
 )
 from pbi_agent.session_store import SESSION_DB_PATH_ENV, SessionStore
 from pbi_agent.display.protocol import QueuedInput, QueuedRuntimeChange
@@ -74,7 +76,11 @@ def test_config_bootstrap_and_crud_endpoints_round_trip(monkeypatch) -> None:
         assert len(bootstrap_payload["providers"]) == 1
         assert bootstrap_payload["providers"][0]["id"] == "auto-provider-openai"
         assert len(bootstrap_payload["model_profiles"]) == 1
-        assert bootstrap_payload["modes"] == []
+        assert [item["id"] for item in bootstrap_payload["modes"]] == [
+            "implement",
+            "plan",
+            "review",
+        ]
         assert (
             bootstrap_payload["model_profiles"][0]["provider_id"]
             == "auto-provider-openai"
@@ -133,16 +139,16 @@ def test_config_bootstrap_and_crud_endpoints_round_trip(monkeypatch) -> None:
             "/api/config/modes",
             headers={"If-Match": revision},
             json={
-                "name": "Plan",
-                "slash_alias": "/plan",
-                "description": "Planning mode",
-                "instructions": "Plan before coding.",
+                "name": "Focus",
+                "slash_alias": "/focus",
+                "description": "Focus mode",
+                "instructions": "Stay focused on the requested change.",
             },
         )
         assert create_mode_response.status_code == 200
         mode_payload = create_mode_response.json()
-        assert mode_payload["mode"]["id"] == "plan"
-        assert mode_payload["mode"]["slash_alias"] == "/plan"
+        assert mode_payload["mode"]["id"] == "focus"
+        assert mode_payload["mode"]["slash_alias"] == "/focus"
         revision = mode_payload["config_revision"]
 
         refreshed = client.get("/api/config/bootstrap")
@@ -158,7 +164,12 @@ def test_config_bootstrap_and_crud_endpoints_round_trip(monkeypatch) -> None:
             for item in refreshed_payload["model_profiles"]
             if item["id"] == "analysis"
         )
-        assert refreshed_payload["modes"][0]["id"] == "plan"
+        assert {item["id"] for item in refreshed_payload["modes"]} == {
+            "focus",
+            "implement",
+            "plan",
+            "review",
+        }
         assert analysis_profile["is_active_default"] is True
         assert refreshed_payload["config_revision"] == revision
 
@@ -184,6 +195,7 @@ def test_config_writes_require_current_revision() -> None:
 
 
 def test_mode_crud_endpoints_round_trip() -> None:
+    save_internal_config(InternalConfig(modes=[]))
     app = create_app(_settings())
 
     with TestClient(app) as client:
@@ -192,30 +204,30 @@ def test_mode_crud_endpoints_round_trip() -> None:
             "/api/config/modes",
             headers={"If-Match": revision},
             json={
-                "name": "Plan",
-                "slash_alias": "/plan",
-                "description": "Planning mode",
-                "instructions": "Plan before coding.",
+                "name": "Focus",
+                "slash_alias": "/focus",
+                "description": "Focus mode",
+                "instructions": "Stay focused on the requested change.",
             },
         )
         assert create_response.status_code == 200
         revision = create_response.json()["config_revision"]
 
         update_response = client.patch(
-            "/api/config/modes/plan",
+            "/api/config/modes/focus",
             headers={"If-Match": revision},
-            json={"description": "Updated planning mode"},
+            json={"description": "Updated focus mode"},
         )
         assert update_response.status_code == 200
-        assert update_response.json()["mode"]["description"] == "Updated planning mode"
+        assert update_response.json()["mode"]["description"] == "Updated focus mode"
         revision = update_response.json()["config_revision"]
 
         list_response = client.get("/api/config/modes")
         assert list_response.status_code == 200
-        assert list_response.json()["modes"][0]["slash_alias"] == "/plan"
+        assert list_response.json()["modes"][0]["slash_alias"] == "/focus"
 
         delete_response = client.delete(
-            "/api/config/modes/plan",
+            "/api/config/modes/focus",
             headers={"If-Match": revision},
         )
         assert delete_response.status_code == 204
@@ -263,6 +275,7 @@ def test_file_search_endpoint_returns_workspace_matches(tmp_path, monkeypatch) -
 
 
 def test_slash_command_search_endpoint_returns_web_commands() -> None:
+    save_internal_config(InternalConfig(modes=[]))
     app = create_app(_settings())
 
     with TestClient(app) as client:
@@ -290,7 +303,51 @@ def test_slash_command_search_endpoint_returns_web_commands() -> None:
     ]
 
 
+def test_slash_command_search_endpoint_includes_default_modes_on_fresh_config() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/slash-commands/search", params={"q": "", "limit": 10}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {
+            "name": "/skills",
+            "description": "Show discovered project skills",
+            "kind": "local_command",
+        },
+        {
+            "name": "/mcp",
+            "description": "Show discovered project MCP servers",
+            "kind": "local_command",
+        },
+        {
+            "name": "/agents",
+            "description": "Show discovered project sub-agents",
+            "kind": "local_command",
+        },
+        {
+            "name": "/implement",
+            "description": "Implementation mode",
+            "kind": "mode",
+        },
+        {
+            "name": "/plan",
+            "description": "Planning mode",
+            "kind": "mode",
+        },
+        {
+            "name": "/review",
+            "description": "Code review mode",
+            "kind": "mode",
+        },
+    ]
+
+
 def test_slash_command_search_endpoint_includes_configured_modes() -> None:
+    save_internal_config(InternalConfig(modes=[]))
     create_mode_config(
         ModeConfig(
             id="plan",
