@@ -914,11 +914,14 @@ class WebSessionManager:
             ),
             expected_revision=expected_revision,
         )
+        # The config snapshot loaded above is stale after the save — if there was
+        # no active profile, create_model_profile_config auto-activated this one.
+        active_profile_id = config.web.active_profile_id or profile.id
         return {
             "model_profile": self._model_profile_view(
                 profile,
                 provider=provider,
-                active_profile_id=config.web.active_profile_id,
+                active_profile_id=active_profile_id,
             ),
             "config_revision": revision,
         }

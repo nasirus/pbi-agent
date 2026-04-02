@@ -669,6 +669,9 @@ def create_model_profile_config(
         raise ConfigError(f"Profile '{profile.id}' already exists.")
     config.model_profiles.append(profile)
     config.model_profiles.sort(key=_config_sort_key)
+    # Auto-activate the first profile so new users get a usable default.
+    if config.web.active_profile_id is None:
+        config.web.active_profile_id = profile.id
     revision = save_internal_config_with_revision(
         config, expected_revision=expected_revision
     )
