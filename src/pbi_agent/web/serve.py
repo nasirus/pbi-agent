@@ -181,6 +181,7 @@ class LiveSessionModel(BaseModel):
     exit_code: int | None
     fatal_error: str | None
     ended_at: str | None
+    last_event_seq: int = 0
 
 
 class ImageAttachmentModel(BaseModel):

@@ -188,20 +188,21 @@ export function ChatPage({
   });
 
   // Hydrate saved chat items when session detail data arrives.
-  // Only skip when the live WebSocket is actively connected and has
-  // already populated items — the API data may lag behind (user
-  // message not yet persisted).  In all other cases (disconnected,
-  // reconnecting, navigating back to a previously viewed chat) we
-  // hydrate from the API so the UI reflects the latest DB state.
+  // Skip hydration when a live session is already attached and has
+  // items — even if the WebSocket is reconnecting.  Re-hydrating
+  // during reconnection replaces WS-sourced items (item IDs like
+  // "message-N") with API history items ("history-N"), then the WS
+  // snapshot replay adds them again with their original IDs,
+  // producing duplicates and flickering.
   useEffect(() => {
     if (!routeSessionId || !sessionDetailQuery.isSuccess) return;
     const chatKey = getSavedChatKey(routeSessionId);
     const existing = useChatStore.getState().chatsByKey[chatKey];
-    const liveAndConnected =
+    const skipHydration =
       existing?.liveSessionId
-      && existing.connection === "connected"
+      && !existing.sessionEnded
       && existing.items.length > 0;
-    if (!liveAndConnected) {
+    if (!skipHydration) {
       const serverSeq =
         sessionDetailQuery.data.active_live_session?.last_event_seq;
       hydrateSavedChat(
