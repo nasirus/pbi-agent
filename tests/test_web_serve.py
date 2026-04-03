@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from io import StringIO
+import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -60,7 +62,13 @@ def test_bootstrap_endpoint_returns_workspace_metadata() -> None:
     assert payload["model"] == "gpt-5.4"
     assert payload["supports_image_inputs"] is True
     assert "workspace_root" in payload
-    assert payload["board_stages"] == ["backlog", "plan", "processing", "review"]
+    assert [stage["id"] for stage in payload["board_stages"]] == [
+        "backlog",
+        "plan",
+        "review",
+    ]
+    assert payload["board_stages"][1]["mode_id"] == "plan"
+    assert payload["board_stages"][2]["mode_id"] == "review"
 
 
 def test_config_bootstrap_and_crud_endpoints_round_trip(monkeypatch) -> None:
@@ -509,6 +517,95 @@ def test_task_contract_includes_model_profile_binding_and_null_patch_semantics(
         updated = update_response.json()["task"]
         assert updated["session_id"] is None
         assert updated["profile_id"] is None
+
+
+def test_board_stage_endpoints_round_trip() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        list_response = client.get("/api/board/stages")
+        assert list_response.status_code == 200
+        assert [item["id"] for item in list_response.json()["board_stages"]] == [
+            "backlog",
+            "plan",
+            "review",
+        ]
+
+        update_response = client.put(
+            "/api/board/stages",
+            json={
+                "board_stages": [
+                    {"id": "backlog", "name": "Backlog"},
+                    {
+                        "id": "build",
+                        "name": "Build",
+                        "mode_id": "implement",
+                        "auto_start": True,
+                    },
+                    {"id": "review", "name": "Review", "mode_id": "review"},
+                ]
+            },
+        )
+        assert update_response.status_code == 200
+        payload = update_response.json()
+        assert [item["id"] for item in payload["board_stages"]] == [
+            "backlog",
+            "build",
+            "review",
+        ]
+        assert payload["board_stages"][1]["auto_start"] is True
+        assert payload["board_stages"][1]["mode_id"] == "implement"
+
+
+def test_run_task_advances_to_next_configured_stage(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    app = create_app(_settings())
+
+    with patch(
+        "pbi_agent.web.session_manager.run_single_turn_in_directory",
+        return_value=SimpleNamespace(
+            tool_errors=[],
+            text="Planned.",
+            session_id="session-123",
+        ),
+    ):
+        with TestClient(app) as client:
+            client.put(
+                "/api/board/stages",
+                json={
+                    "board_stages": [
+                        {"id": "backlog", "name": "Backlog"},
+                        {"id": "plan", "name": "Plan", "mode_id": "plan"},
+                        {"id": "review", "name": "Review", "mode_id": "review"},
+                    ]
+                },
+            )
+            create_response = client.post(
+                "/api/tasks",
+                json={"title": "Task A", "prompt": "Investigate", "stage": "plan"},
+            )
+            assert create_response.status_code == 200
+            task_id = create_response.json()["task"]["task_id"]
+
+            run_response = client.post(f"/api/tasks/{task_id}/run")
+            assert run_response.status_code == 200
+
+            deadline = time.monotonic() + 2
+            while True:
+                task_response = client.get("/api/tasks")
+                task_payload = task_response.json()["tasks"][0]
+                if (
+                    task_payload["stage"] == "review"
+                    and task_payload["run_status"] == "completed"
+                ):
+                    break
+                if time.monotonic() > deadline:
+                    raise AssertionError("task run did not finish in time")
+                time.sleep(0.01)
+
+    assert task_payload["stage"] == "review"
+    assert task_payload["run_status"] == "completed"
+    assert task_payload["session_id"] == "session-123"
 
 
 def test_chat_session_stream_replays_state_events() -> None:

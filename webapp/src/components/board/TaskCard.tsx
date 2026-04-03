@@ -33,16 +33,17 @@ export function TaskCard({
   onDelete: () => void;
   onRun: () => void;
 }) {
+  const isRunning = task.run_status === "running";
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.task_id,
-    disabled: task.stage === "processing",
+    disabled: isRunning,
     data: { taskId: task.task_id, stage: task.stage },
   });
 
   return (
     <article
       ref={setNodeRef}
-      className={`task-card${isDragging ? " task-card--dragging" : ""}${task.stage === "processing" ? " task-card--readonly" : ""}`}
+      className={`task-card${isDragging ? " task-card--dragging" : ""}${isRunning ? " task-card--readonly" : ""}`}
     >
       {/* Drag handle — only this region initiates drag */}
       <div className="task-card__drag-handle" {...listeners} {...attributes}>
@@ -50,14 +51,14 @@ export function TaskCard({
       </div>
 
       <div className="task-card__actions">
-        <button type="button" className="btn btn--ghost btn--sm" onClick={onEdit}>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onEdit} disabled={isRunning}>
           Edit
         </button>
         <button
           type="button"
           className="btn btn--ghost btn--sm"
           onClick={onRun}
-          disabled={task.run_status === "running"}
+          disabled={isRunning}
         >
           Run
         </button>
@@ -71,7 +72,7 @@ export function TaskCard({
             Chat
           </a>
         ) : null}
-        <button type="button" className="btn btn--danger btn--sm" onClick={onDelete}>
+        <button type="button" className="btn btn--danger btn--sm" onClick={onDelete} disabled={isRunning}>
           Delete
         </button>
       </div>

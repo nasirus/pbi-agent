@@ -343,9 +343,7 @@ def run_chat_loop(
                         format_project_sub_agents_markdown(reloaded=True)
                     )
                     continue
-                active_mode_instructions = _extract_active_mode_instructions(
-                    user_input
-                )
+                active_mode_instructions = _extract_active_mode_instructions(user_input)
                 turn_instructions = _turn_instructions(active_mode_instructions)
                 if (
                     not user_input

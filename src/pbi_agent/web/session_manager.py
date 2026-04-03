@@ -48,7 +48,8 @@ from pbi_agent.providers.capabilities import provider_supports_images
 from pbi_agent.session_store import (
     KANBAN_RUN_STATUS_COMPLETED,
     KANBAN_RUN_STATUS_FAILED,
-    KANBAN_STAGE_BACKLOG,
+    KanbanStageConfigRecord,
+    KanbanStageConfigSpec,
     KanbanTaskRecord,
     MessageRecord,
     MessageImageAttachment,
@@ -163,6 +164,17 @@ def _serialize_task(
         "last_run_started_at": record.last_run_started_at,
         "last_run_finished_at": record.last_run_finished_at,
         "runtime_summary": _runtime_summary(runtime),
+    }
+
+
+def _serialize_board_stage(record: KanbanStageConfigRecord) -> dict[str, Any]:
+    return {
+        "id": record.stage_id,
+        "name": record.name,
+        "position": record.position,
+        "profile_id": record.model_profile_id,
+        "mode_id": record.mode_id,
+        "auto_start": record.auto_start,
     }
 
 
@@ -315,7 +327,7 @@ class WebSessionManager:
         self._running_task_ids: set[str] = set()
         self._lock = threading.Lock()
         with SessionStore() as store:
-            store.normalize_kanban_processing_tasks(directory=self._directory_key)
+            store.normalize_kanban_running_tasks(directory=self._directory_key)
 
     @property
     def workspace_root(self) -> Path:
@@ -367,7 +379,7 @@ class WebSessionManager:
                 self._serialize_live_session(item)
                 for item in self._chat_sessions.values()
             ],
-            "board_stages": ["backlog", "plan", "processing", "review"],
+            "board_stages": self.list_board_stages(),
         }
 
     def config_bootstrap(self) -> dict[str, Any]:
@@ -491,13 +503,74 @@ class WebSessionManager:
     def list_tasks(self) -> list[dict[str, Any]]:
         with SessionStore() as store:
             records = store.list_kanban_tasks(self._directory_key)
+            stage_records = {
+                item.stage_id: item
+                for item in store.list_kanban_stage_configs(self._directory_key)
+            }
         return [
             _serialize_task(
                 record,
-                runtime=self._resolve_runtime_optional(record.model_profile_id),
+                runtime=self._resolve_task_runtime(
+                    record,
+                    stage_record=stage_records.get(record.stage),
+                ),
             )
             for record in records
         ]
+
+    def list_board_stages(self) -> list[dict[str, Any]]:
+        with SessionStore() as store:
+            records = store.list_kanban_stage_configs(self._directory_key)
+        return [_serialize_board_stage(record) for record in records]
+
+    def replace_board_stages(
+        self, *, stages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        if not stages:
+            raise ConfigError("Board must contain at least one stage.")
+        config = load_internal_config()
+        profiles = self._profile_map(config)
+        modes = self._mode_map(config)
+        stage_specs: list[KanbanStageConfigSpec] = []
+        seen_stage_ids: set[str] = set()
+        for item in stages:
+            raw_id = str(item.get("id") or "").strip()
+            raw_name = str(item.get("name") or "").strip()
+            if not raw_name:
+                raise ConfigError("Stage name cannot be empty.")
+            stage_id = slugify(raw_id or raw_name)
+            if stage_id in seen_stage_ids:
+                raise ConfigError(f"Stage '{stage_id}' already exists.")
+            seen_stage_ids.add(stage_id)
+            profile_id = item.get("profile_id")
+            if profile_id is not None:
+                profile_key = slugify(str(profile_id))
+                if profiles.get(profile_key) is None:
+                    raise ConfigError(f"Unknown profile ID '{profile_id}'.")
+                profile_id = profile_key
+            mode_id = item.get("mode_id")
+            if mode_id is not None:
+                mode_key = slugify(str(mode_id))
+                if modes.get(mode_key) is None:
+                    raise ConfigError(f"Unknown mode ID '{mode_id}'.")
+                mode_id = mode_key
+            stage_specs.append(
+                KanbanStageConfigSpec(
+                    stage_id=stage_id,
+                    name=raw_name,
+                    model_profile_id=profile_id,
+                    mode_id=mode_id,
+                    auto_start=bool(item.get("auto_start")),
+                )
+            )
+        with SessionStore() as store:
+            records = store.replace_kanban_stage_configs(
+                self._directory_key,
+                stages=stage_specs,
+            )
+        payload = [_serialize_board_stage(record) for record in records]
+        self._app_stream.publish("board_stages_updated", {"board_stages": payload})
+        return payload
 
     def create_live_chat(
         self,
@@ -743,7 +816,7 @@ class WebSessionManager:
         *,
         title: str,
         prompt: str,
-        stage: str = KANBAN_STAGE_BACKLOG,
+        stage: str | None = None,
         project_dir: str = ".",
         session_id: str | None = None,
         profile_id: str | None = None,
@@ -751,17 +824,19 @@ class WebSessionManager:
         self._validate_project_dir(project_dir)
         if profile_id is not None:
             self._resolve_runtime(profile_id)
+        stage_id = stage or self._default_board_stage_id()
         with SessionStore() as store:
             record = store.create_kanban_task(
                 directory=self._directory_key,
                 title=title,
                 prompt=prompt,
-                stage=stage,
+                stage=stage_id,
                 project_dir=project_dir,
                 session_id=session_id,
                 model_profile_id=profile_id,
             )
-        return self._publish_task_updated(record)
+        payload = self._publish_task_updated(record)
+        return self._maybe_auto_start_task(record) or payload
 
     def update_task(
         self,
@@ -804,7 +879,10 @@ class WebSessionManager:
             )
         if updated is None:
             raise KeyError(task_id)
-        return self._publish_task_updated(updated)
+        payload = self._publish_task_updated(updated)
+        if stage is not None and stage != current.stage:
+            return self._maybe_auto_start_task(updated) or payload
+        return payload
 
     def delete_task(self, task_id: str) -> None:
         with self._lock:
@@ -1233,42 +1311,71 @@ class WebSessionManager:
                 self._publish_task_updated(updated)
 
         try:
-            with SessionStore() as store:
-                record = store.get_kanban_task(task_id)
-            if record is None:
-                raise KeyError(task_id)
+            while True:
+                with SessionStore() as store:
+                    record = store.get_kanban_task(task_id)
+                    stage_record = store.get_kanban_stage_config(
+                        self._directory_key,
+                        record.stage if record is not None else "",
+                    )
+                if record is None:
+                    raise KeyError(task_id)
 
-            runtime = self._resolve_runtime_or_default(record.model_profile_id)
-            outcome = run_single_turn_in_directory(
-                record.prompt,
-                runtime,
-                KanbanTaskDisplay(
-                    publish_summary=publish_summary,
-                    verbose=runtime.settings.verbose,
-                ),
-                project_dir=record.project_dir,
-                workspace_root=self._workspace_root,
-                resume_session_id=record.session_id,
-            )
-            if outcome.tool_errors:
-                status = KANBAN_RUN_STATUS_FAILED
-                summary = shorten(
-                    (outcome.text or "Completed with tool errors.").strip(),
-                    200,
+                runtime = self._resolve_task_runtime(
+                    record,
+                    stage_record=stage_record,
                 )
-            else:
-                status = KANBAN_RUN_STATUS_COMPLETED
-                summary = shorten((outcome.text or "Completed.").strip(), 200)
+                outcome = run_single_turn_in_directory(
+                    self._task_prompt_for_run(record.prompt, stage_record),
+                    runtime,
+                    KanbanTaskDisplay(
+                        publish_summary=publish_summary,
+                        verbose=runtime.settings.verbose,
+                    ),
+                    project_dir=record.project_dir,
+                    workspace_root=self._workspace_root,
+                    resume_session_id=record.session_id,
+                )
+                if outcome.tool_errors:
+                    status = KANBAN_RUN_STATUS_FAILED
+                    summary = shorten(
+                        (outcome.text or "Completed with tool errors.").strip(),
+                        200,
+                    )
+                else:
+                    status = KANBAN_RUN_STATUS_COMPLETED
+                    summary = shorten((outcome.text or "Completed.").strip(), 200)
 
-            with SessionStore() as store:
-                updated = store.set_kanban_task_result(
-                    task_id,
-                    run_status=status,
-                    summary=summary,
-                    session_id=outcome.session_id,
-                )
-            if updated is not None:
-                self._publish_task_updated(updated)
+                with SessionStore() as store:
+                    updated = store.set_kanban_task_result(
+                        task_id,
+                        run_status=status,
+                        summary=summary,
+                        session_id=outcome.session_id,
+                    )
+                    if updated is None:
+                        raise KeyError(task_id)
+                    if status == KANBAN_RUN_STATUS_FAILED:
+                        next_record = updated
+                    else:
+                        next_stage_id = self._next_board_stage_id(
+                            updated.stage, store=store
+                        )
+                        if next_stage_id is not None:
+                            moved = store.move_kanban_task(task_id, stage=next_stage_id)
+                            next_record = moved or updated
+                        else:
+                            next_record = updated
+                self._publish_task_updated(next_record)
+                if status == KANBAN_RUN_STATUS_FAILED:
+                    break
+                if not self._should_auto_start_stage(next_record.stage):
+                    break
+                with SessionStore() as store:
+                    rerunning = store.set_kanban_task_running(task_id)
+                if rerunning is None:
+                    break
+                self._publish_task_updated(rerunning)
         except Exception as exc:
             message = shorten(format_user_facing_error(exc), 200)
             with SessionStore() as store:
@@ -1366,9 +1473,13 @@ class WebSessionManager:
         }
 
     def _serialize_task_record(self, record: KanbanTaskRecord) -> dict[str, Any]:
+        stage_record = self._get_board_stage_record(record.stage)
         return _serialize_task(
             record,
-            runtime=self._resolve_runtime_optional(record.model_profile_id),
+            runtime=self._resolve_task_runtime(
+                record,
+                stage_record=stage_record,
+            ),
         )
 
     def _require_live_session(self, live_session_id: str) -> LiveChatSession:
@@ -1376,6 +1487,73 @@ class WebSessionManager:
         if live_session is None:
             raise KeyError(live_session_id)
         return live_session
+
+    def _get_board_stage_record(self, stage_id: str) -> KanbanStageConfigRecord | None:
+        with SessionStore() as store:
+            return store.get_kanban_stage_config(self._directory_key, stage_id)
+
+    def _default_board_stage_id(self) -> str:
+        with SessionStore() as store:
+            stages = store.list_kanban_stage_configs(self._directory_key)
+        if not stages:
+            raise ConfigError("Board must contain at least one stage.")
+        return stages[0].stage_id
+
+    def _next_board_stage_id(
+        self,
+        current_stage_id: str,
+        *,
+        store: SessionStore | None = None,
+    ) -> str | None:
+        if store is None:
+            with SessionStore() as owned_store:
+                return self._next_board_stage_id(current_stage_id, store=owned_store)
+        stages = store.list_kanban_stage_configs(self._directory_key)
+        for index, stage in enumerate(stages):
+            if stage.stage_id == current_stage_id:
+                if index + 1 < len(stages):
+                    return stages[index + 1].stage_id
+                return None
+        return None
+
+    def _should_auto_start_stage(self, stage_id: str) -> bool:
+        stage_record = self._get_board_stage_record(stage_id)
+        return bool(stage_record and stage_record.auto_start)
+
+    def _resolve_task_runtime(
+        self,
+        record: KanbanTaskRecord,
+        *,
+        stage_record: KanbanStageConfigRecord | None = None,
+    ) -> ResolvedRuntime:
+        resolved_profile_id = record.model_profile_id or (
+            stage_record.model_profile_id if stage_record is not None else None
+        )
+        return self._resolve_runtime_or_default(resolved_profile_id)
+
+    def _task_prompt_for_run(
+        self,
+        prompt: str,
+        stage_record: KanbanStageConfigRecord | None,
+    ) -> str:
+        stripped_prompt = prompt.strip()
+        if (
+            not stripped_prompt
+            or stripped_prompt.startswith("/")
+            or stage_record is None
+            or not stage_record.mode_id
+        ):
+            return prompt
+        config = load_internal_config()
+        mode = self._mode_map(config).get(stage_record.mode_id)
+        if mode is None:
+            return prompt
+        return f"{mode.slash_alias} {prompt}"
+
+    def _maybe_auto_start_task(self, record: KanbanTaskRecord) -> dict[str, Any] | None:
+        if not self._should_auto_start_stage(record.stage):
+            return None
+        return self.run_task(record.task_id)
 
     def _validate_project_dir(self, project_dir: str) -> None:
         candidate = project_dir.strip() or "."

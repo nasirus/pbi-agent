@@ -1,11 +1,7 @@
 import { useDroppable } from "@dnd-kit/core";
-import type { TaskRecord } from "../../types";
+import type { BoardStage, TaskRecord } from "../../types";
 import { EmptyState } from "../shared/EmptyState";
 import { TaskCard } from "./TaskCard";
-
-function formatStageLabel(stage: string): string {
-  return stage.charAt(0).toUpperCase() + stage.slice(1);
-}
 
 export function StageColumn({
   stage,
@@ -14,16 +10,15 @@ export function StageColumn({
   onDelete,
   onRun,
 }: {
-  stage: TaskRecord["stage"];
+  stage: BoardStage;
   tasks: TaskRecord[];
   onEdit: (task: TaskRecord) => void;
   onDelete: (taskId: string) => void;
   onRun: (taskId: string) => void;
 }) {
   const { isOver, setNodeRef } = useDroppable({
-    id: `stage:${stage}`,
-    data: { stage },
-    disabled: stage === "processing",
+    id: `stage:${stage.id}`,
+    data: { stage: stage.id },
   });
 
   return (
@@ -32,12 +27,20 @@ export function StageColumn({
       className={`board-column${isOver ? " board-column--drop-over" : ""}`}
     >
       <header className="board-column__header">
-        <span className="board-column__name">
-          {formatStageLabel(stage)}
-          {stage === "processing" ? (
-            <span className="board-column__label">auto</span>
-          ) : null}
-        </span>
+        <div className="board-column__heading">
+          <span className="board-column__name">{stage.name}</span>
+          <div className="board-column__meta">
+            {stage.auto_start ? (
+              <span className="board-column__label">auto-start</span>
+            ) : null}
+            {stage.mode_id ? (
+              <span className="board-column__label">mode:{stage.mode_id}</span>
+            ) : null}
+            {stage.profile_id ? (
+              <span className="board-column__label">profile:{stage.profile_id}</span>
+            ) : null}
+          </div>
+        </div>
         <span className="board-column__count">{tasks.length}</span>
       </header>
       <div className="board-column__body">
