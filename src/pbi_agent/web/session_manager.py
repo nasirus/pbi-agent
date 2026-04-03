@@ -44,7 +44,7 @@ from pbi_agent.config import (
 from pbi_agent.display.formatting import shorten
 from pbi_agent.media import load_workspace_image
 from pbi_agent.models.messages import ImageAttachment
-from pbi_agent.providers.capabilities import provider_supports_images
+from pbi_agent.provider_capabilities import provider_supports_images
 from pbi_agent.session_store import (
     KANBAN_RUN_STATUS_COMPLETED,
     KANBAN_RUN_STATUS_FAILED,

@@ -40,7 +40,7 @@ from pbi_agent.config import (
     Settings,
     resolve_web_runtime,
 )
-from pbi_agent.providers.capabilities import provider_supports_images
+from pbi_agent.provider_capabilities import provider_supports_images
 from pbi_agent.web.input_mentions import expand_input_mentions
 from pbi_agent.web.session_manager import APP_EVENT_STREAM_ID, WebSessionManager
 from pbi_agent.web.uploads import load_uploaded_image_record, uploaded_image_path

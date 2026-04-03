@@ -5,7 +5,7 @@ description: 'The provider-agnostic function tools available to the pbi-agent ru
 
 # Built-in Tools
 
-Most built-in tools are exposed through the shared tool registry across providers. `read_image` is only enabled on providers that support multimodal image input in this build.
+Most built-in tools are exposed through the shared tool registry across providers. `read_file` handles supported images as well as text and document formats, but image attachments only work on providers that support multimodal image input in this build.
 
 Project-local MCP servers are discovered from `.agents/mcp.json` and their tools are merged into the same runtime catalog at startup. Those tools are exposed to the model as ordinary function tools with per-server namespacing, so a tool named `say_hi` from the `echo` server is sent to the model as `echo__say_hi`.
 
@@ -19,8 +19,7 @@ Project-local MCP servers are discovered from `.agents/mcp.json` and their tools
 | `sub_agent` | no | Delegate a scoped task to a child agent, optionally selecting a discovered project sub-agent type and inheriting parent context. |
 | `list_files` | no | List files and directories in the workspace, with optional glob and type filtering. |
 | `search_files` | no | Search text file contents for a string or regex pattern. |
-| `read_file` | no | Read text files with optional line ranges, summarize tabular files, and extract text from PDF and DOCX files. |
-| `read_image` | no | Read a local image file and attach it to the model context in native multimodal format. |
+| `read_file` | no | Read text files with optional line ranges, summarize tabular files, extract text from PDF and DOCX files, and attach supported local images to the model context. |
 | `read_web_url` | no | Fetch a public web page through markdown.new and return Markdown. |
 
 ## MCP Tools
@@ -188,7 +187,7 @@ List directory contents for general workspace discovery, or narrow results by gl
 
 ## `read_file`
 
-Read workspace files safely, with line-range support for text files, compact summaries for tabular files, and extraction for formats such as PDF and DOCX.
+Read workspace files safely, with line-range support for text files, compact summaries for tabular files, extraction for formats such as PDF and DOCX, and multimodal attachment support for supported image files.
 
 `read_file` is also the activation path for project-local `SKILL.md` files discovered from `.agents/skills/`. When the prompt catalog lists a skill, the model should load that `SKILL.md` with `read_file` first, then inspect any referenced project-local resources with `read_file`, `list_files`, or `search_files`.
 
@@ -207,26 +206,12 @@ Read workspace files safely, with line-range support for text files, compact sum
 }
 ```
 
-## `read_image`
+Supported image formats are `.png`, `.jpg`, `.jpeg`, and `.webp`. Common unsupported image extensions such as `.gif` are rejected with a clear error.
 
-Read a local image file and attach it to the model context while returning a compact metadata summary.
-
-| Parameter | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `path` | `string` | yes | Image path relative to the workspace root, or an absolute path that still resolves within the workspace. |
-
-```json
-{
-  "path": "general_ocr_002.png"
-}
-```
-
-Supported image formats are `.png`, `.jpg`, `.jpeg`, and `.webp`.
-
-`read_image` returns a concise JSON summary to the transcript and keeps the base64 image payload in provider-native multimodal content blocks instead of embedding it into plain text.
+When `path` points to a supported image, `read_file` returns a concise JSON summary to the transcript and keeps the base64 image payload in provider-native multimodal content blocks instead of embedding it into plain text.
 
 ::: warning
-`read_image` is currently only registered for OpenAI, Google, and Anthropic. It is intentionally hidden for xAI and Generic in this build.
+Image attachment output from `read_file` is currently only available on OpenAI, Google, and Anthropic. On xAI and Generic, `read_file` returns a clear runtime error if asked to inspect a local image.
 :::
 
 ## `read_web_url`

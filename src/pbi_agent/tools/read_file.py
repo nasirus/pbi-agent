@@ -9,8 +9,10 @@ from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
+from pbi_agent.media import load_workspace_image
+from pbi_agent.provider_capabilities import provider_supports_images
 from pbi_agent.tools.output import bound_output
-from pbi_agent.tools.types import ToolContext, ToolSpec
+from pbi_agent.tools.types import ToolContext, ToolOutput, ToolSpec
 from pbi_agent.tools.workspace_access import DEFAULT_MAX_LINES
 from pbi_agent.tools.workspace_access import normalize_positive_int
 from pbi_agent.tools.workspace_access import open_text_file
@@ -35,12 +37,13 @@ _TABULAR_EXTENSIONS = {
     ".arrow",
 }
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_IMAGE_HINT_EXTENSIONS = _IMAGE_EXTENSIONS | {".bmp", ".gif", ".tif", ".tiff"}
 
 SPEC = ToolSpec(
     name="read_file",
     description=(
         "Read a workspace file. Supports text (with line ranges), "
-        "tabular data (CSV/Excel/Parquet), PDF, and DOCX."
+        "tabular data (CSV/Excel/Parquet), PDF, DOCX, and supported images."
     ),
     parameters_schema={
         "type": "object",
@@ -72,8 +75,9 @@ SPEC = ToolSpec(
 )
 
 
-def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-    del context
+def handle(
+    arguments: dict[str, Any], context: ToolContext
+) -> dict[str, Any] | ToolOutput:
     path_value = arguments.get("path", "")
     if not isinstance(path_value, str) or not path_value.strip():
         return {"error": "'path' must be a non-empty string."}
@@ -93,13 +97,8 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
             return {"error": f"path is not a file: {target_path}"}
 
         suffix = target_path.suffix.lower()
-        if suffix in _IMAGE_EXTENSIONS:
-            return {
-                "error": (
-                    f"image file is not supported by read_file: {target_path.name}; "
-                    "use read_image instead"
-                )
-            }
+        if suffix in _IMAGE_HINT_EXTENSIONS:
+            return _handle_image_file(root, target_path, context=context)
         if suffix in {".xlsx", ".xls"}:
             return _handle_excel_workbook(root, target_path)
         if suffix in _TABULAR_EXTENSIONS:
@@ -145,6 +144,33 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         return result
     except Exception as exc:
         return {"error": bound_output(str(exc))[0]}
+
+
+def _handle_image_file(
+    root: Path,
+    target_path: Path,
+    *,
+    context: ToolContext,
+) -> dict[str, Any] | ToolOutput:
+    settings = context.settings
+    provider_name = ""
+    if settings is not None:
+        provider_name = str(getattr(settings, "provider", "") or "").strip()
+
+    if provider_name and not provider_supports_images(provider_name):
+        return {
+            "error": (
+                f"provider '{provider_name}' does not support image inputs in this build"
+            )
+        }
+
+    image = load_workspace_image(root, str(target_path))
+    summary = {
+        "path": image.path,
+        "mime_type": image.mime_type,
+        "byte_count": image.byte_count,
+    }
+    return ToolOutput(result=summary, attachments=[image])
 
 
 def _handle_tabular_file(root: Path, target_path: Path, suffix: str) -> dict[str, Any]:
