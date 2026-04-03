@@ -101,7 +101,12 @@ export function ModeModal({ mode, onSave, onClose }: Props) {
           </button>
         </div>
 
-        <form className="task-form" onSubmit={handleSubmit}>
+        <form
+          className="task-form"
+          onSubmit={(event) => {
+            void handleSubmit(event);
+          }}
+        >
           <div className="task-form__field">
             <label className="task-form__label">Name</label>
             <input

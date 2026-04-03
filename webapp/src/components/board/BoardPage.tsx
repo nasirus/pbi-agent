@@ -10,6 +10,7 @@ import { TaskModal, type EditableTask } from "./TaskModal";
 import { TaskCardContent } from "./TaskCard";
 
 const BOARD_STAGES = ["backlog", "plan", "processing", "review"] as const;
+const EMPTY_TASKS: TaskRecord[] = [];
 
 export function BoardPage() {
   const client = useQueryClient();
@@ -35,7 +36,7 @@ export function BoardPage() {
     onSuccess: () => client.invalidateQueries({ queryKey: ["tasks"] }),
   });
 
-  const tasks = tasksQuery.data ?? [];
+  const tasks = tasksQuery.data ?? EMPTY_TASKS;
   const tasksByStage = useMemo(
     () =>
       BOARD_STAGES.reduce<Record<string, TaskRecord[]>>((acc, stage) => {
@@ -181,7 +182,9 @@ export function BoardPage() {
           onChange={(updates) =>
             setEditingTask((prev) => (prev ? { ...prev, ...updates } : prev))
           }
-          onSave={saveTask}
+          onSave={(event) => {
+            void saveTask(event);
+          }}
           onClose={() => setEditingTask(null)}
         />
       ) : null}

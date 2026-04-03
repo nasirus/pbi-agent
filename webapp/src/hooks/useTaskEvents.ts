@@ -24,9 +24,23 @@ export function useTaskEvents(): void {
       };
 
       socket.onmessage = (message) => {
+        if (typeof message.data !== "string") {
+          return;
+        }
         const event = JSON.parse(message.data) as WebEvent;
         if (event.type === "task_updated" || event.type === "task_deleted") {
-          client.invalidateQueries({ queryKey: ["tasks"] });
+          void client.invalidateQueries({ queryKey: ["tasks"] });
+          return;
+        }
+        if (
+          event.type === "live_session_started"
+          || event.type === "live_session_updated"
+          || event.type === "live_session_bound"
+          || event.type === "live_session_ended"
+        ) {
+          void client.invalidateQueries({ queryKey: ["sessions"] });
+          void client.invalidateQueries({ queryKey: ["bootstrap"] });
+          void client.invalidateQueries({ queryKey: ["live-sessions"] });
         }
       };
 

@@ -172,6 +172,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const canSend =
     Boolean(liveSessionId) && inputEnabled && !sessionEnded && !isSubmitting;
+  const isActionMenuOpen = canSend && actionMenuOpen;
   const activeSlashCommand = parseActiveSlashCommand(input, cursorIndex);
   const activeMention = activeSlashCommand
     ? null
@@ -347,7 +348,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, []);
 
   useEffect(() => {
-    if (!actionMenuOpen) {
+    if (!isActionMenuOpen) {
       return undefined;
     }
 
@@ -363,13 +364,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [actionMenuOpen]);
-
-  useEffect(() => {
-    if (!canSend) {
-      setActionMenuOpen(false);
-    }
-  }, [canSend]);
+  }, [isActionMenuOpen]);
 
   const submitValue = useCallback(
     async (textValue: string) => {
@@ -405,6 +400,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   useEffect(() => {
     if (!canSend || activeCompletionMode === null || activeCompletionQuery === null) {
       completionRequestIdRef.current += 1;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- completion UI must reset immediately when the query becomes invalid; deferring this causes stale suggestions to flash.
       closeCompletions();
       return undefined;
     }
@@ -420,39 +416,41 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
     const requestId = completionRequestIdRef.current + 1;
     completionRequestIdRef.current = requestId;
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        const items =
-          activeCompletionMode === "slash"
-            ? (await searchSlashCommands(activeCompletionQuery, 8)).map(
-                (command): CompletionItem => ({
-                  kind: "slash",
-                  key: command.name,
-                  command,
-                }),
-              )
-            : (await searchFileMentions(activeCompletionQuery, 8)).map(
-                (mention): CompletionItem => ({
-                  kind: "mention",
-                  key: mention.path,
-                  mention,
-                }),
-              );
-        if (completionRequestIdRef.current !== requestId) return;
-        setCompletionItems(items);
-        setCompletionLoading(false);
-        setCompletionSelectedIndex((previousIndex) =>
-          items.length === 0 ? 0 : Math.min(previousIndex, items.length - 1),
-        );
-      } catch {
-        if (completionRequestIdRef.current !== requestId) return;
-        setCompletionLoading(false);
-        setCompletionError(
-          activeCompletionMode === "slash"
-            ? "Unable to load commands"
-            : "Unable to load files",
-        );
-      }
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const items =
+            activeCompletionMode === "slash"
+              ? (await searchSlashCommands(activeCompletionQuery, 8)).map(
+                  (command): CompletionItem => ({
+                    kind: "slash",
+                    key: command.name,
+                    command,
+                  }),
+                )
+              : (await searchFileMentions(activeCompletionQuery, 8)).map(
+                  (mention): CompletionItem => ({
+                    kind: "mention",
+                    key: mention.path,
+                    mention,
+                  }),
+                );
+          if (completionRequestIdRef.current !== requestId) return;
+          setCompletionItems(items);
+          setCompletionLoading(false);
+          setCompletionSelectedIndex((previousIndex) =>
+            items.length === 0 ? 0 : Math.min(previousIndex, items.length - 1),
+          );
+        } catch {
+          if (completionRequestIdRef.current !== requestId) return;
+          setCompletionLoading(false);
+          setCompletionError(
+            activeCompletionMode === "slash"
+              ? "Unable to load commands"
+              : "Unable to load files",
+          );
+        }
+      })();
     }, activeCompletionMode === "slash" ? 60 : 120);
 
     return () => {
@@ -606,7 +604,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       : null);
 
   return (
-    <form className="composer" onSubmit={handleSubmit}>
+    <form
+      className="composer"
+      onSubmit={(event) => {
+        void handleSubmit(event);
+      }}
+    >
       <input
         ref={fileInputRef}
         type="file"
@@ -625,16 +628,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         <div className="composer__action-menu" ref={actionMenuRef}>
           <button
             type="button"
-            className={`composer__action-trigger ${actionMenuOpen ? "composer__action-trigger--open" : ""}`}
+            className={`composer__action-trigger ${isActionMenuOpen ? "composer__action-trigger--open" : ""}`}
             onClick={() => setActionMenuOpen((current) => !current)}
             disabled={!canSend}
             aria-haspopup="menu"
-            aria-expanded={actionMenuOpen}
+            aria-expanded={isActionMenuOpen}
             aria-label="Actions"
           >
             <span className="composer__action-trigger-icon" aria-hidden="true">+</span>
           </button>
-          {actionMenuOpen ? (
+          {isActionMenuOpen ? (
             <div className="composer__action-popover" role="menu" aria-label="Input actions">
               <button
                 type="button"

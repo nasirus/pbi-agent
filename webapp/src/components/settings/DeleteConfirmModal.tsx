@@ -69,7 +69,9 @@ export function DeleteConfirmModal({
             <button
               type="button"
               className="btn btn--danger"
-              onClick={handleConfirm}
+              onClick={() => {
+                void handleConfirm();
+              }}
               disabled={isPending}
             >
               {isPending ? "Deleting…" : confirmLabel}

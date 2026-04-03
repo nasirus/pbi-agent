@@ -3,8 +3,6 @@ import type { TaskRecord } from "../../types";
 import { EmptyState } from "../shared/EmptyState";
 import { TaskCard } from "./TaskCard";
 
-const BOARD_STAGES = ["backlog", "plan", "processing", "review"] as const;
-
 function formatStageLabel(stage: string): string {
   return stage.charAt(0).toUpperCase() + stage.slice(1);
 }
@@ -16,7 +14,7 @@ export function StageColumn({
   onDelete,
   onRun,
 }: {
-  stage: (typeof BOARD_STAGES)[number];
+  stage: TaskRecord["stage"];
   tasks: TaskRecord[];
   onEdit: (task: TaskRecord) => void;
   onDelete: (taskId: string) => void;
