@@ -148,7 +148,7 @@ pbi-agent run --prompt "Read the text in this image." --image ./general_ocr_002.
 
 Supported image formats are `.png`, `.jpg`, `.jpeg`, and `.webp`.
 
-| Provider | Explicit image attachments (`--image`, `/image add`) | `read_image` tool |
+| Provider | Explicit image attachments (`--image`, `/image add`) | `read_file` image reads |
 | --- | --- | --- |
 | OpenAI | yes | yes |
 | Google | yes | yes |

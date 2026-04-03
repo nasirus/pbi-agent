@@ -22,7 +22,7 @@ my-project/
 
 - Its content becomes the agent's system prompt verbatim.
 - The Power BI-specific tools `skill_knowledge` and `init_report` are automatically excluded from the tool list, since they are only meaningful in a Power BI context.
-- All other tools (`shell`, `python_exec`, `apply_patch`, `read_file`, `search_files`, `list_files`, `read_web_url`, `sub_agent`, `read_image`) remain available.
+- All other tools (`shell`, `python_exec`, `apply_patch`, `read_file`, `search_files`, `list_files`, `read_web_url`, `sub_agent`) remain available.
 - `AGENTS.md` project rules are still appended if present (see below).
 
 **Example — Python coding agent:**

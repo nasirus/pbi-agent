@@ -32,12 +32,12 @@ from pbi_agent.models.messages import (
     TokenUsage,
     UserTurnInput,
 )
+from pbi_agent.provider_capabilities import provider_supports_images
 from pbi_agent.providers import create_provider
 from pbi_agent.providers.base import Provider
 
 if TYPE_CHECKING:
     from pbi_agent.tools.catalog import ToolCatalog
-from pbi_agent.providers.capabilities import provider_supports_images
 from pbi_agent.session_store import MessageImageAttachment, SessionStore
 from pbi_agent.tools.types import ParentContextSnapshot
 from pbi_agent.display.protocol import (
