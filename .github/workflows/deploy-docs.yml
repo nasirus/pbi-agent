@@ -25,17 +25,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install docs dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Build VitePress site
-        run: npm run docs:build
+        run: bun run docs:build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
