@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const SCROLL_THRESHOLD = 80;
 
 export function useAutoScroll(
-  deps: unknown[],
+  changeKey: unknown,
   options?: {
     followOnChange?: boolean;
   },
@@ -19,7 +19,9 @@ export function useAutoScroll(
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
     userScrolledRef.current = !atBottom;
-    if (atBottom) setShowNewMessages(false);
+    if (atBottom) {
+      setShowNewMessages(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -39,12 +41,15 @@ export function useAutoScroll(
         el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
       });
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- badge visibility should change with the message batch that triggered this effect, not one frame later.
       setShowNewMessages(true);
     }
-  }, [followOnChange, ...deps]);
+  }, [changeKey, followOnChange]);
 
   useEffect(() => {
-    return () => cancelAnimationFrame(rafRef.current);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+    };
   }, []);
 
   const scrollToBottom = useCallback(() => {

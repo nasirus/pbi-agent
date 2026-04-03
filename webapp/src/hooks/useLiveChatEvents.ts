@@ -21,6 +21,8 @@ export function useLiveChatEvents(
       }
       return;
     }
+    const currentChatKey = chatKey;
+    const currentLiveSessionId = liveSessionId;
 
     let socket: WebSocket | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -28,21 +30,24 @@ export function useLiveChatEvents(
 
     function connect() {
       if (disposed) return;
-      setConnection(chatKey, "connecting");
-      socket = new WebSocket(websocketUrl(`/api/events/${liveSessionId}`));
+      setConnection(currentChatKey, "connecting");
+      socket = new WebSocket(websocketUrl(`/api/events/${currentLiveSessionId}`));
 
       socket.onopen = () => {
         retryDelay.current = INITIAL_DELAY;
-        setConnection(chatKey, "connected");
+        setConnection(currentChatKey, "connected");
       };
 
       socket.onmessage = (message) => {
-        applyEvent(chatKey, JSON.parse(message.data) as WebEvent);
+        if (typeof message.data !== "string") {
+          return;
+        }
+        applyEvent(currentChatKey, JSON.parse(message.data) as WebEvent);
       };
 
       socket.onclose = () => {
         if (disposed) return;
-        setConnection(chatKey, "disconnected");
+        setConnection(currentChatKey, "disconnected");
         retryTimer = setTimeout(() => {
           retryDelay.current = Math.min(retryDelay.current * 2, MAX_DELAY);
           connect();

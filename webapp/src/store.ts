@@ -103,6 +103,37 @@ function upsertItem(items: TimelineItem[], nextItem: TimelineItem): TimelineItem
   return updated;
 }
 
+function readString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function readTimelineRole(
+  value: unknown,
+): "user" | "assistant" | "notice" | "error" | "debug" {
+  switch (value) {
+    case "user":
+    case "assistant":
+    case "notice":
+    case "error":
+    case "debug":
+      return value;
+    default:
+      return "assistant";
+  }
+}
+
+function isImageAttachment(value: unknown): value is ImageAttachment {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  return "upload_id" in value
+    && typeof (value as { upload_id: unknown }).upload_id === "string";
+}
+
 function mapSnapshotItem(raw: Record<string, unknown>): TimelineItem | null {
   const kind = raw.kind;
   const itemId = typeof raw.itemId === "string" ? raw.itemId : null;
@@ -111,44 +142,36 @@ function mapSnapshotItem(raw: Record<string, unknown>): TimelineItem | null {
     return {
       kind: "message",
       itemId,
-      role: (raw.role as "user" | "assistant" | "notice" | "error" | "debug") ?? "assistant",
-      content: String(raw.content ?? ""),
+      role: readTimelineRole(raw.role),
+      content: readString(raw.content),
       filePaths: Array.isArray(raw.file_paths)
         ? raw.file_paths.filter((value): value is string => typeof value === "string")
         : undefined,
       imageAttachments: Array.isArray(raw.image_attachments)
-        ? raw.image_attachments.filter(
-            (value): value is ImageAttachment =>
-              Boolean(value)
-              && typeof value === "object"
-              && typeof (value as ImageAttachment).upload_id === "string",
-          )
+        ? raw.image_attachments.filter(isImageAttachment)
         : undefined,
       markdown: Boolean(raw.markdown),
-      subAgentId:
-        typeof raw.sub_agent_id === "string" ? raw.sub_agent_id : undefined,
+      subAgentId: readOptionalString(raw.sub_agent_id),
     };
   }
   if (kind === "thinking") {
     return {
       kind: "thinking",
       itemId,
-      title: String(raw.title ?? "Thinking"),
-      content: String(raw.content ?? ""),
-      subAgentId:
-        typeof raw.sub_agent_id === "string" ? raw.sub_agent_id : undefined,
+      title: readString(raw.title, "Thinking"),
+      content: readString(raw.content),
+      subAgentId: readOptionalString(raw.sub_agent_id),
     };
   }
   if (kind === "tool_group") {
     return {
       kind: "tool_group",
       itemId,
-      label: String(raw.label ?? "Tool calls"),
+      label: readString(raw.label, "Tool calls"),
       items: Array.isArray(raw.items)
         ? (raw.items as { text: string; classes?: string }[])
         : [],
-      subAgentId:
-        typeof raw.sub_agent_id === "string" ? raw.sub_agent_id : undefined,
+      subAgentId: readOptionalString(raw.sub_agent_id),
     };
   }
   return null;
@@ -183,7 +206,7 @@ function moveChatState(
   };
 }
 
-export const useChatStore = create<ChatStore>((set, get) => ({
+export const useChatStore = create<ChatStore>((set) => ({
   activeChatKey: null,
   chatsByKey: {},
   liveSessionIndex: {},
@@ -397,7 +420,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           patch.inputEnabled = Boolean(payload.enabled);
           break;
         case "wait_state":
-          patch.waitMessage = payload.active ? String(payload.message || "Working...") : null;
+          patch.waitMessage = payload.active
+            ? readString(payload.message, "Working...")
+            : null;
           break;
         case "usage_updated":
           if (payload.scope === "session") {
@@ -414,24 +439,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const item: TimelineItem = {
             kind: "message",
             itemId: String(payload.item_id),
-            role:
-              (payload.role as "user" | "assistant" | "notice" | "error" | "debug")
-              ?? "assistant",
-            content: String(payload.content || ""),
+            role: readTimelineRole(payload.role),
+            content: readString(payload.content),
             filePaths: Array.isArray(payload.file_paths)
               ? payload.file_paths.filter((value): value is string => typeof value === "string")
               : undefined,
             imageAttachments: Array.isArray(payload.image_attachments)
-              ? payload.image_attachments.filter(
-                  (value): value is ImageAttachment =>
-                    Boolean(value)
-                    && typeof value === "object"
-                    && typeof value.upload_id === "string",
-                )
+              ? payload.image_attachments.filter(isImageAttachment)
               : undefined,
             markdown: Boolean(payload.markdown),
-            subAgentId:
-              typeof payload.sub_agent_id === "string" ? payload.sub_agent_id : undefined,
+            subAgentId: readOptionalString(payload.sub_agent_id),
           };
           patch.items = upsertItem(current.items, item);
           patch.itemsVersion = current.itemsVersion + 1;
@@ -441,10 +458,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const item: TimelineItem = {
             kind: "thinking",
             itemId: String(payload.item_id),
-            title: String(payload.title || "Thinking"),
-            content: String(payload.content || ""),
-            subAgentId:
-              typeof payload.sub_agent_id === "string" ? payload.sub_agent_id : undefined,
+            title: readString(payload.title, "Thinking"),
+            content: readString(payload.content),
+            subAgentId: readOptionalString(payload.sub_agent_id),
           };
           patch.items = upsertItem(current.items, item);
           patch.itemsVersion = current.itemsVersion + 1;
@@ -454,24 +470,23 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const item: TimelineItem = {
             kind: "tool_group",
             itemId: String(payload.item_id),
-            label: String(payload.label || "Tool calls"),
+            label: readString(payload.label, "Tool calls"),
             items: Array.isArray(payload.items)
               ? (payload.items as { text: string; classes?: string }[])
               : [],
-            subAgentId:
-              typeof payload.sub_agent_id === "string" ? payload.sub_agent_id : undefined,
+            subAgentId: readOptionalString(payload.sub_agent_id),
           };
           patch.items = upsertItem(current.items, item);
           patch.itemsVersion = current.itemsVersion + 1;
           break;
         }
         case "sub_agent_state": {
-          const subAgentId = String(payload.sub_agent_id || "");
+          const subAgentId = readString(payload.sub_agent_id);
           patch.subAgents = {
             ...current.subAgents,
             [subAgentId]: {
-              title: String(payload.title || "sub_agent"),
-              status: String(payload.status || "running"),
+              title: readString(payload.title, "sub_agent"),
+              status: readString(payload.status, "running"),
             },
           };
           break;

@@ -10,12 +10,12 @@ export function UsageBar({
   turnUsage,
 }: {
   sessionUsage: UsagePayload | null;
-  turnUsage: { usage: UsagePayload; elapsedSeconds?: number } | null;
+  turnUsage: { usage: UsagePayload | null; elapsedSeconds?: number } | null;
 }) {
   const tokens = formatTokens(sessionUsage?.total_tokens ?? 0);
   const cost = `$${(sessionUsage?.estimated_cost_usd ?? 0).toFixed(2)}`;
   const lastTurn = turnUsage
-    ? `${formatTokens(turnUsage.usage.total_tokens)} / ${turnUsage.elapsedSeconds?.toFixed(1) ?? "0.0"}s`
+    ? `${formatTokens(turnUsage.usage?.total_tokens ?? 0)} / ${turnUsage.elapsedSeconds?.toFixed(1) ?? "0.0"}s`
     : null;
 
   return (

@@ -36,7 +36,9 @@ export function OnboardingModal({ isOnSettingsPage, onDismissOnSettings }: Props
               <button
                 type="button"
                 className="btn btn--primary"
-                onClick={() => navigate("/settings")}
+                onClick={() => {
+                  void navigate("/settings");
+                }}
               >
                 Go to Settings
               </button>

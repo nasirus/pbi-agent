@@ -40,12 +40,12 @@ export function ChatTimeline({
   waitMessage: string | null;
   itemsVersion: number;
 }) {
-  const previousLengthRef = useRef<number>();
+  const previousLengthRef = useRef<number | undefined>(undefined);
   const latestItem = items.at(-1);
   const latestItemIsUserMessage =
     latestItem?.kind === "message" && latestItem.role === "user";
   const { containerRef, showNewMessages, setShowNewMessages, scrollToBottom, userScrolledRef } =
-    useAutoScroll([itemsVersion], { followOnChange: false });
+    useAutoScroll(itemsVersion, { followOnChange: false });
 
   const scrollToTarget = useCallback(
     (container: HTMLElement, target: HTMLElement, offset: number) => {
@@ -76,7 +76,7 @@ export function ChatTimeline({
       if (latestItemIsUserMessage) {
         // Always scroll to user messages
         if (target) {
-          waitForImages(container).then(() => {
+          void waitForImages(container).then(() => {
             scrollToTarget(container, target, USER_MESSAGE_TOP_OFFSET);
           });
         }
@@ -84,7 +84,7 @@ export function ChatTimeline({
       } else if (!userScrolledRef.current) {
         // Scroll to top of new assistant/tool/thinking item
         if (target) {
-          waitForImages(container).then(() => {
+          void waitForImages(container).then(() => {
             scrollToTarget(container, target, ASSISTANT_MESSAGE_TOP_OFFSET);
           });
         }

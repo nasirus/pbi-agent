@@ -1302,7 +1302,7 @@ def _spa_index_response(title: str) -> Response:
             "color:#eef2ff;padding:40px}code{background:#111827;padding:2px 6px;"
             "border-radius:6px}</style></head><body>"
             "<h1>PBI Agent Web UI assets are missing.</h1>"
-            "<p>Run <code>npm install</code> then <code>npm run web:build</code> "
+            "<p>Run <code>bun install</code> then <code>bun run web:build</code> "
             "to build the bundled frontend.</p></body></html>"
         )
     )

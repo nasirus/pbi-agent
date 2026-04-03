@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchBootstrap, fetchConfigBootstrap } from "../api";
@@ -44,13 +44,11 @@ export function AppShell() {
     ? configBootstrap.model_profiles.length === 0
     : false;
 
-  const [onboardingDismissedOnSettings, setOnboardingDismissedOnSettings] = useState(false);
+  const [dismissedOnboardingRevision, setDismissedOnboardingRevision] = useState<string | null>(null);
   const isSettingsRoute = location.pathname === "/settings";
-  const showOnboardingModal = requiresOnboarding && !(isSettingsRoute && onboardingDismissedOnSettings);
-
-  useEffect(() => {
-    if (!requiresOnboarding) setOnboardingDismissedOnSettings(false);
-  }, [requiresOnboarding]);
+  const showOnboardingModal = requiresOnboarding && !(
+    isSettingsRoute && dismissedOnboardingRevision === configBootstrap?.config_revision
+  );
 
   const folderLabel = bootstrap?.workspace_root
     ? bootstrap.workspace_root.split(/[/\\]/).filter(Boolean).slice(-2).join("/")
@@ -152,7 +150,9 @@ export function AppShell() {
       {showOnboardingModal && (
         <OnboardingModal
           isOnSettingsPage={isSettingsRoute}
-          onDismissOnSettings={() => setOnboardingDismissedOnSettings(true)}
+          onDismissOnSettings={() => {
+            setDismissedOnboardingRevision(configBootstrap?.config_revision ?? null);
+          }}
         />
       )}
     </div>

@@ -109,19 +109,20 @@ export function ChatPage({
   const createSessionMutation = useMutation({
     mutationFn: createChatSession,
     onSuccess: (session, variables) => {
+      const requestSessionId = variables?.session_id ?? null;
       const requestedKey = createRequestKeyRef.current
-        ?? (variables.session_id
-          ? getSavedChatKey(variables.session_id)
+        ?? (requestSessionId
+          ? getSavedChatKey(requestSessionId)
           : getLiveChatKey(session.live_session_id));
       const resolvedKey = attachLiveSession(requestedKey, session, {
-        preserveItems: Boolean(variables.session_id),
+        preserveItems: Boolean(requestSessionId),
       });
-      if (!variables.session_id) {
-        navigate(`/chat/live/${encodeURIComponent(session.live_session_id)}`, {
+      if (!requestSessionId) {
+        void navigate(`/chat/live/${encodeURIComponent(session.live_session_id)}`, {
           replace: true,
         });
       } else if (resolvedKey !== requestedKey && session.session_id) {
-        navigate(`/chat/${encodeURIComponent(session.session_id)}`, { replace: true });
+        void navigate(`/chat/${encodeURIComponent(session.session_id)}`, { replace: true });
       }
     },
   });
@@ -163,9 +164,9 @@ export function ChatPage({
       if (targetKey) {
         updateRuntimeFromSession(targetKey, session);
       }
-      client.invalidateQueries({ queryKey: ["sessions"] });
+      void client.invalidateQueries({ queryKey: ["sessions"] });
       if (session.session_id) {
-        client.invalidateQueries({ queryKey: ["session", session.session_id] });
+        void client.invalidateQueries({ queryKey: ["session", session.session_id] });
       }
     },
   });
@@ -233,8 +234,7 @@ export function ChatPage({
   }, [
     chatState?.liveSessionId,
     chatState?.sessionEnded,
-    createSessionMutation.mutate,
-    createSessionMutation.isPending,
+    createSessionMutation,
     routeSessionId,
     sessionDetailQuery.isSuccess,
     sessionDetailQuery.data?.active_live_session,
@@ -248,7 +248,7 @@ export function ChatPage({
       liveSessionDetailQuery.data.snapshot,
     );
     if (liveSessionDetailQuery.data.live_session.session_id) {
-      navigate(
+      void navigate(
         `/chat/${encodeURIComponent(liveSessionDetailQuery.data.live_session.session_id)}`,
         { replace: true },
       );
@@ -276,8 +276,7 @@ export function ChatPage({
     createSessionMutation.mutate(profileId ? { profile_id: profileId } : {});
   }, [
     configQuery.data,
-    createSessionMutation.mutate,
-    createSessionMutation.isPending,
+    createSessionMutation,
     pendingProfileId,
     routeLiveSessionId,
     routeSessionId,
@@ -285,7 +284,7 @@ export function ChatPage({
 
   useEffect(() => {
     if (!routeLiveSessionId || !chatState?.sessionId) return;
-    navigate(`/chat/${encodeURIComponent(chatState.sessionId)}`, { replace: true });
+    void navigate(`/chat/${encodeURIComponent(chatState.sessionId)}`, { replace: true });
   }, [chatState?.sessionId, navigate, routeLiveSessionId]);
 
   useEffect(() => {
@@ -303,8 +302,8 @@ export function ChatPage({
   useEffect(() => {
     const sessionId = chatState?.sessionId;
     if (!sessionId) return;
-    client.invalidateQueries({ queryKey: ["sessions"] });
-    client.invalidateQueries({ queryKey: ["session", sessionId] });
+    void client.invalidateQueries({ queryKey: ["sessions"] });
+    void client.invalidateQueries({ queryKey: ["session", sessionId] });
   }, [chatState?.sessionId, client]);
 
   useLiveChatEvents(selectedRouteChatKey, chatState?.liveSessionId ?? null);
@@ -412,7 +411,7 @@ export function ChatPage({
   const handleNewSession = () => {
     setSidebarOpen(false);
     createRequestKeyRef.current = null;
-    navigate("/chat");
+    void navigate("/chat");
   };
 
   const handleDeleteSession = async () => {
@@ -425,7 +424,7 @@ export function ChatPage({
     setPendingDeleteSession(null);
     await client.invalidateQueries({ queryKey: ["sessions"] });
     if (deletingActive) {
-      navigate("/chat", { replace: true });
+      void navigate("/chat", { replace: true });
     }
   };
 
@@ -449,7 +448,7 @@ export function ChatPage({
           workspaceRoot={workspaceRoot}
           onNewSession={handleNewSession}
           onResumeSession={(sessionId) => {
-            navigate(`/chat/${encodeURIComponent(sessionId)}`);
+            void navigate(`/chat/${encodeURIComponent(sessionId)}`);
             setSidebarOpen(false);
           }}
           onDeleteSession={(session) => {
