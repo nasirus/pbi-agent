@@ -14,7 +14,7 @@ def test_get_embedded_rtk_path_returns_binary_and_sets_executable(
     monkeypatch,
 ) -> None:
     binary = tmp_path / "rtk"
-    binary.write_text("binary", encoding="utf-8")
+    binary.write_bytes(b"binary")
     binary.chmod(0o644)
 
     monkeypatch.setattr(rtk, "_resolve_embedded_rtk_resource", lambda: binary)
@@ -64,11 +64,24 @@ def test_rewrite_command_with_rtk_falls_back_to_original_command(monkeypatch) ->
     def fake_rtk_path():
         yield Path("/tmp/rtk")
 
+    calls: list[object] = []
+
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        del args, kwargs
+        calls.append((args, kwargs))
         raise subprocess.TimeoutExpired(cmd="rtk rewrite", timeout=1.0)
 
     monkeypatch.setattr(rtk, "_embedded_rtk_path", fake_rtk_path)
     monkeypatch.setattr(rtk.subprocess, "run", fake_run)
 
     assert rtk.rewrite_command_with_rtk("printf original") == "printf original"
+    assert calls == [
+        (
+            (["/tmp/rtk", "rewrite", "printf original"],),
+            {
+                "capture_output": True,
+                "text": False,
+                "check": False,
+                "timeout": rtk.RTK_REWRITE_TIMEOUT_SECONDS,
+            },
+        )
+    ]

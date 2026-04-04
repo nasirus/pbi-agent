@@ -8,6 +8,7 @@ import stat
 import subprocess
 from contextlib import contextmanager
 from importlib.resources import as_file, files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Iterator
 
@@ -32,8 +33,16 @@ _RTK_BINARIES = {
 
 def get_embedded_rtk_path() -> Path:
     """Return the packaged RTK binary path for the current platform."""
-    with _embedded_rtk_path() as path:
-        return path
+    resource = _resolve_embedded_rtk_resource()
+    if not resource.is_file():
+        raise FileNotFoundError("Bundled RTK binary is not available.")
+
+    if not isinstance(resource, Path):
+        raise RuntimeError("Bundled RTK binary is not installed on the filesystem.")
+
+    path = resource
+    _ensure_executable(path)
+    return path
 
 
 def rewrite_command_with_rtk(command: str) -> str:
@@ -76,7 +85,7 @@ def _embedded_rtk_path() -> Iterator[Path]:
         yield path
 
 
-def _resolve_embedded_rtk_resource():
+def _resolve_embedded_rtk_resource() -> Traversable:
     bundle_directory, binary_name = _resolve_platform_binary()
     return files("pbi_agent").joinpath("_vendor", "rtk", bundle_directory, binary_name)
 
@@ -99,7 +108,6 @@ def _ensure_executable(path: Path) -> None:
         return
 
     current_mode = path.stat().st_mode
-    executable_bits = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-    if current_mode & executable_bits == executable_bits:
+    if current_mode & stat.S_IXUSR:
         return
-    path.chmod(current_mode | executable_bits)
+    path.chmod(current_mode | stat.S_IXUSR)
