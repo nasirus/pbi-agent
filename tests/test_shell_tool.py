@@ -110,6 +110,44 @@ def test_shell_handle_uses_requested_directory_and_clamps_timeout(
     }
 
 
+def test_shell_handle_executes_rewritten_command(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    seen: dict[str, object] = {}
+
+    def fake_run(
+        command: str,
+        *,
+        cwd: str,
+        capture_output: bool,
+        text: bool,
+        shell: bool,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[bytes]:
+        del capture_output, text, shell
+        seen["command"] = command
+        seen["cwd"] = cwd
+        seen["timeout"] = timeout
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout=b"",
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(
+        shell_tool, "rewrite_command_with_rtk", lambda command: "pwd -P"
+    )
+    monkeypatch.setattr(shell_tool.subprocess, "run", fake_run)
+
+    shell_tool.handle({"command": "pwd"}, ToolContext())
+
+    assert seen == {
+        "command": "pwd -P",
+        "cwd": str(tmp_path.resolve()),
+        "timeout": shell_tool.MAX_TIMEOUT_MS / 1000.0,
+    }
+
+
 def test_shell_handle_returns_timeout_payload(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 
