@@ -13,6 +13,7 @@ from typing import Any
 
 from pbi_agent.tools.output import MAX_OUTPUT_CHARS as DEFAULT_MAX_OUTPUT_CHARS
 from pbi_agent.tools.output import bound_output, decode_output
+from pbi_agent.tools.rtk import rewrite_command_with_rtk
 from pbi_agent.tools.types import ToolContext, ToolSpec
 
 MAX_TIMEOUT_MS = 120_000
@@ -61,10 +62,11 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         root, arguments.get("working_directory")
     )
     timeout_ms = _normalize_timeout_ms(arguments.get("timeout_ms"))
+    rewritten_command = rewrite_command_with_rtk(command)
 
     try:
         completed = subprocess.run(
-            command,
+            rewritten_command,
             cwd=str(working_directory),
             capture_output=True,
             text=False,
