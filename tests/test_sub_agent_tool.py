@@ -154,8 +154,9 @@ class _ProviderStub:
         display,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
+        tracer=None,
     ) -> CompletedResponse:
-        del tool_result_items, display
+        del tool_result_items, display, tracer
         self.request_messages.append(user_message)
         self.instructions = instructions
         response = CompletedResponse(
@@ -177,6 +178,7 @@ class _ProviderStub:
         turn_usage: TokenUsage,
         sub_agent_depth: int = 0,
         parent_context=None,
+        tracer=None,
     ):
         del (
             response,
@@ -186,6 +188,7 @@ class _ProviderStub:
             turn_usage,
             sub_agent_depth,
             parent_context,
+            tracer,
         )
         return [], False
 
@@ -215,8 +218,16 @@ def test_sub_agent_tool_passes_agent_type_to_runtime(monkeypatch) -> None:
         agent_type: str | None = None,
         include_context: bool = False,
         parent_context: ParentContextSnapshot | None = None,
+        parent_tracer=None,
     ) -> dict[str, object]:
-        del settings, display, parent_session_usage, parent_turn_usage, sub_agent_depth
+        del (
+            settings,
+            display,
+            parent_session_usage,
+            parent_turn_usage,
+            sub_agent_depth,
+            parent_tracer,
+        )
         captured["task_instruction"] = task_instruction
         captured["tool_catalog"] = tool_catalog
         captured["agent_type"] = agent_type
@@ -275,15 +286,19 @@ def test_sub_agent_tool_maps_default_agent_type_to_generalist(monkeypatch) -> No
         agent_type: str | None = None,
         include_context: bool = False,
         parent_context: ParentContextSnapshot | None = None,
+        parent_tracer=None,
     ) -> dict[str, object]:
         del (
+            task_instruction,
             settings,
             display,
             parent_session_usage,
             parent_turn_usage,
             sub_agent_depth,
+            tool_catalog,
             include_context,
             parent_context,
+            parent_tracer,
         )
         captured["agent_type"] = agent_type
         return {"status": "completed", "final_output": "done"}

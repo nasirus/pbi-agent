@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from unittest.mock import Mock
 
 import pytest
 
@@ -1117,3 +1118,46 @@ def test_xai_web_search_call_not_in_function_calls() -> None:
 
     assert result.function_calls == []
     assert not result.has_tool_calls
+
+
+def test_xai_request_turn_records_observability(monkeypatch) -> None:
+    tracer = Mock()
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return _FakeHTTPResponse(
+            {
+                "id": "resp_trace",
+                "model": DEFAULT_XAI_MODEL,
+                "usage": {
+                    "input_tokens": 7,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 3,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Traced."}],
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = XAIProvider(_make_settings())
+    provider.request_turn(
+        user_message="hello",
+        display=_DisplayStub(),
+        session_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_XAI_MODEL),
+        tracer=tracer,
+    )
+
+    tracer.log_model_call.assert_called_once()
+    assert tracer.log_model_call.call_args.kwargs["url"] == DEFAULT_XAI_RESPONSES_URL

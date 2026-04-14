@@ -256,6 +256,113 @@ def test_delete_session_removes_session_and_messages(tmp_path) -> None:
     assert msgs == []
 
 
+def test_create_and_list_run_sessions(tmp_path) -> None:
+    db = tmp_path / "sessions.db"
+    with SessionStore(db_path=db) as store:
+        session_id = store.create_session("/w", "openai", "gpt-5", "trace me")
+        parent_run_id = store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="chat_turn",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5",
+            metadata={"origin": "test"},
+        )
+        child_run_id = store.create_run_session(
+            session_id=session_id,
+            parent_run_session_id=parent_run_id,
+            agent_name="athena",
+            agent_type="reviewer",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5-mini",
+        )
+        store.update_run_session(
+            child_run_id,
+            status="completed",
+            total_duration_ms=42,
+            total_tool_calls=1,
+            total_api_calls=2,
+            error_count=0,
+        )
+
+        runs = store.list_run_sessions(session_id)
+
+    assert [run.run_session_id for run in runs] == [parent_run_id, child_run_id]
+    assert runs[1].parent_run_session_id == parent_run_id
+    assert runs[1].status == "completed"
+    assert runs[1].total_duration_ms == 42
+
+
+def test_add_and_list_observability_events(tmp_path) -> None:
+    db = tmp_path / "sessions.db"
+    with SessionStore(db_path=db) as store:
+        session_id = store.create_session("/w", "openai", "gpt-5", "trace me")
+        run_session_id = store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="single_turn",
+            provider="openai",
+            provider_id=None,
+            profile_id=None,
+            model="gpt-5",
+        )
+        store.add_observability_event(
+            run_session_id=run_session_id,
+            session_id=session_id,
+            step_index=0,
+            event_type="run_start",
+            request_config={"provider": "openai"},
+        )
+        store.add_observability_event(
+            run_session_id=run_session_id,
+            session_id=session_id,
+            step_index=1,
+            event_type="tool_call",
+            tool_name="shell",
+            tool_call_id="call_1",
+            tool_input={"command": "pwd"},
+            tool_output={"ok": True},
+            success=True,
+        )
+
+        events = store.list_observability_events(run_session_id=run_session_id)
+
+    assert [event.event_type for event in events] == ["run_start", "tool_call"]
+    assert events[1].tool_name == "shell"
+    assert events[1].tool_call_id == "call_1"
+    assert events[1].tool_input_json == '{"command": "pwd"}'
+
+
+def test_delete_session_removes_observability_records(tmp_path) -> None:
+    db = tmp_path / "sessions.db"
+    with SessionStore(db_path=db) as store:
+        session_id = store.create_session("/w", "openai", "gpt-5", "trace me")
+        run_session_id = store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="single_turn",
+            provider="openai",
+            provider_id=None,
+            profile_id=None,
+            model="gpt-5",
+        )
+        store.add_observability_event(
+            run_session_id=run_session_id,
+            session_id=session_id,
+            step_index=0,
+            event_type="run_start",
+        )
+
+        assert store.delete_session(session_id) is True
+
+        assert store.get_run_session(run_session_id) is None
+        assert store.list_observability_events(run_session_id=run_session_id) == []
+
+
 def test_create_and_list_kanban_tasks(tmp_path) -> None:
     db = tmp_path / "sessions.db"
     with SessionStore(db_path=db) as store:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from unittest.mock import Mock
 
 import pytest
 
@@ -1629,3 +1630,46 @@ def test_openai_web_search_sources_preserve_duplicate_urls() -> None:
     assert len(result.web_search_sources) == 2
     assert result.web_search_sources[0].url == "https://example.com/same"
     assert result.web_search_sources[1].url == "https://example.com/same"
+
+
+def test_openai_request_turn_records_observability(monkeypatch) -> None:
+    provider = OpenAIProvider(_make_settings())
+    tracer = Mock()
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return _FakeHTTPResponse(
+            {
+                "id": "resp_trace",
+                "model": DEFAULT_MODEL,
+                "usage": {
+                    "input_tokens": 7,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 3,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Traced."}],
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider.request_turn(
+        user_message="hello",
+        display=_DisplayStub(),
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+        tracer=tracer,
+    )
+
+    tracer.log_model_call.assert_called_once()
+    assert tracer.log_model_call.call_args.kwargs["url"] == DEFAULT_RESPONSES_URL

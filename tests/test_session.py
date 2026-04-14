@@ -15,6 +15,7 @@ from pbi_agent.agent.session import (
     NEW_CHAT_SENTINEL,
     SKILLS_COMMAND,
     run_chat_loop,
+    run_sub_agent_task,
     run_single_turn,
 )
 from pbi_agent.config import (
@@ -31,9 +32,11 @@ from pbi_agent.models.messages import (
     ToolCall,
     UserTurnInput,
 )
+from pbi_agent.observability import RunTracer
 from pbi_agent.providers.google_provider import GoogleProvider
 from pbi_agent.providers.openai_provider import OpenAIProvider
 from pbi_agent.session_store import SessionStore
+from pbi_agent.tools.catalog import ToolCatalog
 from pbi_agent.display.protocol import QueuedInput
 
 
@@ -139,6 +142,7 @@ class _ProviderStub:
         display,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
+        tracer=None,
     ) -> CompletedResponse:
         if user_input is not None and user_message is None:
             user_message = user_input.text
@@ -149,7 +153,7 @@ class _ProviderStub:
                 "instructions": instructions,
             }
         )
-        del display
+        del display, tracer
         if user_message is not None:
             response = CompletedResponse(
                 response_id="resp_1",
@@ -188,8 +192,9 @@ class _ProviderStub:
         turn_usage: TokenUsage,
         sub_agent_depth: int = 0,
         parent_context=None,
+        tracer=None,
     ) -> tuple[list[dict[str, object]], bool]:
-        del display, session_usage, turn_usage, sub_agent_depth
+        del display, session_usage, turn_usage, sub_agent_depth, tracer
         self.execute_calls.append(
             {
                 "response_id": response.response_id,
@@ -380,6 +385,81 @@ def test_run_single_turn_persists_provider_checkpoint_for_resume(
     assert session.previous_id == "resp_resume"
 
 
+def test_run_single_turn_persists_observability_run_and_events(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("PBI_AGENT_SESSION_DB_PATH", str(db_path))
+
+    provider = _ProviderStub()
+    display = _DisplaySpy()
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=3)
+    monotonic_values = iter([10.0, 13.5])
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+    monkeypatch.setattr(
+        "pbi_agent.agent.session.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+
+    outcome = run_single_turn("Inspect the workspace", settings, display)
+
+    with SessionStore(db_path=db_path) as store:
+        runs = store.list_run_sessions(outcome.session_id)
+        events = store.list_observability_events(run_session_id=runs[0].run_session_id)
+
+    assert len(runs) == 1
+    assert runs[0].status == "completed"
+    assert runs[0].total_api_calls == 0
+    assert runs[0].total_tool_calls == 0
+    assert events[0].event_type == "run_start"
+    assert events[-1].event_type == "run_end"
+
+
+def test_run_sub_agent_task_creates_nested_run_session(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "sessions.db"
+    parent_display = _DisplaySpy()
+    provider = _ProviderStub()
+
+    monkeypatch.setenv("PBI_AGENT_SESSION_DB_PATH", str(db_path))
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+
+    with SessionStore(db_path=db_path) as store:
+        session_id = store.create_session(str(tmp_path), "openai", "gpt-5", "trace me")
+        parent_tracer = RunTracer.start(
+            store=store,
+            session_id=session_id,
+            agent_name="main",
+            agent_type="chat_turn",
+            provider="openai",
+            provider_id=None,
+            profile_id=None,
+            model="gpt-5",
+        )
+        result = run_sub_agent_task(
+            "Inspect the sub-agent path",
+            Settings(api_key="test-key", provider="openai", model="gpt-5"),
+            parent_display,
+            parent_session_usage=TokenUsage(model="gpt-5"),
+            parent_turn_usage=TokenUsage(model="gpt-5"),
+            tool_catalog=ToolCatalog.from_builtin_registry(),
+            parent_tracer=parent_tracer,
+        )
+        parent_tracer.finish(status="completed")
+        runs = store.list_run_sessions(session_id)
+
+    assert result["status"] == "completed"
+    assert len(runs) == 2
+    assert runs[1].parent_run_session_id == runs[0].run_session_id
+
+
 class _ChatDisplaySpy(_DisplaySpy):
     def __init__(self, prompts: list[str | QueuedInput]) -> None:
         super().__init__()
@@ -506,8 +586,9 @@ class _ChatProviderStub:
         display,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
+        tracer=None,
     ) -> CompletedResponse:
-        del display, tool_result_items
+        del display, tool_result_items, tracer
         if user_input is not None:
             self.request_inputs.append(user_input)
         if user_input is not None and user_message is None:
@@ -820,6 +901,7 @@ def test_run_chat_loop_does_not_persist_unanswered_user_turn(monkeypatch) -> Non
             display,
             session_usage: TokenUsage,
             turn_usage: TokenUsage,
+            tracer=None,
         ) -> CompletedResponse:
             del (
                 user_message,
@@ -829,6 +911,7 @@ def test_run_chat_loop_does_not_persist_unanswered_user_turn(monkeypatch) -> Non
                 display,
                 session_usage,
                 turn_usage,
+                tracer,
             )
             raise RuntimeError("boom")
 

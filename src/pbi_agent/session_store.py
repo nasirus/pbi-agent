@@ -72,6 +72,80 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id);
 
+CREATE TABLE IF NOT EXISTS run_sessions (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_session_id          TEXT NOT NULL UNIQUE,
+    session_id              TEXT REFERENCES sessions(session_id),
+    parent_run_session_id   TEXT,
+    agent_name              TEXT,
+    agent_type              TEXT,
+    provider                TEXT,
+    provider_id             TEXT,
+    profile_id              TEXT,
+    model                   TEXT,
+    status                  TEXT NOT NULL,
+    started_at              TEXT NOT NULL,
+    ended_at                TEXT,
+    total_duration_ms       INTEGER,
+    input_tokens            INTEGER NOT NULL DEFAULT 0,
+    cached_input_tokens     INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens      INTEGER NOT NULL DEFAULT 0,
+    cache_write_1h_tokens   INTEGER NOT NULL DEFAULT 0,
+    output_tokens           INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens        INTEGER NOT NULL DEFAULT 0,
+    tool_use_tokens         INTEGER NOT NULL DEFAULT 0,
+    provider_total_tokens   INTEGER NOT NULL DEFAULT 0,
+    estimated_cost_usd      REAL NOT NULL DEFAULT 0.0,
+    total_tool_calls        INTEGER NOT NULL DEFAULT 0,
+    total_api_calls         INTEGER NOT NULL DEFAULT 0,
+    error_count             INTEGER NOT NULL DEFAULT 0,
+    metadata_json           TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_run_sessions_session_id
+    ON run_sessions(session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_run_sessions_parent_run_session_id
+    ON run_sessions(parent_run_session_id);
+CREATE INDEX IF NOT EXISTS idx_run_sessions_started_at
+    ON run_sessions(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS observability_events (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_session_id        TEXT NOT NULL,
+    session_id            TEXT,
+    step_index            INTEGER NOT NULL,
+    event_type            TEXT NOT NULL,
+    timestamp             TEXT NOT NULL,
+    duration_ms           INTEGER,
+    provider              TEXT,
+    model                 TEXT,
+    url                   TEXT,
+    request_config_json   TEXT,
+    request_payload_json  TEXT,
+    response_payload_json TEXT,
+    tool_name             TEXT,
+    tool_call_id          TEXT,
+    tool_input_json       TEXT,
+    tool_output_json      TEXT,
+    tool_duration_ms      INTEGER,
+    prompt_tokens         INTEGER,
+    completion_tokens     INTEGER,
+    total_tokens          INTEGER,
+    status_code           INTEGER,
+    success               INTEGER,
+    error_message         TEXT,
+    metadata_json         TEXT NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_observability_events_run_step
+    ON observability_events(run_session_id, step_index);
+CREATE INDEX IF NOT EXISTS idx_observability_events_session_id
+    ON observability_events(session_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_observability_events_run_session_id
+    ON observability_events(run_session_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_observability_events_event_type
+    ON observability_events(event_type, timestamp);
+CREATE INDEX IF NOT EXISTS idx_observability_events_timestamp
+    ON observability_events(timestamp);
+
 CREATE TABLE IF NOT EXISTS kanban_tasks (
     task_id               TEXT PRIMARY KEY,
     directory             TEXT NOT NULL,
@@ -147,6 +221,66 @@ class MessageImageAttachment:
     mime_type: str
     byte_count: int
     preview_url: str
+
+
+@dataclass(slots=True)
+class RunSessionRecord:
+    id: int
+    run_session_id: str
+    session_id: str | None
+    parent_run_session_id: str | None
+    agent_name: str | None
+    agent_type: str | None
+    provider: str | None
+    provider_id: str | None
+    profile_id: str | None
+    model: str | None
+    status: str
+    started_at: str
+    ended_at: str | None
+    total_duration_ms: int | None
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_tokens: int
+    cache_write_1h_tokens: int
+    output_tokens: int
+    reasoning_tokens: int
+    tool_use_tokens: int
+    provider_total_tokens: int
+    estimated_cost_usd: float
+    total_tool_calls: int
+    total_api_calls: int
+    error_count: int
+    metadata_json: str
+
+
+@dataclass(slots=True)
+class ObservabilityEventRecord:
+    id: int
+    run_session_id: str
+    session_id: str | None
+    step_index: int
+    event_type: str
+    timestamp: str
+    duration_ms: int | None
+    provider: str | None
+    model: str | None
+    url: str | None
+    request_config_json: str | None
+    request_payload_json: str | None
+    response_payload_json: str | None
+    tool_name: str | None
+    tool_call_id: str | None
+    tool_input_json: str | None
+    tool_output_json: str | None
+    tool_duration_ms: int | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    status_code: int | None
+    success: int | None
+    error_message: str | None
+    metadata_json: str
 
 
 @dataclass(slots=True)
@@ -295,6 +429,12 @@ def _serialize_file_paths(file_paths: list[str] | None) -> str:
     if not file_paths:
         return "[]"
     return json.dumps([path for path in file_paths if isinstance(path, str)])
+
+
+def _serialize_json(value: object, *, default: str = "{}") -> str:
+    if value is None:
+        return default
+    return json.dumps(value, sort_keys=True)
 
 
 def _deserialize_file_paths(raw_value: object) -> list[str]:
@@ -558,6 +698,14 @@ class SessionStore:
                 (session_id,),
             )
             self._conn.execute(
+                "DELETE FROM observability_events WHERE session_id = ?",
+                (session_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM run_sessions WHERE session_id = ?",
+                (session_id,),
+            )
+            self._conn.execute(
                 "DELETE FROM sessions WHERE session_id = ?",
                 (session_id,),
             )
@@ -620,6 +768,207 @@ class SessionStore:
                 )
             )
         return messages
+
+    def create_run_session(
+        self,
+        *,
+        session_id: str | None,
+        agent_name: str | None,
+        agent_type: str | None,
+        provider: str | None,
+        provider_id: str | None,
+        profile_id: str | None,
+        model: str | None,
+        status: str = "started",
+        parent_run_session_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> str:
+        run_session_id = uuid.uuid4().hex
+        now = _now_iso()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO run_sessions "
+                "(run_session_id, session_id, parent_run_session_id, agent_name, "
+                "agent_type, provider, provider_id, profile_id, model, status, "
+                "started_at, metadata_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_session_id,
+                    session_id,
+                    parent_run_session_id,
+                    agent_name,
+                    agent_type,
+                    provider,
+                    provider_id,
+                    profile_id,
+                    model,
+                    status,
+                    now,
+                    _serialize_json(metadata, default="{}"),
+                ),
+            )
+            self._conn.commit()
+        return run_session_id
+
+    def update_run_session(
+        self,
+        run_session_id: str,
+        *,
+        status: str | None = None,
+        ended_at: str | None = None,
+        total_duration_ms: int | None = None,
+        input_tokens: int | None = None,
+        cached_input_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        cache_write_1h_tokens: int | None = None,
+        output_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+        tool_use_tokens: int | None = None,
+        provider_total_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
+        total_tool_calls: int | None = None,
+        total_api_calls: int | None = None,
+        error_count: int | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        clauses: list[str] = []
+        params: list[object] = []
+        scalar_values = {
+            "status": status,
+            "ended_at": ended_at,
+            "total_duration_ms": total_duration_ms,
+            "input_tokens": input_tokens,
+            "cached_input_tokens": cached_input_tokens,
+            "cache_write_tokens": cache_write_tokens,
+            "cache_write_1h_tokens": cache_write_1h_tokens,
+            "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning_tokens,
+            "tool_use_tokens": tool_use_tokens,
+            "provider_total_tokens": provider_total_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
+            "total_tool_calls": total_tool_calls,
+            "total_api_calls": total_api_calls,
+            "error_count": error_count,
+        }
+        for key, value in scalar_values.items():
+            if value is None:
+                continue
+            clauses.append(f"{key} = ?")
+            params.append(value)
+        if metadata is not None:
+            clauses.append("metadata_json = ?")
+            params.append(_serialize_json(metadata, default="{}"))
+        if not clauses:
+            return
+        params.append(run_session_id)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE run_sessions SET {', '.join(clauses)} "
+                "WHERE run_session_id = ?",
+                params,
+            )
+            self._conn.commit()
+
+    def get_run_session(self, run_session_id: str) -> RunSessionRecord | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM run_sessions WHERE run_session_id = ?",
+                (run_session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return RunSessionRecord(**dict(row))
+
+    def list_run_sessions(self, session_id: str) -> list[RunSessionRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM run_sessions WHERE session_id = ? "
+                "ORDER BY started_at ASC, id ASC",
+                (session_id,),
+            ).fetchall()
+        return [RunSessionRecord(**dict(row)) for row in rows]
+
+    def add_observability_event(
+        self,
+        *,
+        run_session_id: str,
+        session_id: str | None,
+        step_index: int,
+        event_type: str,
+        timestamp: str | None = None,
+        duration_ms: int | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        url: str | None = None,
+        request_config: object | None = None,
+        request_payload: object | None = None,
+        response_payload: object | None = None,
+        tool_name: str | None = None,
+        tool_call_id: str | None = None,
+        tool_input: object | None = None,
+        tool_output: object | None = None,
+        tool_duration_ms: int | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+        status_code: int | None = None,
+        success: bool | None = None,
+        error_message: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO observability_events "
+                "(run_session_id, session_id, step_index, event_type, timestamp, "
+                "duration_ms, provider, model, url, request_config_json, "
+                "request_payload_json, response_payload_json, tool_name, "
+                "tool_call_id, tool_input_json, tool_output_json, tool_duration_ms, "
+                "prompt_tokens, completion_tokens, total_tokens, status_code, "
+                "success, error_message, metadata_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?, ?, ?)",
+                (
+                    run_session_id,
+                    session_id,
+                    step_index,
+                    event_type,
+                    timestamp or _now_iso(),
+                    duration_ms,
+                    provider,
+                    model,
+                    url,
+                    _serialize_json(request_config, default="null"),
+                    _serialize_json(request_payload, default="null"),
+                    _serialize_json(response_payload, default="null"),
+                    tool_name,
+                    tool_call_id,
+                    _serialize_json(tool_input, default="null"),
+                    _serialize_json(tool_output, default="null"),
+                    tool_duration_ms,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    status_code,
+                    None if success is None else int(success),
+                    error_message,
+                    _serialize_json(metadata, default="{}"),
+                ),
+            )
+            self._conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def list_observability_events(
+        self,
+        *,
+        run_session_id: str,
+    ) -> list[ObservabilityEventRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM observability_events WHERE run_session_id = ? "
+                "ORDER BY step_index ASC, id ASC",
+                (run_session_id,),
+            ).fetchall()
+        return [ObservabilityEventRecord(**dict(row)) for row in rows]
 
     # -- kanban tasks -----------------------------------------------------
 

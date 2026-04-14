@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 
 from pbi_agent.agent import tool_runtime
 from pbi_agent.models.messages import ToolCall
@@ -264,3 +265,30 @@ def test_execute_tool_calls_passes_runtime_context_to_handler(monkeypatch) -> No
     assert batch.had_errors is False
     assert len(captured_context) == 1
     assert captured_context[0].sub_agent_depth == 1
+
+
+def test_execute_tool_calls_records_observability_events(monkeypatch) -> None:
+    tracer = Mock()
+
+    def fake_handler(
+        arguments: dict[str, object],
+        context: ToolContext,
+    ) -> dict[str, object]:
+        del context
+        return {"echo": arguments["value"]}
+
+    monkeypatch.setattr(tool_runtime, "get_tool_handler", lambda name: fake_handler)
+
+    batch = tool_runtime.execute_tool_calls(
+        [ToolCall(call_id="call_1", name="shell", arguments={"value": 7})],
+        max_workers=1,
+        context=ToolContext(tracer=tracer),
+    )
+
+    assert batch.had_errors is False
+    tracer.log_tool_call.assert_called_once()
+    kwargs = tracer.log_tool_call.call_args.kwargs
+    assert kwargs["tool_name"] == "shell"
+    assert kwargs["tool_call_id"] == "call_1"
+    assert kwargs["tool_input"] == {"value": 7}
+    assert kwargs["success"] is True

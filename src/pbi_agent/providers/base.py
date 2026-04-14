@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from pbi_agent.config import Settings
 from pbi_agent.models.messages import CompletedResponse, TokenUsage, UserTurnInput
 from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.types import ParentContextSnapshot
 from pbi_agent.display.protocol import DisplayProtocol
+
+if TYPE_CHECKING:
+    from pbi_agent.observability import RunTracer
 
 
 class Provider(ABC):
@@ -43,6 +46,7 @@ class Provider(ABC):
         display: DisplayProtocol,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
+        tracer: "RunTracer | None" = None,
     ) -> CompletedResponse:
         """Send a turn and return the model response.
 
@@ -63,6 +67,7 @@ class Provider(ABC):
         turn_usage: TokenUsage,
         sub_agent_depth: int = 0,
         parent_context: ParentContextSnapshot | None = None,
+        tracer: "RunTracer | None" = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Execute every tool call present in *response*.
 

@@ -12,7 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from pbi_agent import __version__
 from pbi_agent.agent.system_prompt import get_system_prompt
@@ -33,6 +33,9 @@ from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.catalog import ToolCatalog
 from pbi_agent.tools.types import ParentContextSnapshot, ToolContext
 from pbi_agent.display.protocol import DisplayProtocol
+
+if TYPE_CHECKING:
+    from pbi_agent.observability import RunTracer
 
 _REQUEST_TIMEOUT_SECS = 3600.0
 _REASONING_EFFORT_MODELS = ("grok-3-mini",)
@@ -136,6 +139,7 @@ class XAIProvider(Provider):
         display: DisplayProtocol,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
+        tracer: "RunTracer | None" = None,
     ) -> CompletedResponse:
         if user_input is None and user_message is not None:
             user_input = UserTurnInput(text=user_message)
@@ -153,6 +157,7 @@ class XAIProvider(Provider):
             input_items=input_items,
             instructions=instructions or self._instructions,
             display=display,
+            tracer=tracer,
         )
         self._previous_response_id = result.response_id
         session_usage.add(result.usage)
@@ -203,6 +208,7 @@ class XAIProvider(Provider):
         turn_usage: TokenUsage,
         sub_agent_depth: int = 0,
         parent_context: ParentContextSnapshot | None = None,
+        tracer: "RunTracer | None" = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         if not response.function_calls:
             return [], False
@@ -223,6 +229,7 @@ class XAIProvider(Provider):
                 sub_agent_depth=sub_agent_depth,
                 tool_catalog=self._tool_catalog,
                 parent_context=parent_context,
+                tracer=tracer,
             ),
         )
 
@@ -247,14 +254,15 @@ class XAIProvider(Provider):
         input_items: list[dict[str, Any]],
         instructions: str,
         display: DisplayProtocol,
+        tracer: "RunTracer | None" = None,
     ) -> CompletedResponse:
         display.wait_start(_waiting_message_for_input_items(input_items))
 
-        body = self._build_request_body(
+        request_body = self._build_request_body(
             input_items=input_items,
             instructions=instructions,
         )
-        request_data = json.dumps(body).encode("utf-8")
+        request_data = json.dumps(request_body).encode("utf-8")
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -270,6 +278,7 @@ class XAIProvider(Provider):
             if attempt > 0:
                 display.retry_notice(attempt, max_retries)
 
+            req_start = time.perf_counter()
             try:
                 req = urllib.request.Request(
                     self._settings.responses_url,
@@ -281,11 +290,44 @@ class XAIProvider(Provider):
                     response_json = json.loads(resp.read().decode("utf-8"))
 
                 result = self._parse_response(response_json)
+                _trace_provider_call(
+                    tracer=tracer,
+                    provider=self._settings.provider,
+                    model=self._settings.model,
+                    url=self._settings.responses_url,
+                    request_config=self._settings.redacted(),
+                    request_payload=request_body,
+                    response_payload=response_json,
+                    duration_ms=_duration_ms(req_start),
+                    prompt_tokens=result.usage.input_tokens,
+                    completion_tokens=result.usage.output_tokens,
+                    total_tokens=result.usage.total_tokens,
+                    status_code=200,
+                    success=True,
+                    metadata={"attempt": attempt + 1},
+                )
                 display.wait_stop()
                 return result
             except urllib.error.HTTPError as exc:
                 error_body = _read_error_body(exc)
                 error_payload = _normalize_http_error(exc, error_body)
+                _trace_provider_call(
+                    tracer=tracer,
+                    provider=self._settings.provider,
+                    model=self._settings.model,
+                    url=self._settings.responses_url,
+                    request_config=self._settings.redacted(),
+                    request_payload=request_body,
+                    response_payload=error_payload or {"body": error_body},
+                    duration_ms=_duration_ms(req_start),
+                    status_code=exc.code,
+                    success=False,
+                    error_message=_format_error_message(
+                        f"xAI Responses API error {exc.code}",
+                        error_payload,
+                    ),
+                    metadata={"attempt": attempt + 1},
+                )
                 if exc.code == 429:
                     if attempt >= max_retries:
                         display.wait_stop()
@@ -322,6 +364,19 @@ class XAIProvider(Provider):
             except urllib.error.URLError as exc:
                 last_error = exc
                 last_error_message = None
+                _trace_provider_call(
+                    tracer=tracer,
+                    provider=self._settings.provider,
+                    model=self._settings.model,
+                    url=self._settings.responses_url,
+                    request_config=self._settings.redacted(),
+                    request_payload=request_body,
+                    response_payload={"error": str(exc)},
+                    duration_ms=_duration_ms(req_start),
+                    success=False,
+                    error_message=str(exc),
+                    metadata={"attempt": attempt + 1},
+                )
                 continue
 
         display.wait_stop()
@@ -874,6 +929,48 @@ def _extract_retry_after(exc: urllib.error.HTTPError, attempt: int) -> float:
     except (TypeError, ValueError):
         pass
     return min(2.0 * (2**attempt), 30.0) + 1.0
+
+
+def _duration_ms(started_at: float) -> int:
+    return max(0, int((time.perf_counter() - started_at) * 1000))
+
+
+def _trace_provider_call(
+    *,
+    tracer,
+    provider: str,
+    model: str,
+    url: str,
+    request_config: dict[str, Any],
+    request_payload: dict[str, Any],
+    response_payload: dict[str, Any],
+    duration_ms: int,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+    status_code: int | None = None,
+    success: bool,
+    error_message: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if tracer is None:
+        return
+    tracer.log_model_call(
+        provider=provider,
+        model=model,
+        url=url,
+        request_config=request_config,
+        request_payload=request_payload,
+        response_payload=response_payload,
+        duration_ms=duration_ms,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        status_code=status_code,
+        success=success,
+        error_message=error_message,
+        metadata=metadata,
+    )
 
 
 def _waiting_message_for_input_items(input_items: list[dict[str, Any]]) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from unittest.mock import Mock
 
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import ToolExecutionBatch
@@ -453,3 +454,49 @@ def test_generic_request_turn_retries_after_rate_limit(
     assert waits == [1.25]
     assert display_spy.rate_limit_notices == [(1.25, 1, 1)]
     assert display_spy.retry_notices == [(1, 1)]
+
+
+def test_generic_request_turn_records_observability(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    tracer = Mock()
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ):
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "chatcmpl_trace",
+                "model": "openrouter/auto",
+                "usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 3,
+                },
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Traced.",
+                        }
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = GenericProvider(_make_settings())
+    provider.request_turn(
+        user_message="hello",
+        display=display_spy,
+        session_usage=TokenUsage(),
+        turn_usage=TokenUsage(),
+        tracer=tracer,
+    )
+
+    tracer.log_model_call.assert_called_once()
+    assert tracer.log_model_call.call_args.kwargs["url"] == DEFAULT_GENERIC_API_URL

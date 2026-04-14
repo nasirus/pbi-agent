@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from unittest.mock import Mock
 
 import pytest
 
@@ -1156,3 +1157,41 @@ def test_google_request_turn_renders_google_search_block_before_text(
     }
     assert display.events[2] == ("tool_group_end", None)
     assert display.events[3] == ("markdown", "Bitcoin is around $70k.")
+
+
+def test_google_request_turn_records_observability(monkeypatch) -> None:
+    tracer = Mock()
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return _FakeHTTPResponse(
+            {
+                "id": "resp_trace",
+                "model": DEFAULT_GOOGLE_MODEL,
+                "usage": {
+                    "total_input_tokens": 7,
+                    "total_output_tokens": 3,
+                    "total_tokens": 10,
+                },
+                "outputs": [{"type": "text", "text": "Traced."}],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = GoogleProvider(_make_settings())
+    provider.request_turn(
+        user_message="hello",
+        display=_DisplayStub(),
+        session_usage=TokenUsage(model=DEFAULT_GOOGLE_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_GOOGLE_MODEL),
+        tracer=tracer,
+    )
+
+    tracer.log_model_call.assert_called_once()
+    assert (
+        tracer.log_model_call.call_args.kwargs["url"] == DEFAULT_GOOGLE_INTERACTIONS_URL
+    )

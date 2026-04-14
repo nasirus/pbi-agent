@@ -32,6 +32,7 @@ from pbi_agent.models.messages import (
     TokenUsage,
     UserTurnInput,
 )
+from pbi_agent.observability import RunTracer
 from pbi_agent.providers import create_provider
 from pbi_agent.providers.base import Provider
 
@@ -155,63 +156,102 @@ def run_single_turn(
         runtime,
         title=_session_title_for_user_turn(user_input),
     )
+    tracer = RunTracer.start(
+        store=store,
+        session_id=session_id,
+        agent_name="main",
+        agent_type="single_turn",
+        provider=settings.provider,
+        provider_id=runtime.provider_id,
+        profile_id=runtime.profile_id,
+        model=model,
+        metadata={
+            "single_turn_hint": single_turn_hint,
+            "resumed": resume_session_id is not None,
+        },
+    )
 
-    with _open_runtime_provider(
-        settings,
-        excluded_tools=get_custom_excluded_tools(),
-    ) as provider:
-        _resume_session(
-            provider=provider,
-            store=store,
-            session_id=resume_session_id,
-            session_usage=session_usage,
-            display=display,
+    try:
+        with _open_runtime_provider(
+            settings,
+            excluded_tools=get_custom_excluded_tools(),
+        ) as provider:
+            _resume_session(
+                provider=provider,
+                store=store,
+                session_id=resume_session_id,
+                session_usage=session_usage,
+                display=display,
+            )
+            tracer.log_event(
+                "agent_step_start",
+                metadata={"step": "initial_model_request"},
+            )
+            response = _request_user_turn(
+                provider=provider,
+                user_input=user_input,
+                instructions=turn_instructions,
+                display=display,
+                session_usage=session_usage,
+                turn_usage=turn_usage,
+                tracer=tracer,
+            )
+            tracer.log_event(
+                "agent_step_end",
+                metadata={"step": "initial_model_request"},
+            )
+            response, had_tool_errors, _ = _run_tool_iterations(
+                provider=provider,
+                response=response,
+                max_workers=settings.max_tool_workers,
+                display=display,
+                session_usage=session_usage,
+                turn_usage=turn_usage,
+                store=store,
+                session_id=session_id,
+                current_user_turn_text=user_turn_history_text,
+                instructions=turn_instructions,
+                tracer=tracer,
+            )
+            _add_message(
+                store,
+                session_id,
+                runtime,
+                "user",
+                user_turn_history_text,
+            )
+            _add_message(store, session_id, runtime, "assistant", response.text)
+            _update_session_after_turn(
+                store,
+                session_id,
+                runtime,
+                _conversation_checkpoint_for_resume(provider, response.response_id),
+                session_usage,
+            )
+            elapsed = time.monotonic() - session_start
+            display.turn_usage(turn_usage, elapsed)
+            display.session_usage(session_usage)
+            tracer.finish(
+                status="completed",
+                usage=session_usage,
+                metadata={"tool_errors": had_tool_errors},
+            )
+            return AgentOutcome(
+                response_id=response.response_id,
+                text=response.text,
+                tool_errors=had_tool_errors,
+                session_id=session_id,
+            )
+    except Exception as exc:
+        tracer.log_error(str(exc), metadata={"phase": "run_single_turn"})
+        tracer.finish(
+            status="failed",
+            usage=session_usage,
+            metadata={"error_message": str(exc)},
         )
-        response = _request_user_turn(
-            provider=provider,
-            user_input=user_input,
-            instructions=turn_instructions,
-            display=display,
-            session_usage=session_usage,
-            turn_usage=turn_usage,
-        )
-        response, had_tool_errors, _ = _run_tool_iterations(
-            provider=provider,
-            response=response,
-            max_workers=settings.max_tool_workers,
-            display=display,
-            session_usage=session_usage,
-            turn_usage=turn_usage,
-            store=store,
-            session_id=session_id,
-            current_user_turn_text=user_turn_history_text,
-            instructions=turn_instructions,
-        )
-        _add_message(
-            store,
-            session_id,
-            runtime,
-            "user",
-            user_turn_history_text,
-        )
-        _add_message(store, session_id, runtime, "assistant", response.text)
-        _update_session_after_turn(
-            store,
-            session_id,
-            runtime,
-            _conversation_checkpoint_for_resume(provider, response.response_id),
-            session_usage,
-        )
-        elapsed = time.monotonic() - session_start
-        display.turn_usage(turn_usage, elapsed)
-        display.session_usage(session_usage)
+        raise
+    finally:
         _close_store(store)
-        return AgentOutcome(
-            response_id=response.response_id,
-            text=response.text,
-            tool_errors=had_tool_errors,
-            session_id=session_id,
-        )
 
 
 def run_chat_loop(
@@ -384,58 +424,93 @@ def run_chat_loop(
                     model=_selected_model(current_runtime.settings),
                     service_tier=current_runtime.settings.service_tier or "",
                 )
-                display.assistant_start()
-                response = _request_user_turn(
-                    provider=provider,
-                    user_input=turn_input,
-                    instructions=turn_instructions,
-                    display=display,
-                    session_usage=session_usage,
-                    turn_usage=turn_usage,
-                )
-                response, loop_had_errors, _ = _run_tool_iterations(
-                    provider=provider,
-                    response=response,
-                    max_workers=current_runtime.settings.max_tool_workers,
-                    display=display,
-                    session_usage=session_usage,
-                    turn_usage=turn_usage,
+                turn_tracer = RunTracer.start(
                     store=store,
                     session_id=session_id,
-                    current_user_turn_text=turn_history_text,
-                    instructions=turn_instructions,
+                    agent_name="main",
+                    agent_type="chat_turn",
+                    provider=current_runtime.settings.provider,
+                    provider_id=current_runtime.provider_id,
+                    profile_id=current_runtime.profile_id,
+                    model=_selected_model(current_runtime.settings),
+                    metadata={"resumed": resume_session_id is not None},
                 )
+                display.assistant_start()
+                try:
+                    turn_tracer.log_event(
+                        "agent_step_start",
+                        metadata={"step": "initial_model_request"},
+                    )
+                    response = _request_user_turn(
+                        provider=provider,
+                        user_input=turn_input,
+                        instructions=turn_instructions,
+                        display=display,
+                        session_usage=session_usage,
+                        turn_usage=turn_usage,
+                        tracer=turn_tracer,
+                    )
+                    turn_tracer.log_event(
+                        "agent_step_end",
+                        metadata={"step": "initial_model_request"},
+                    )
+                    response, loop_had_errors, _ = _run_tool_iterations(
+                        provider=provider,
+                        response=response,
+                        max_workers=current_runtime.settings.max_tool_workers,
+                        display=display,
+                        session_usage=session_usage,
+                        turn_usage=turn_usage,
+                        store=store,
+                        session_id=session_id,
+                        current_user_turn_text=turn_history_text,
+                        instructions=turn_instructions,
+                        tracer=turn_tracer,
+                    )
 
-                _add_message(
-                    store,
-                    session_id,
-                    current_runtime,
-                    "user",
-                    turn_history_text,
-                    file_paths=file_paths,
-                    image_attachments=message_image_attachments,
-                )
-                _add_message(
-                    store,
-                    session_id,
-                    current_runtime,
-                    "assistant",
-                    response.text,
-                )
-                _update_session_after_turn(
-                    store,
-                    session_id,
-                    current_runtime,
-                    _conversation_checkpoint_for_resume(
-                        provider,
-                        response.response_id,
-                    ),
-                    session_usage,
-                )
-                had_tool_errors = had_tool_errors or loop_had_errors
-                elapsed = time.monotonic() - turn_start
-                display.turn_usage(turn_usage, elapsed)
-                display.session_usage(session_usage)
+                    _add_message(
+                        store,
+                        session_id,
+                        current_runtime,
+                        "user",
+                        turn_history_text,
+                        file_paths=file_paths,
+                        image_attachments=message_image_attachments,
+                    )
+                    _add_message(
+                        store,
+                        session_id,
+                        current_runtime,
+                        "assistant",
+                        response.text,
+                    )
+                    _update_session_after_turn(
+                        store,
+                        session_id,
+                        current_runtime,
+                        _conversation_checkpoint_for_resume(
+                            provider,
+                            response.response_id,
+                        ),
+                        session_usage,
+                    )
+                    had_tool_errors = had_tool_errors or loop_had_errors
+                    elapsed = time.monotonic() - turn_start
+                    display.turn_usage(turn_usage, elapsed)
+                    display.session_usage(session_usage)
+                    turn_tracer.finish(
+                        status="completed",
+                        usage=session_usage,
+                        metadata={"tool_errors": loop_had_errors},
+                    )
+                except Exception as exc:
+                    turn_tracer.log_error(str(exc), metadata={"phase": "run_chat_loop"})
+                    turn_tracer.finish(
+                        status="failed",
+                        usage=session_usage,
+                        metadata={"error_message": str(exc)},
+                    )
+                    raise
 
     _close_store(store)
     return 4 if had_tool_errors else 0
@@ -453,6 +528,7 @@ def run_sub_agent_task(
     agent_type: str | None = None,
     include_context: bool = False,
     parent_context: ParentContextSnapshot | None = None,
+    parent_tracer: RunTracer | None = None,
 ) -> dict[str, Any]:
     agent_definition = None
     if agent_type is not None:
@@ -490,6 +566,29 @@ def run_sub_agent_task(
     child_turn_usage = TokenUsage(
         model=_selected_model(child_settings), service_tier=_child_tier
     )
+    child_tracer = (
+        parent_tracer.child(
+            agent_name=child_name,
+            agent_type=agent_type or "default",
+            provider=child_settings.provider,
+            provider_id=None,
+            profile_id=None,
+            model=_selected_model(child_settings),
+            metadata={"include_context": include_context},
+        )
+        if parent_tracer is not None
+        else RunTracer.start(
+            store=None,
+            session_id=None,
+            agent_name=child_name,
+            agent_type=agent_type or "default",
+            provider=child_settings.provider,
+            provider_id=None,
+            profile_id=None,
+            model=_selected_model(child_settings),
+            metadata={"include_context": include_context},
+        )
+    )
     child_display.session_usage(child_session_usage)
     started_at = time.monotonic()
     request_count = 0
@@ -525,6 +624,7 @@ def run_sub_agent_task(
                 display=child_display,
                 session_usage=child_session_usage,
                 turn_usage=child_turn_usage,
+                tracer=child_tracer,
             )
             request_count += 1
             response, had_tool_errors, request_count = _run_tool_iterations(
@@ -539,10 +639,16 @@ def run_sub_agent_task(
                 request_count=request_count,
                 started_at=started_at,
                 max_elapsed_seconds=SUB_AGENT_MAX_ELAPSED_SECONDS,
+                tracer=child_tracer,
             )
             elapsed = time.monotonic() - started_at
             child_display.turn_usage(child_turn_usage, elapsed)
             child_display.finish_sub_agent(status="completed")
+            child_tracer.finish(
+                status="completed",
+                usage=child_session_usage,
+                metadata={"tool_errors": had_tool_errors},
+            )
             return {
                 "status": "completed",
                 "final_output": response.text,
@@ -550,6 +656,12 @@ def run_sub_agent_task(
     except SubAgentRunError as exc:
         child_display.error(exc.message)
         child_display.finish_sub_agent(status="failed")
+        child_tracer.log_error(exc.message, metadata={"phase": "run_sub_agent_task"})
+        child_tracer.finish(
+            status="failed",
+            usage=child_session_usage,
+            metadata={"error_message": exc.message},
+        )
         return {
             "status": "failed",
             "error": {"type": exc.error_type, "message": exc.message},
@@ -558,6 +670,12 @@ def run_sub_agent_task(
         message = str(exc) or exc.__class__.__name__
         child_display.error(message)
         child_display.finish_sub_agent(status="failed")
+        child_tracer.log_error(message, metadata={"phase": "run_sub_agent_task"})
+        child_tracer.finish(
+            status="failed",
+            usage=child_session_usage,
+            metadata={"error_message": message},
+        )
         return {
             "status": "failed",
             "error": {"type": "sub_agent_failed", "message": message},
@@ -621,6 +739,7 @@ def _run_tool_iterations(
     session_id: str | None = None,
     current_user_turn_text: str | None = None,
     instructions: str | None = None,
+    tracer: RunTracer | None = None,
 ) -> tuple[CompletedResponse, bool, int]:
     had_errors = False
 
@@ -645,6 +764,14 @@ def _run_tool_iterations(
                     session_id=session_id,
                     current_user_turn_text=current_user_turn_text,
                 )
+            if tracer is not None:
+                tracer.log_event(
+                    "agent_step_start",
+                    metadata={
+                        "step": "tool_iteration",
+                        "tool_count": len(response.function_calls),
+                    },
+                )
             tool_result_items, loop_errors = provider.execute_tool_calls(
                 response,
                 max_workers=max_workers,
@@ -653,6 +780,7 @@ def _run_tool_iterations(
                 turn_usage=turn_usage,
                 sub_agent_depth=sub_agent_depth,
                 parent_context=parent_context,
+                tracer=tracer,
             )
         except Exception:
             _log.exception("Tool execution failed inside provider.execute_tool_calls")
@@ -661,6 +789,11 @@ def _run_tool_iterations(
 
         if not tool_result_items:
             _log.debug("No tool_result_items returned; stopping tool loop")
+            if tracer is not None:
+                tracer.log_event(
+                    "agent_step_end",
+                    metadata={"step": "tool_iteration", "empty_result": True},
+                )
             break
 
         if max_requests is not None and request_count >= max_requests:
@@ -679,7 +812,13 @@ def _run_tool_iterations(
                 display=display,
                 session_usage=session_usage,
                 turn_usage=turn_usage,
+                tracer=tracer,
             )
+            if tracer is not None:
+                tracer.log_event(
+                    "agent_step_end",
+                    metadata={"step": "tool_iteration"},
+                )
             request_count += 1
         except Exception:
             _log.exception("Follow-up request after tool execution failed")
@@ -1056,6 +1195,7 @@ def _request_user_turn(
     display: DisplayProtocol,
     session_usage: TokenUsage,
     turn_usage: TokenUsage,
+    tracer: RunTracer | None = None,
 ) -> CompletedResponse:
     return provider.request_turn(
         user_input=user_input,
@@ -1063,6 +1203,7 @@ def _request_user_turn(
         display=display,
         session_usage=session_usage,
         turn_usage=turn_usage,
+        tracer=tracer,
     )
 
 

@@ -93,6 +93,7 @@ def _execute_one_tool_call(
     context: ToolContext | None = None,
 ) -> ToolResult:
     start = time.monotonic()
+    tracer = context.tracer if context is not None else None
     _log.debug("Starting tool call %s (%s)", call.call_id, call.name)
     handler = (
         tool_catalog.get_handler(call.name) if tool_catalog is not None else None
@@ -100,6 +101,14 @@ def _execute_one_tool_call(
     if handler is None:
         result = _error_result(
             call, "unknown_tool", f"Tool '{call.name}' is not registered."
+        )
+        _log_tool_call(
+            tracer=tracer,
+            call=call,
+            output_payload=json.loads(result.output_json),
+            duration_ms=_duration_ms(start),
+            success=False,
+            error_message=f"Tool '{call.name}' is not registered.",
         )
         _log.debug(
             "Finished tool call %s (%s) in %.3fs with error",
@@ -112,6 +121,14 @@ def _execute_one_tool_call(
     args_or_error = _normalize_arguments(call.arguments)
     if isinstance(args_or_error, str):
         result = _error_result(call, "invalid_arguments", args_or_error)
+        _log_tool_call(
+            tracer=tracer,
+            call=call,
+            output_payload=json.loads(result.output_json),
+            duration_ms=_duration_ms(start),
+            success=False,
+            error_message=args_or_error,
+        )
         _log.debug(
             "Finished tool call %s (%s) in %.3fs with error",
             call.call_id,
@@ -134,6 +151,14 @@ def _execute_one_tool_call(
             is_error=False,
             attachments=attachments,
         )
+        _log_tool_call(
+            tracer=tracer,
+            call=call,
+            output_payload=payload,
+            duration_ms=_duration_ms(start),
+            success=True,
+            metadata={"attachment_count": len(attachments)},
+        )
         _log.debug(
             "Finished tool call %s (%s) in %.3fs",
             call.call_id,
@@ -143,6 +168,14 @@ def _execute_one_tool_call(
         return result
     except Exception as exc:
         result = _error_result(call, "tool_execution_failed", str(exc))
+        _log_tool_call(
+            tracer=tracer,
+            call=call,
+            output_payload=json.loads(result.output_json),
+            duration_ms=_duration_ms(start),
+            success=False,
+            error_message=str(exc),
+        )
         _log.debug(
             "Finished tool call %s (%s) in %.3fs with exception: %s",
             call.call_id,
@@ -183,4 +216,32 @@ def _error_result(call: ToolCall, error_type: str, message: str) -> ToolResult:
         call_id=call.call_id,
         output_json=json.dumps(payload),
         is_error=True,
+    )
+
+
+def _duration_ms(start: float) -> int:
+    return max(0, int((time.monotonic() - start) * 1000))
+
+
+def _log_tool_call(
+    *,
+    tracer,
+    call: ToolCall,
+    output_payload: dict[str, Any],
+    duration_ms: int,
+    success: bool,
+    error_message: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if tracer is None:
+        return
+    tracer.log_tool_call(
+        tool_name=call.name,
+        tool_call_id=call.call_id,
+        tool_input=call.arguments,
+        tool_output=output_payload,
+        duration_ms=duration_ms,
+        success=success,
+        error_message=error_message,
+        metadata=metadata,
     )
