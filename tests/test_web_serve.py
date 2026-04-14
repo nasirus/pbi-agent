@@ -52,7 +52,7 @@ def test_web_server_prints_banner_and_starts_uvicorn() -> None:
     output = StringIO()
     server.console = Console(file=output, width=80, highlight=False)
 
-    with patch("pbi_agent.web.serve.uvicorn.Server.run") as mock_run:
+    with patch("pbi_agent.web.server_runtime.uvicorn.Server.run") as mock_run:
         server.serve(debug=False)
 
     rendered = output.getvalue()

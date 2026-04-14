@@ -1,5 +1,5 @@
 # TODO
 
-- [x] Clean remaining command example wording from `mode` to `command`.
-- [x] Rename residual command-related test names and fixtures for wording consistency.
-- [x] Run targeted validation, then append the cleanup note to `MEMORY.md`.
+- [x] Remove the facade-only `uvicorn` import from `src/pbi_agent/web/serve.py`.
+- [x] Retarget the web server test patch to `pbi_agent.web.server_runtime.uvicorn.Server.run`.
+- [x] Run targeted validation for the touched files.
