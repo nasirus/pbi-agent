@@ -1,7 +1,5 @@
 # TODO
 
-- [x] Update project command discovery/config to use `.agents/commands`.
-- [x] Update tests and UI copy to match the project command directory.
-- [x] Rename the workspace command folder to `.agents/commands`.
-- [x] Rebuild and run targeted validation.
-- [x] Record the change in `MEMORY.md`.
+- [x] Trace the board stage reorder failure across webapp and FastAPI.
+- [x] Patch the webapp to avoid resubmitting stale stage mode/profile IDs.
+- [x] Run frontend validation and record the change in `MEMORY.md`.

@@ -1,29 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { BoardStage, ModeView, ModelProfileView } from "../../types";
+import {
+  type EditableBoardStage,
+  normalizeEditableBoardStages,
+  toEditableBoardStages,
+} from "./stageConfig";
 
 const BACKLOG_STAGE_ID = "backlog";
 const DONE_STAGE_ID = "done";
 
-type EditableBoardStage = {
-  id: string;
-  name: string;
-  profile_id: string;
-  mode_id: string;
-  auto_start: boolean;
-};
-
 function isFixedStage(stageId: string): boolean {
   return stageId === BACKLOG_STAGE_ID || stageId === DONE_STAGE_ID;
-}
-
-function initStages(stages: BoardStage[]): EditableBoardStage[] {
-  return stages.map((stage) => ({
-    id: stage.id,
-    name: stage.name,
-    profile_id: stage.profile_id ?? "",
-    mode_id: stage.mode_id ?? "",
-    auto_start: stage.auto_start,
-  }));
 }
 
 export function BoardStageEditorModal({
@@ -41,7 +28,9 @@ export function BoardStageEditorModal({
   onSave: (stages: EditableBoardStage[]) => Promise<void>;
   onClose: () => void;
 }) {
-  const [items, setItems] = useState<EditableBoardStage[]>(() => initStages(stages));
+  const [items, setItems] = useState<EditableBoardStage[]>(() =>
+    toEditableBoardStages(stages, profiles, modes),
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -103,7 +92,7 @@ export function BoardStageEditorModal({
       return;
     }
     try {
-      await onSave(items);
+      await onSave(normalizeEditableBoardStages(items, profiles, modes));
     } catch (err) {
       setError((err as Error).message);
     }

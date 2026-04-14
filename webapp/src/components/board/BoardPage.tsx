@@ -28,6 +28,7 @@ import { EmptyState } from "../shared/EmptyState";
 import { DeleteConfirmModal } from "../settings/DeleteConfirmModal";
 import { BoardStageEditorModal } from "./BoardStageEditorModal";
 import { StageColumn } from "./StageColumn";
+import { normalizeEditableBoardStages, toEditableBoardStages } from "./stageConfig";
 import { TaskModal, type EditableTask } from "./TaskModal";
 import { TaskCardContent } from "./TaskCard";
 
@@ -74,6 +75,8 @@ export function BoardPage() {
 
   const tasks = tasksQuery.data ?? EMPTY_TASKS;
   const boardStages = stagesQuery.data ?? EMPTY_STAGES;
+  const profiles = configQuery.data?.model_profiles ?? [];
+  const modes = configQuery.data?.modes ?? [];
   const tasksByStage = useMemo(
     () =>
       boardStages.reduce<Record<string, TaskRecord[]>>((acc, stage) => {
@@ -106,15 +109,7 @@ export function BoardPage() {
       const newIndex = boardStages.findIndex((s) => `sortable-stage:${s.id}` === overId);
       if (oldIndex === -1 || newIndex === -1) return;
       const reordered = arrayMove(boardStages, oldIndex, newIndex);
-      void saveBoardStages(
-        reordered.map((s) => ({
-          id: s.id,
-          name: s.name,
-          profile_id: s.profile_id ?? "",
-          mode_id: s.mode_id ?? "",
-          auto_start: s.auto_start,
-        })),
-      );
+      void saveBoardStages(toEditableBoardStages(reordered, profiles, modes));
       return;
     }
 
@@ -192,8 +187,9 @@ export function BoardPage() {
       auto_start: boolean;
     }>,
   ) => {
+    const normalizedStages = normalizeEditableBoardStages(stages, profiles, modes);
     await updateBoardStagesMutation.mutateAsync({
-      board_stages: stages.map((stage) => ({
+      board_stages: normalizedStages.map((stage) => ({
         id: stage.id.trim() === "" ? null : stage.id,
         name: stage.name,
         profile_id: stage.profile_id.trim() === "" ? null : stage.profile_id,
@@ -316,7 +312,7 @@ export function BoardPage() {
         <TaskModal
           task={editingTask}
           boardStages={boardStages}
-          profiles={configQuery.data?.model_profiles ?? []}
+          profiles={profiles}
           isSaving={createTaskMutation.isPending || updateTaskMutation.isPending}
           onChange={(updates) =>
             setEditingTask((prev) => (prev ? { ...prev, ...updates } : prev))
@@ -349,8 +345,8 @@ export function BoardPage() {
       {isBoardEditorOpen ? (
         <BoardStageEditorModal
           stages={boardStages}
-          profiles={configQuery.data?.model_profiles ?? []}
-          modes={configQuery.data?.modes ?? []}
+          profiles={profiles}
+          modes={modes}
           isSaving={updateBoardStagesMutation.isPending}
           onSave={saveBoardStages}
           onClose={() => setIsBoardEditorOpen(false)}
