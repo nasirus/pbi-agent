@@ -13,6 +13,7 @@ import {
 } from "@dnd-kit/sortable";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ApiError,
   createTask,
   deleteTask,
   fetchBoardStages,
@@ -28,12 +29,38 @@ import { EmptyState } from "../shared/EmptyState";
 import { DeleteConfirmModal } from "../settings/DeleteConfirmModal";
 import { BoardStageEditorModal } from "./BoardStageEditorModal";
 import { StageColumn } from "./StageColumn";
-import { normalizeEditableBoardStages, toEditableBoardStages } from "./stageConfig";
+import { sanitizeEditableBoardStages, toEditableBoardStages } from "./stageConfig";
 import { TaskModal, type EditableTask } from "./TaskModal";
 import { TaskCardContent } from "./TaskCard";
 
 const EMPTY_TASKS: TaskRecord[] = [];
 const EMPTY_STAGES: BoardStage[] = [];
+
+function toBoardStagePayload(
+  stages: Array<{
+    id: string;
+    name: string;
+    profile_id: string;
+    mode_id: string;
+    auto_start: boolean;
+  }>,
+) {
+  return {
+    board_stages: stages.map((stage) => ({
+      id: stage.id.trim() === "" ? null : stage.id,
+      name: stage.name,
+      profile_id: stage.profile_id.trim() === "" ? null : stage.profile_id,
+      mode_id: stage.mode_id.trim() === "" ? null : stage.mode_id,
+      auto_start: stage.auto_start,
+    })),
+  };
+}
+
+function isUnknownStageReferenceError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 400 && (
+    error.message.includes("Unknown profile ID") || error.message.includes("Unknown mode ID")
+  );
+}
 
 export function BoardPage() {
   const client = useQueryClient();
@@ -109,7 +136,7 @@ export function BoardPage() {
       const newIndex = boardStages.findIndex((s) => `sortable-stage:${s.id}` === overId);
       if (oldIndex === -1 || newIndex === -1) return;
       const reordered = arrayMove(boardStages, oldIndex, newIndex);
-      void saveBoardStages(toEditableBoardStages(reordered, profiles, modes));
+      void saveBoardStages(toEditableBoardStages(reordered));
       return;
     }
 
@@ -187,16 +214,20 @@ export function BoardPage() {
       auto_start: boolean;
     }>,
   ) => {
-    const normalizedStages = normalizeEditableBoardStages(stages, profiles, modes);
-    await updateBoardStagesMutation.mutateAsync({
-      board_stages: normalizedStages.map((stage) => ({
-        id: stage.id.trim() === "" ? null : stage.id,
-        name: stage.name,
-        profile_id: stage.profile_id.trim() === "" ? null : stage.profile_id,
-        mode_id: stage.mode_id.trim() === "" ? null : stage.mode_id,
-        auto_start: stage.auto_start,
-      })),
-    });
+    try {
+      await updateBoardStagesMutation.mutateAsync(toBoardStagePayload(stages));
+    } catch (error) {
+      if (!isUnknownStageReferenceError(error)) {
+        throw error;
+      }
+      const freshConfig = await fetchConfigBootstrap();
+      client.setQueryData(["config-bootstrap"], freshConfig);
+      await updateBoardStagesMutation.mutateAsync(
+        toBoardStagePayload(
+          sanitizeEditableBoardStages(stages, freshConfig.model_profiles, freshConfig.modes),
+        ),
+      );
+    }
     setIsBoardEditorOpen(false);
   };
 

@@ -1,10 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { BoardStage, ModeView, ModelProfileView } from "../../types";
-import {
-  type EditableBoardStage,
-  normalizeEditableBoardStages,
-  toEditableBoardStages,
-} from "./stageConfig";
+import { type EditableBoardStage, toEditableBoardStages } from "./stageConfig";
 
 const BACKLOG_STAGE_ID = "backlog";
 const DONE_STAGE_ID = "done";
@@ -29,7 +25,7 @@ export function BoardStageEditorModal({
   onClose: () => void;
 }) {
   const [items, setItems] = useState<EditableBoardStage[]>(() =>
-    toEditableBoardStages(stages, profiles, modes),
+    toEditableBoardStages(stages),
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -92,7 +88,7 @@ export function BoardStageEditorModal({
       return;
     }
     try {
-      await onSave(normalizeEditableBoardStages(items, profiles, modes));
+      await onSave(items);
     } catch (err) {
       setError((err as Error).message);
     }

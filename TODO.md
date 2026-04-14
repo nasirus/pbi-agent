@@ -1,5 +1,5 @@
 # TODO
 
-- [x] Trace the board stage reorder failure across webapp and FastAPI.
-- [x] Patch the webapp to avoid resubmitting stale stage mode/profile IDs.
-- [x] Run frontend validation and record the change in `MEMORY.md`.
+- [x] Remove board-stage save normalization that clears cached profile/command IDs.
+- [x] Preserve existing stage defaults when opening and submitting the board stage editor.
+- [x] Run frontend validation and record the fix in `MEMORY.md`.

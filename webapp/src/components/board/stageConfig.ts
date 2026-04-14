@@ -15,7 +15,7 @@ function sanitizeReference(value: string | null | undefined, allowedIds: Set<str
   return allowedIds.has(value) ? value : "";
 }
 
-export function normalizeEditableBoardStages(
+export function sanitizeEditableBoardStages(
   stages: EditableBoardStage[],
   profiles: ModelProfileView[],
   modes: ModeView[],
@@ -29,20 +29,12 @@ export function normalizeEditableBoardStages(
   }));
 }
 
-export function toEditableBoardStages(
-  stages: BoardStage[],
-  profiles: ModelProfileView[],
-  modes: ModeView[],
-): EditableBoardStage[] {
-  return normalizeEditableBoardStages(
-    stages.map((stage) => ({
-      id: stage.id,
-      name: stage.name,
-      profile_id: stage.profile_id ?? "",
-      mode_id: stage.mode_id ?? "",
-      auto_start: stage.auto_start,
-    })),
-    profiles,
-    modes,
-  );
+export function toEditableBoardStages(stages: BoardStage[]): EditableBoardStage[] {
+  return stages.map((stage) => ({
+    id: stage.id,
+    name: stage.name,
+    profile_id: stage.profile_id ?? "",
+    mode_id: stage.mode_id ?? "",
+    auto_start: stage.auto_start,
+  }));
 }
