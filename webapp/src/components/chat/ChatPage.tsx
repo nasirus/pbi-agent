@@ -24,6 +24,7 @@ import {
 import { useLiveChatEvents } from "../../hooks/useLiveChatEvents";
 import { ConnectionBadge } from "./ConnectionBadge";
 import { DeleteSessionModal } from "./DeleteSessionModal";
+import { RunHistory } from "./RunHistory";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatTimeline } from "./ChatTimeline";
 import { UsageBar } from "./UsageBar";
@@ -480,6 +481,9 @@ export function ChatPage({
               sessionUsage={chatState?.sessionUsage ?? null}
               turnUsage={chatState?.turnUsage ?? null}
             />
+            {routeSessionId ? (
+              <RunHistory sessionId={routeSessionId} />
+            ) : null}
             {canDeleteActiveSession ? (
               <button
                 type="button"

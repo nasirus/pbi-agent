@@ -1177,6 +1177,186 @@ def test_get_session_detail_returns_saved_history(tmp_path, monkeypatch) -> None
     assert payload["live_session"] is None
 
 
+def test_get_session_detail_matches_legacy_mixed_case_directory(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Saved chat",
+        )
+        legacy_directory = str(tmp_path).replace("/tmp/", "/TMP/", 1)
+        store._conn.execute(
+            "UPDATE sessions SET directory = ? WHERE session_id = ?",
+            (legacy_directory, session_id),
+        )
+        store._conn.commit()
+
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        sessions_response = client.get("/api/sessions")
+        detail_response = client.get(f"/api/sessions/{session_id}")
+
+    assert sessions_response.status_code == 200
+    assert [item["session_id"] for item in sessions_response.json()["sessions"]] == [
+        session_id
+    ]
+    assert detail_response.status_code == 200
+    assert detail_response.json()["session"]["session_id"] == session_id
+
+
+def test_list_session_runs_returns_observability_runs(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Saved chat",
+        )
+        parent_run_id = store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="chat_turn",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5.4",
+            metadata={"origin": "test"},
+        )
+        child_run_id = store.create_run_session(
+            session_id=session_id,
+            parent_run_session_id=parent_run_id,
+            agent_name="athena",
+            agent_type="reviewer",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5.4-mini",
+        )
+        store.update_run_session(
+            child_run_id,
+            status="completed",
+            total_duration_ms=42,
+            total_tool_calls=1,
+            total_api_calls=2,
+            error_count=0,
+        )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/sessions/{session_id}/runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [run["run_session_id"] for run in payload["runs"]] == [
+        parent_run_id,
+        child_run_id,
+    ]
+    assert payload["runs"][0]["metadata"] == {"origin": "test"}
+    assert payload["runs"][1]["parent_run_session_id"] == parent_run_id
+    assert payload["runs"][1]["status"] == "completed"
+    assert payload["runs"][1]["total_duration_ms"] == 42
+    assert payload["runs"][1]["total_tool_calls"] == 1
+    assert payload["runs"][1]["total_api_calls"] == 2
+
+
+def test_list_session_runs_returns_not_found_for_unknown_session() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.get("/api/sessions/missing-session/runs")
+
+    assert response.status_code == 404
+
+
+def test_get_run_detail_returns_observability_events(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Saved chat",
+        )
+        run_session_id = store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="chat_turn",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5.4",
+        )
+        store.add_observability_event(
+            run_session_id=run_session_id,
+            session_id=session_id,
+            step_index=0,
+            event_type="run_start",
+            request_config={"provider": "openai"},
+            metadata={"origin": "test"},
+        )
+        store.add_observability_event(
+            run_session_id=run_session_id,
+            session_id=session_id,
+            step_index=1,
+            event_type="model_call",
+            provider="openai",
+            model="gpt-5.4",
+            request_payload={"input": "Hello"},
+            response_payload={"output": "Hi"},
+            prompt_tokens=12,
+            completion_tokens=8,
+            total_tokens=20,
+            status_code=200,
+            success=True,
+        )
+        store.update_run_session(
+            run_session_id,
+            status="completed",
+            total_api_calls=1,
+        )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/runs/{run_session_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run"]["run_session_id"] == run_session_id
+    assert payload["run"]["status"] == "completed"
+    assert [event["event_type"] for event in payload["events"]] == [
+        "run_start",
+        "model_call",
+    ]
+    assert payload["events"][0]["request_config"] == {"provider": "openai"}
+    assert payload["events"][0]["metadata"] == {"origin": "test"}
+    assert payload["events"][1]["request_payload"] == {"input": "Hello"}
+    assert payload["events"][1]["response_payload"] == {"output": "Hi"}
+    assert payload["events"][1]["success"] is True
+    assert payload["events"][1]["status_code"] == 200
+    assert payload["events"][1]["total_tokens"] == 20
+
+
+def test_get_run_detail_returns_not_found_for_unknown_run() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.get("/api/runs/missing-run")
+
+    assert response.status_code == 404
+
+
 def test_get_session_detail_returns_not_found_for_unknown_session() -> None:
     app = create_app(_settings())
 
@@ -1773,3 +1953,147 @@ def test_static_and_spa_routes_return_expected_responses() -> None:
     assert logo_response.headers["content-type"] == "image/png"
     assert api_not_found_response.status_code == 404
     assert stream_guard_response.status_code == 404
+
+
+def test_dashboard_stats_returns_aggregated_overview(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Dashboard test",
+        )
+        run_id = store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="chat_turn",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5.4",
+        )
+        store.update_run_session(
+            run_id,
+            status="completed",
+            total_duration_ms=1000,
+            input_tokens=100,
+            output_tokens=50,
+            estimated_cost_usd=0.01,
+            total_tool_calls=3,
+            total_api_calls=2,
+            error_count=0,
+        )
+
+    with TestClient(app) as client:
+        response = client.get("/api/dashboard/stats")
+
+    assert response.status_code == 200
+    payload = response.json()
+    overview = payload["overview"]
+    assert overview["total_sessions"] == 1
+    assert overview["total_runs"] == 1
+    assert overview["total_input_tokens"] == 100
+    assert overview["total_output_tokens"] == 50
+    assert overview["total_cost"] == 0.01
+    assert overview["total_tool_calls"] == 3
+    assert overview["total_api_calls"] == 2
+    assert overview["completed_runs"] == 1
+    assert overview["failed_runs"] == 0
+
+    assert len(payload["breakdown"]) == 1
+    assert payload["breakdown"][0]["provider"] == "openai"
+    assert payload["breakdown"][0]["model"] == "gpt-5.4"
+    assert payload["breakdown"][0]["run_count"] == 1
+
+    assert len(payload["daily"]) >= 1
+
+
+def test_dashboard_stats_global_scope_includes_other_workspaces(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        # Create a session in a *different* directory than the workspace.
+        session_id = store.create_session(
+            "/other/workspace",
+            "anthropic",
+            "claude-4",
+            "Other workspace",
+        )
+        store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="chat_turn",
+            provider="anthropic",
+            provider_id=None,
+            profile_id=None,
+            model="claude-4",
+        )
+
+    with TestClient(app) as client:
+        # Workspace scope should NOT see the other workspace's run.
+        ws_response = client.get("/api/dashboard/stats?scope=workspace")
+        assert ws_response.status_code == 200
+        assert ws_response.json()["overview"]["total_runs"] == 0
+
+        # Global scope SHOULD see it.
+        global_response = client.get("/api/dashboard/stats?scope=global")
+        assert global_response.status_code == 200
+        assert global_response.json()["overview"]["total_runs"] == 1
+
+
+def test_list_all_runs_returns_paginated_runs(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Paginated test",
+        )
+        for i in range(5):
+            run_id = store.create_run_session(
+                session_id=session_id,
+                agent_name="main",
+                agent_type="chat_turn",
+                provider="openai",
+                provider_id="default",
+                profile_id="analysis",
+                model="gpt-5.4",
+                status="completed" if i % 2 == 0 else "failed",
+            )
+            store.update_run_session(
+                run_id,
+                input_tokens=(i + 1) * 100,
+                output_tokens=(i + 1) * 50,
+            )
+
+    with TestClient(app) as client:
+        response = client.get("/api/runs?limit=2&offset=0")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total_count"] == 5
+        assert len(payload["runs"]) == 2
+        assert payload["runs"][0]["session_title"] == "Paginated test"
+
+        response = client.get("/api/runs?status=completed")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total_count"] == 3
+        assert all(run["status"] == "completed" for run in payload["runs"])
+
+        response = client.get("/api/runs?status=failed")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total_count"] == 2
+        assert all(run["status"] == "failed" for run in payload["runs"])

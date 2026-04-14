@@ -72,6 +72,80 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id);
 
+CREATE TABLE IF NOT EXISTS run_sessions (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_session_id          TEXT NOT NULL UNIQUE,
+    session_id              TEXT REFERENCES sessions(session_id),
+    parent_run_session_id   TEXT,
+    agent_name              TEXT,
+    agent_type              TEXT,
+    provider                TEXT,
+    provider_id             TEXT,
+    profile_id              TEXT,
+    model                   TEXT,
+    status                  TEXT NOT NULL,
+    started_at              TEXT NOT NULL,
+    ended_at                TEXT,
+    total_duration_ms       INTEGER,
+    input_tokens            INTEGER NOT NULL DEFAULT 0,
+    cached_input_tokens     INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens      INTEGER NOT NULL DEFAULT 0,
+    cache_write_1h_tokens   INTEGER NOT NULL DEFAULT 0,
+    output_tokens           INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens        INTEGER NOT NULL DEFAULT 0,
+    tool_use_tokens         INTEGER NOT NULL DEFAULT 0,
+    provider_total_tokens   INTEGER NOT NULL DEFAULT 0,
+    estimated_cost_usd      REAL NOT NULL DEFAULT 0.0,
+    total_tool_calls        INTEGER NOT NULL DEFAULT 0,
+    total_api_calls         INTEGER NOT NULL DEFAULT 0,
+    error_count             INTEGER NOT NULL DEFAULT 0,
+    metadata_json           TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_run_sessions_session_id
+    ON run_sessions(session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_run_sessions_parent_run_session_id
+    ON run_sessions(parent_run_session_id);
+CREATE INDEX IF NOT EXISTS idx_run_sessions_started_at
+    ON run_sessions(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS observability_events (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_session_id        TEXT NOT NULL,
+    session_id            TEXT,
+    step_index            INTEGER NOT NULL,
+    event_type            TEXT NOT NULL,
+    timestamp             TEXT NOT NULL,
+    duration_ms           INTEGER,
+    provider              TEXT,
+    model                 TEXT,
+    url                   TEXT,
+    request_config_json   TEXT,
+    request_payload_json  TEXT,
+    response_payload_json TEXT,
+    tool_name             TEXT,
+    tool_call_id          TEXT,
+    tool_input_json       TEXT,
+    tool_output_json      TEXT,
+    tool_duration_ms      INTEGER,
+    prompt_tokens         INTEGER,
+    completion_tokens     INTEGER,
+    total_tokens          INTEGER,
+    status_code           INTEGER,
+    success               INTEGER,
+    error_message         TEXT,
+    metadata_json         TEXT NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_observability_events_run_step
+    ON observability_events(run_session_id, step_index);
+CREATE INDEX IF NOT EXISTS idx_observability_events_session_id
+    ON observability_events(session_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_observability_events_run_session_id
+    ON observability_events(run_session_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_observability_events_event_type
+    ON observability_events(event_type, timestamp);
+CREATE INDEX IF NOT EXISTS idx_observability_events_timestamp
+    ON observability_events(timestamp);
+
 CREATE TABLE IF NOT EXISTS kanban_tasks (
     task_id               TEXT PRIMARY KEY,
     directory             TEXT NOT NULL,
@@ -147,6 +221,66 @@ class MessageImageAttachment:
     mime_type: str
     byte_count: int
     preview_url: str
+
+
+@dataclass(slots=True)
+class RunSessionRecord:
+    id: int
+    run_session_id: str
+    session_id: str | None
+    parent_run_session_id: str | None
+    agent_name: str | None
+    agent_type: str | None
+    provider: str | None
+    provider_id: str | None
+    profile_id: str | None
+    model: str | None
+    status: str
+    started_at: str
+    ended_at: str | None
+    total_duration_ms: int | None
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_tokens: int
+    cache_write_1h_tokens: int
+    output_tokens: int
+    reasoning_tokens: int
+    tool_use_tokens: int
+    provider_total_tokens: int
+    estimated_cost_usd: float
+    total_tool_calls: int
+    total_api_calls: int
+    error_count: int
+    metadata_json: str
+
+
+@dataclass(slots=True)
+class ObservabilityEventRecord:
+    id: int
+    run_session_id: str
+    session_id: str | None
+    step_index: int
+    event_type: str
+    timestamp: str
+    duration_ms: int | None
+    provider: str | None
+    model: str | None
+    url: str | None
+    request_config_json: str | None
+    request_payload_json: str | None
+    response_payload_json: str | None
+    tool_name: str | None
+    tool_call_id: str | None
+    tool_input_json: str | None
+    tool_output_json: str | None
+    tool_duration_ms: int | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    status_code: int | None
+    success: int | None
+    error_message: str | None
+    metadata_json: str
 
 
 @dataclass(slots=True)
@@ -268,6 +402,10 @@ def _db_path() -> Path:
     return DEFAULT_SESSION_DB_PATH
 
 
+def _normalize_directory_key(directory: str) -> str:
+    return directory.lower()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -295,6 +433,12 @@ def _serialize_file_paths(file_paths: list[str] | None) -> str:
     if not file_paths:
         return "[]"
     return json.dumps([path for path in file_paths if isinstance(path, str)])
+
+
+def _serialize_json(value: object, *, default: str = "{}") -> str:
+    if value is None:
+        return default
+    return json.dumps(value, sort_keys=True)
 
 
 def _deserialize_file_paths(raw_value: object) -> list[str]:
@@ -377,6 +521,7 @@ class SessionStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._ensure_schema()
+        self._normalize_directory_keys()
 
     def __enter__(self) -> SessionStore:
         return self
@@ -417,6 +562,21 @@ class SessionStore:
             )
         self._conn.commit()
 
+    def _normalize_directory_keys(self) -> None:
+        self._conn.execute(
+            "UPDATE sessions SET directory = LOWER(directory) "
+            "WHERE directory != LOWER(directory)"
+        )
+        self._conn.execute(
+            "UPDATE kanban_tasks SET directory = LOWER(directory) "
+            "WHERE directory != LOWER(directory)"
+        )
+        self._conn.execute(
+            "UPDATE kanban_stage_configs SET directory = LOWER(directory) "
+            "WHERE directory != LOWER(directory)"
+        )
+        self._conn.commit()
+
     def create_session(
         self,
         directory: str,
@@ -429,6 +589,7 @@ class SessionStore:
     ) -> str:
         session_id = uuid.uuid4().hex
         now = _now_iso()
+        normalized_directory = _normalize_directory_key(directory)
         with self._lock:
             self._conn.execute(
                 "INSERT INTO sessions "
@@ -438,7 +599,7 @@ class SessionStore:
                 "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, 0, 0, 0.0, ?, ?)",
                 (
                     session_id,
-                    directory,
+                    normalized_directory,
                     provider,
                     provider_id,
                     model,
@@ -527,12 +688,13 @@ class SessionStore:
         limit: int = 20,
         provider: str | None = None,
     ) -> list[SessionRecord]:
+        normalized_directory = _normalize_directory_key(directory)
         if provider:
             sql = "SELECT * FROM sessions WHERE directory = ? AND provider = ? ORDER BY updated_at DESC LIMIT ?"
-            params: tuple[object, ...] = (directory, provider, limit)
+            params: tuple[object, ...] = (normalized_directory, provider, limit)
         else:
             sql = "SELECT * FROM sessions WHERE directory = ? ORDER BY updated_at DESC LIMIT ?"
-            params = (directory, limit)
+            params = (normalized_directory, limit)
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         return [SessionRecord(**dict(r)) for r in rows]
@@ -555,6 +717,14 @@ class SessionStore:
                 return False
             self._conn.execute(
                 "DELETE FROM messages WHERE session_id = ?",
+                (session_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM observability_events WHERE session_id = ?",
+                (session_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM run_sessions WHERE session_id = ?",
                 (session_id,),
             )
             self._conn.execute(
@@ -621,29 +791,424 @@ class SessionStore:
             )
         return messages
 
+    def create_run_session(
+        self,
+        *,
+        session_id: str | None,
+        agent_name: str | None,
+        agent_type: str | None,
+        provider: str | None,
+        provider_id: str | None,
+        profile_id: str | None,
+        model: str | None,
+        status: str = "started",
+        parent_run_session_id: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> str:
+        run_session_id = uuid.uuid4().hex
+        now = _now_iso()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO run_sessions "
+                "(run_session_id, session_id, parent_run_session_id, agent_name, "
+                "agent_type, provider, provider_id, profile_id, model, status, "
+                "started_at, metadata_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_session_id,
+                    session_id,
+                    parent_run_session_id,
+                    agent_name,
+                    agent_type,
+                    provider,
+                    provider_id,
+                    profile_id,
+                    model,
+                    status,
+                    now,
+                    _serialize_json(metadata, default="{}"),
+                ),
+            )
+            self._conn.commit()
+        return run_session_id
+
+    def update_run_session(
+        self,
+        run_session_id: str,
+        *,
+        status: str | None = None,
+        ended_at: str | None = None,
+        total_duration_ms: int | None = None,
+        input_tokens: int | None = None,
+        cached_input_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        cache_write_1h_tokens: int | None = None,
+        output_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+        tool_use_tokens: int | None = None,
+        provider_total_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
+        total_tool_calls: int | None = None,
+        total_api_calls: int | None = None,
+        error_count: int | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        clauses: list[str] = []
+        params: list[object] = []
+        scalar_values = {
+            "status": status,
+            "ended_at": ended_at,
+            "total_duration_ms": total_duration_ms,
+            "input_tokens": input_tokens,
+            "cached_input_tokens": cached_input_tokens,
+            "cache_write_tokens": cache_write_tokens,
+            "cache_write_1h_tokens": cache_write_1h_tokens,
+            "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning_tokens,
+            "tool_use_tokens": tool_use_tokens,
+            "provider_total_tokens": provider_total_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
+            "total_tool_calls": total_tool_calls,
+            "total_api_calls": total_api_calls,
+            "error_count": error_count,
+        }
+        for key, value in scalar_values.items():
+            if value is None:
+                continue
+            clauses.append(f"{key} = ?")
+            params.append(value)
+        if metadata is not None:
+            clauses.append("metadata_json = ?")
+            params.append(_serialize_json(metadata, default="{}"))
+        if not clauses:
+            return
+        params.append(run_session_id)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE run_sessions SET {', '.join(clauses)} "
+                "WHERE run_session_id = ?",
+                params,
+            )
+            self._conn.commit()
+
+    def get_run_session(self, run_session_id: str) -> RunSessionRecord | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM run_sessions WHERE run_session_id = ?",
+                (run_session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return RunSessionRecord(**dict(row))
+
+    def list_run_sessions(self, session_id: str) -> list[RunSessionRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM run_sessions WHERE session_id = ? "
+                "ORDER BY started_at ASC, id ASC",
+                (session_id,),
+            ).fetchall()
+        return [RunSessionRecord(**dict(row)) for row in rows]
+
+    def add_observability_event(
+        self,
+        *,
+        run_session_id: str,
+        session_id: str | None,
+        step_index: int,
+        event_type: str,
+        timestamp: str | None = None,
+        duration_ms: int | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        url: str | None = None,
+        request_config: object | None = None,
+        request_payload: object | None = None,
+        response_payload: object | None = None,
+        tool_name: str | None = None,
+        tool_call_id: str | None = None,
+        tool_input: object | None = None,
+        tool_output: object | None = None,
+        tool_duration_ms: int | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+        status_code: int | None = None,
+        success: bool | None = None,
+        error_message: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO observability_events "
+                "(run_session_id, session_id, step_index, event_type, timestamp, "
+                "duration_ms, provider, model, url, request_config_json, "
+                "request_payload_json, response_payload_json, tool_name, "
+                "tool_call_id, tool_input_json, tool_output_json, tool_duration_ms, "
+                "prompt_tokens, completion_tokens, total_tokens, status_code, "
+                "success, error_message, metadata_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?, ?, ?)",
+                (
+                    run_session_id,
+                    session_id,
+                    step_index,
+                    event_type,
+                    timestamp or _now_iso(),
+                    duration_ms,
+                    provider,
+                    model,
+                    url,
+                    _serialize_json(request_config, default="null"),
+                    _serialize_json(request_payload, default="null"),
+                    _serialize_json(response_payload, default="null"),
+                    tool_name,
+                    tool_call_id,
+                    _serialize_json(tool_input, default="null"),
+                    _serialize_json(tool_output, default="null"),
+                    tool_duration_ms,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    status_code,
+                    None if success is None else int(success),
+                    error_message,
+                    _serialize_json(metadata, default="{}"),
+                ),
+            )
+            self._conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def list_observability_events(
+        self,
+        *,
+        run_session_id: str,
+    ) -> list[ObservabilityEventRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM observability_events WHERE run_session_id = ? "
+                "ORDER BY step_index ASC, id ASC",
+                (run_session_id,),
+            ).fetchall()
+        return [ObservabilityEventRecord(**dict(row)) for row in rows]
+
+    # -- dashboard / observability aggregation ----------------------------
+
+    def get_dashboard_stats(
+        self,
+        *,
+        directory: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, object]:
+        """Return aggregated overview, provider/model breakdown, and daily buckets."""
+        normalized_dir = _normalize_directory_key(directory) if directory else None
+
+        base_where = "WHERE 1=1"
+        params: list[object] = []
+        if normalized_dir is not None:
+            base_where += " AND s.directory = ?"
+            params.append(normalized_dir)
+        if start_date is not None:
+            base_where += " AND rs.started_at >= ?"
+            params.append(start_date)
+        if end_date is not None:
+            base_where += " AND rs.started_at <= ?"
+            params.append(end_date)
+
+        join_clause = (
+            "FROM run_sessions rs JOIN sessions s ON rs.session_id = s.session_id"
+        )
+
+        with self._lock:
+            # -- overview --
+            overview_row = self._conn.execute(
+                f"SELECT "
+                "COUNT(DISTINCT rs.session_id) AS total_sessions, "
+                "COUNT(*) AS total_runs, "
+                "COALESCE(SUM(rs.input_tokens), 0) AS total_input_tokens, "
+                "COALESCE(SUM(rs.cached_input_tokens), 0) AS total_cached_tokens, "
+                "COALESCE(SUM(rs.output_tokens), 0) AS total_output_tokens, "
+                "COALESCE(SUM(rs.reasoning_tokens), 0) AS total_reasoning_tokens, "
+                "COALESCE(SUM(rs.estimated_cost_usd), 0.0) AS total_cost, "
+                "COALESCE(SUM(rs.total_api_calls), 0) AS total_api_calls, "
+                "COALESCE(SUM(rs.total_tool_calls), 0) AS total_tool_calls, "
+                "COALESCE(SUM(rs.error_count), 0) AS total_errors, "
+                "AVG(rs.total_duration_ms) AS avg_duration_ms, "
+                "COUNT(CASE WHEN rs.status = 'completed' THEN 1 END) AS completed_runs, "
+                "COUNT(CASE WHEN rs.status = 'failed' THEN 1 END) AS failed_runs "
+                f"{join_clause} {base_where}",
+                params,
+            ).fetchone()
+
+            overview = (
+                dict(overview_row)
+                if overview_row
+                else {
+                    "total_sessions": 0,
+                    "total_runs": 0,
+                    "total_input_tokens": 0,
+                    "total_cached_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_reasoning_tokens": 0,
+                    "total_cost": 0.0,
+                    "total_api_calls": 0,
+                    "total_tool_calls": 0,
+                    "total_errors": 0,
+                    "avg_duration_ms": None,
+                    "completed_runs": 0,
+                    "failed_runs": 0,
+                }
+            )
+
+            # -- provider/model breakdown --
+            breakdown_rows = self._conn.execute(
+                f"SELECT "
+                "rs.provider, rs.model, "
+                "COUNT(*) AS run_count, "
+                "COALESCE(SUM(rs.input_tokens + rs.output_tokens), 0) AS total_tokens, "
+                "COALESCE(SUM(rs.estimated_cost_usd), 0.0) AS total_cost, "
+                "AVG(rs.total_duration_ms) AS avg_duration_ms, "
+                "COALESCE(SUM(rs.error_count), 0) AS error_count, "
+                "COALESCE(SUM(rs.total_api_calls), 0) AS total_api_calls, "
+                "COALESCE(SUM(rs.total_tool_calls), 0) AS total_tool_calls "
+                f"{join_clause} {base_where} "
+                "GROUP BY rs.provider, rs.model "
+                "ORDER BY total_tokens DESC",
+                params,
+            ).fetchall()
+            breakdown = [dict(row) for row in breakdown_rows]
+
+            # -- daily time-series buckets --
+            daily_rows = self._conn.execute(
+                f"SELECT "
+                "DATE(rs.started_at) AS date, "
+                "COUNT(*) AS runs, "
+                "COALESCE(SUM(rs.input_tokens + rs.output_tokens), 0) AS tokens, "
+                "COALESCE(SUM(rs.estimated_cost_usd), 0.0) AS cost, "
+                "COALESCE(SUM(rs.error_count), 0) AS errors "
+                f"{join_clause} {base_where} "
+                "GROUP BY DATE(rs.started_at) "
+                "ORDER BY date ASC",
+                params,
+            ).fetchall()
+            daily = [dict(row) for row in daily_rows]
+
+        return {
+            "overview": overview,
+            "breakdown": breakdown,
+            "daily": daily,
+        }
+
+    _ALLOWED_RUN_SORT_COLUMNS = frozenset(
+        {
+            "started_at",
+            "ended_at",
+            "total_duration_ms",
+            "estimated_cost_usd",
+            "input_tokens",
+            "output_tokens",
+            "error_count",
+            "total_tool_calls",
+            "total_api_calls",
+        }
+    )
+
+    def list_all_run_sessions(
+        self,
+        *,
+        directory: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        status: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        sort_by: str = "started_at",
+        sort_dir: str = "desc",
+    ) -> tuple[list[dict[str, object]], int]:
+        """Return a page of run_sessions with optional filters + total count.
+
+        Each dict in the returned list has all run_sessions columns plus
+        ``session_title`` (from the joined sessions table).
+        """
+        normalized_dir = _normalize_directory_key(directory) if directory else None
+
+        where_clauses = ["1=1"]
+        params: list[object] = []
+        if normalized_dir is not None:
+            where_clauses.append("s.directory = ?")
+            params.append(normalized_dir)
+        if status is not None:
+            where_clauses.append("rs.status = ?")
+            params.append(status)
+        if provider is not None:
+            where_clauses.append("rs.provider = ?")
+            params.append(provider)
+        if model is not None:
+            where_clauses.append("rs.model = ?")
+            params.append(model)
+        if start_date is not None:
+            where_clauses.append("rs.started_at >= ?")
+            params.append(start_date)
+        if end_date is not None:
+            where_clauses.append("rs.started_at <= ?")
+            params.append(end_date)
+
+        where = " AND ".join(where_clauses)
+        join = (
+            "FROM run_sessions rs LEFT JOIN sessions s ON rs.session_id = s.session_id"
+        )
+
+        # Sanitise sort column to prevent injection.
+        if sort_by not in self._ALLOWED_RUN_SORT_COLUMNS:
+            sort_by = "started_at"
+        direction = "ASC" if sort_dir.upper() == "ASC" else "DESC"
+
+        with self._lock:
+            total_row = self._conn.execute(
+                f"SELECT COUNT(*) AS cnt {join} WHERE {where}",
+                params,
+            ).fetchone()
+            total_count: int = total_row["cnt"] if total_row else 0
+
+            rows = self._conn.execute(
+                f"SELECT rs.*, s.title AS session_title {join} "
+                f"WHERE {where} "
+                f"ORDER BY rs.{sort_by} {direction}, rs.id DESC "
+                "LIMIT ? OFFSET ?",
+                [*params, limit, offset],
+            ).fetchall()
+
+        results: list[dict[str, object]] = [dict(row) for row in rows]
+        return results, total_count
+
     # -- kanban tasks -----------------------------------------------------
 
     def list_kanban_stage_configs(
         self, directory: str
     ) -> list[KanbanStageConfigRecord]:
+        normalized_directory = _normalize_directory_key(directory)
         with self._lock:
-            self._ensure_canonical_kanban_stages_locked(directory)
+            self._ensure_canonical_kanban_stages_locked(normalized_directory)
             rows = self._conn.execute(
                 "SELECT * FROM kanban_stage_configs "
                 "WHERE directory = ? ORDER BY position ASC, stage_id ASC",
-                (directory,),
+                (normalized_directory,),
             ).fetchall()
         return [_kanban_stage_config_record(row) for row in rows]
 
     def get_kanban_stage_config(
         self, directory: str, stage_id: str
     ) -> KanbanStageConfigRecord | None:
+        normalized_directory = _normalize_directory_key(directory)
         with self._lock:
-            self._ensure_canonical_kanban_stages_locked(directory)
+            self._ensure_canonical_kanban_stages_locked(normalized_directory)
             row = self._conn.execute(
                 "SELECT * FROM kanban_stage_configs "
                 "WHERE directory = ? AND stage_id = ?",
-                (directory, stage_id),
+                (normalized_directory, stage_id),
             ).fetchone()
         if row is None:
             return None
@@ -655,6 +1220,7 @@ class SessionStore:
         *,
         stages: list[KanbanStageConfigSpec],
     ) -> list[KanbanStageConfigRecord]:
+        normalized_directory = _normalize_directory_key(directory)
         if not stages:
             raise ValueError("board must contain at least one stage")
         normalized: list[KanbanStageConfigSpec] = []
@@ -694,12 +1260,12 @@ class SessionStore:
                 row["stage_id"]: row
                 for row in self._conn.execute(
                     "SELECT * FROM kanban_stage_configs WHERE directory = ?",
-                    (directory,),
+                    (normalized_directory,),
                 ).fetchall()
             }
             task_rows = self._conn.execute(
                 "SELECT DISTINCT stage FROM kanban_tasks WHERE directory = ?",
-                (directory,),
+                (normalized_directory,),
             ).fetchall()
             missing_task_stages = sorted(
                 {
@@ -716,7 +1282,7 @@ class SessionStore:
             now = _now_iso()
             self._conn.execute(
                 "DELETE FROM kanban_stage_configs WHERE directory = ?",
-                (directory,),
+                (normalized_directory,),
             )
             for position, item in enumerate(normalized):
                 created_at = (
@@ -730,7 +1296,7 @@ class SessionStore:
                     "auto_start, created_at, updated_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        directory,
+                        normalized_directory,
                         item.stage_id,
                         item.name,
                         position,
@@ -745,7 +1311,7 @@ class SessionStore:
             rows = self._conn.execute(
                 "SELECT * FROM kanban_stage_configs "
                 "WHERE directory = ? ORDER BY position ASC, stage_id ASC",
-                (directory,),
+                (normalized_directory,),
             ).fetchall()
         return [_kanban_stage_config_record(row) for row in rows]
 
@@ -763,9 +1329,10 @@ class SessionStore:
         task_id = uuid.uuid4().hex
         now = _now_iso()
         project_dir_value = project_dir.strip() or "."
+        normalized_directory = _normalize_directory_key(directory)
         with self._lock:
-            self._require_kanban_stage_locked(directory, stage)
-            position = self._next_kanban_position_locked(directory, stage)
+            self._require_kanban_stage_locked(normalized_directory, stage)
+            position = self._next_kanban_position_locked(normalized_directory, stage)
             self._conn.execute(
                 "INSERT INTO kanban_tasks "
                 "(task_id, directory, title, prompt, stage, position, project_dir, "
@@ -774,7 +1341,7 @@ class SessionStore:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 (
                     task_id,
-                    directory,
+                    normalized_directory,
                     title,
                     prompt,
                     stage,
@@ -807,8 +1374,9 @@ class SessionStore:
         return KanbanTaskRecord(**dict(row))
 
     def list_kanban_tasks(self, directory: str) -> list[KanbanTaskRecord]:
+        normalized_directory = _normalize_directory_key(directory)
         with self._lock:
-            self._ensure_canonical_kanban_stages_locked(directory)
+            self._ensure_canonical_kanban_stages_locked(normalized_directory)
             rows = self._conn.execute(
                 "SELECT task.* FROM kanban_tasks AS task "
                 "LEFT JOIN kanban_stage_configs AS stage_cfg "
@@ -817,7 +1385,7 @@ class SessionStore:
                 "ORDER BY "
                 "CASE WHEN stage_cfg.position IS NULL THEN 1 ELSE 0 END ASC, "
                 "stage_cfg.position ASC, task.position ASC, task.updated_at DESC",
-                (directory,),
+                (normalized_directory,),
             ).fetchall()
         return [KanbanTaskRecord(**dict(row)) for row in rows]
 
@@ -1067,7 +1635,7 @@ class SessionStore:
         params.append(KANBAN_RUN_STATUS_RUNNING)
         if directory is not None:
             where += " AND directory = ?"
-            params.append(directory)
+            params.append(_normalize_directory_key(directory))
         with self._lock:
             cursor = self._conn.execute(
                 f"UPDATE kanban_tasks SET {', '.join(clauses)} {where}",

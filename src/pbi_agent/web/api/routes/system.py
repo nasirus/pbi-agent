@@ -1,18 +1,26 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Response
 
 from pbi_agent.web.api.deps import (
     LimitQuery,
     MentionLimitQuery,
     MentionQuery,
+    RunSessionIdPath,
     SessionIdPath,
     SessionManagerDep,
     model_from_payload,
 )
 from pbi_agent.web.api.errors import bad_request, not_found
 from pbi_agent.web.api.schemas.system import (
+    AllRunsResponse,
+    AllRunsRunModel,
     BootstrapResponse,
+    DailyBucketModel,
+    DashboardOverviewModel,
+    DashboardStatsResponse,
     FileMentionItemModel,
     FileMentionSearchResponse,
     HistoryItemModel,
@@ -20,8 +28,13 @@ from pbi_agent.web.api.schemas.system import (
     LiveSessionModel,
     LiveSessionSnapshotModel,
     LiveSessionsResponse,
+    ObservabilityEventModel,
+    ProviderBreakdownModel,
+    RunSessionDetailResponse,
+    RunSessionModel,
     SessionDetailResponse,
     SessionRecordModel,
+    SessionRunsResponse,
     SessionsResponse,
     SlashCommandItemModel,
     SlashCommandSearchResponse,
@@ -73,6 +86,98 @@ def get_session_detail(
             if payload["active_live_session"] is not None
             else None
         ),
+    )
+
+
+@router.get("/sessions/{session_id}/runs", response_model=SessionRunsResponse)
+def list_session_runs(
+    session_id: SessionIdPath,
+    manager: SessionManagerDep,
+) -> SessionRunsResponse:
+    try:
+        payload = manager.list_session_runs(session_id)
+    except KeyError as exc:
+        raise not_found("Session not found.") from exc
+    return SessionRunsResponse(
+        runs=[model_from_payload(RunSessionModel, item) for item in payload]
+    )
+
+
+ScopeQuery = Annotated[str, Query(pattern="^(workspace|global)$")]
+
+
+@router.get("/runs/{run_session_id}", response_model=RunSessionDetailResponse)
+def get_run_detail(
+    run_session_id: RunSessionIdPath,
+    manager: SessionManagerDep,
+    scope: ScopeQuery = "workspace",
+) -> RunSessionDetailResponse:
+    try:
+        payload = manager.get_run_detail(
+            run_session_id, global_scope=(scope == "global")
+        )
+    except KeyError as exc:
+        raise not_found("Run not found.") from exc
+    return RunSessionDetailResponse(
+        run=model_from_payload(RunSessionModel, payload["run"]),
+        events=[
+            model_from_payload(ObservabilityEventModel, item)
+            for item in payload["events"]
+        ],
+    )
+
+
+@router.get("/dashboard/stats", response_model=DashboardStatsResponse)
+def get_dashboard_stats(
+    manager: SessionManagerDep,
+    start_date: Annotated[str | None, Query()] = None,
+    end_date: Annotated[str | None, Query()] = None,
+    scope: ScopeQuery = "workspace",
+) -> DashboardStatsResponse:
+    payload = manager.get_dashboard_stats(
+        start_date=start_date,
+        end_date=end_date,
+        global_scope=scope == "global",
+    )
+    return DashboardStatsResponse(
+        overview=model_from_payload(DashboardOverviewModel, payload["overview"]),
+        breakdown=[
+            model_from_payload(ProviderBreakdownModel, item)
+            for item in payload["breakdown"]
+        ],
+        daily=[model_from_payload(DailyBucketModel, item) for item in payload["daily"]],
+    )
+
+
+@router.get("/runs", response_model=AllRunsResponse)
+def list_all_runs(
+    manager: SessionManagerDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    status: Annotated[str | None, Query()] = None,
+    provider: Annotated[str | None, Query()] = None,
+    model: Annotated[str | None, Query()] = None,
+    start_date: Annotated[str | None, Query()] = None,
+    end_date: Annotated[str | None, Query()] = None,
+    sort_by: Annotated[str, Query()] = "started_at",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
+    scope: ScopeQuery = "workspace",
+) -> AllRunsResponse:
+    payload = manager.list_all_runs(
+        limit=limit,
+        offset=offset,
+        status=status,
+        provider=provider,
+        model=model,
+        start_date=start_date,
+        end_date=end_date,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        global_scope=scope == "global",
+    )
+    return AllRunsResponse(
+        runs=[model_from_payload(AllRunsRunModel, item) for item in payload["runs"]],
+        total_count=payload["total_count"],
     )
 
 

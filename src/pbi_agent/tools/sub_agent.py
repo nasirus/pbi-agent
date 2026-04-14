@@ -88,6 +88,7 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
     sub_agent_depth = context.sub_agent_depth
     tool_catalog = context.tool_catalog
     parent_context = context.parent_context
+    parent_tracer = context.tracer
 
     if sub_agent_depth > 0:
         return {
@@ -120,4 +121,5 @@ def handle(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
         agent_type=agent_type,
         include_context=include_context,
         parent_context=parent_context,
+        parent_tracer=parent_tracer,
     )

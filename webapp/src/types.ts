@@ -293,3 +293,112 @@ export type WebEvent = {
   created_at: string;
   payload: Record<string, unknown>;
 };
+
+export type RunSession = {
+  run_session_id: string;
+  session_id: string | null;
+  parent_run_session_id: string | null;
+  agent_name: string | null;
+  agent_type: string | null;
+  provider: string | null;
+  provider_id: string | null;
+  profile_id: string | null;
+  model: string | null;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  total_duration_ms: number | null;
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_write_tokens: number;
+  cache_write_1h_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  tool_use_tokens: number;
+  provider_total_tokens: number;
+  estimated_cost_usd: number;
+  total_tool_calls: number;
+  total_api_calls: number;
+  error_count: number;
+  metadata: unknown;
+};
+
+export type ObservabilityEvent = {
+  run_session_id: string;
+  session_id: string | null;
+  step_index: number;
+  event_type: string;
+  timestamp: string;
+  duration_ms: number | null;
+  provider: string | null;
+  model: string | null;
+  url: string | null;
+  request_config: unknown;
+  request_payload: unknown;
+  response_payload: unknown;
+  tool_name: string | null;
+  tool_call_id: string | null;
+  tool_input: unknown;
+  tool_output: unknown;
+  tool_duration_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  status_code: number | null;
+  success: boolean | null;
+  error_message: string | null;
+  metadata: unknown;
+};
+
+// -- Dashboard / Observability Aggregation --------------------------------
+
+export type DailyBucket = {
+  date: string;
+  runs: number;
+  tokens: number;
+  cost: number;
+  errors: number;
+};
+
+export type ProviderBreakdown = {
+  provider: string | null;
+  model: string | null;
+  run_count: number;
+  total_tokens: number;
+  total_cost: number;
+  avg_duration_ms: number | null;
+  error_count: number;
+  total_api_calls: number;
+  total_tool_calls: number;
+};
+
+export type DashboardOverview = {
+  total_sessions: number;
+  total_runs: number;
+  total_input_tokens: number;
+  total_cached_tokens: number;
+  total_output_tokens: number;
+  total_reasoning_tokens: number;
+  total_cost: number;
+  total_api_calls: number;
+  total_tool_calls: number;
+  total_errors: number;
+  avg_duration_ms: number | null;
+  completed_runs: number;
+  failed_runs: number;
+};
+
+export type DashboardStatsPayload = {
+  overview: DashboardOverview;
+  breakdown: ProviderBreakdown[];
+  daily: DailyBucket[];
+};
+
+export type AllRunsRun = RunSession & {
+  session_title: string | null;
+};
+
+export type AllRunsPayload = {
+  runs: AllRunsRun[];
+  total_count: number;
+};

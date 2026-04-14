@@ -124,3 +124,122 @@ class SessionDetailResponse(BaseModel):
     history_items: list[HistoryItemModel]
     live_session: LiveSessionModel | None
     active_live_session: LiveSessionModel | None
+
+
+class RunSessionModel(BaseModel):
+    run_session_id: str
+    session_id: str | None
+    parent_run_session_id: str | None
+    agent_name: str | None
+    agent_type: str | None
+    provider: str | None
+    provider_id: str | None
+    profile_id: str | None
+    model: str | None
+    status: str
+    started_at: str
+    ended_at: str | None
+    total_duration_ms: int | None
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_tokens: int
+    cache_write_1h_tokens: int
+    output_tokens: int
+    reasoning_tokens: int
+    tool_use_tokens: int
+    provider_total_tokens: int
+    estimated_cost_usd: float
+    total_tool_calls: int
+    total_api_calls: int
+    error_count: int
+    metadata: Any | None
+
+
+class ObservabilityEventModel(BaseModel):
+    run_session_id: str
+    session_id: str | None
+    step_index: int
+    event_type: str
+    timestamp: str
+    duration_ms: int | None
+    provider: str | None
+    model: str | None
+    url: str | None
+    request_config: Any | None
+    request_payload: Any | None
+    response_payload: Any | None
+    tool_name: str | None
+    tool_call_id: str | None
+    tool_input: Any | None
+    tool_output: Any | None
+    tool_duration_ms: int | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    status_code: int | None
+    success: bool | None
+    error_message: str | None
+    metadata: Any | None
+
+
+class SessionRunsResponse(BaseModel):
+    runs: list[RunSessionModel]
+
+
+class RunSessionDetailResponse(BaseModel):
+    run: RunSessionModel
+    events: list[ObservabilityEventModel]
+
+
+# -- Dashboard / observability aggregation --------------------------------
+
+
+class DailyBucketModel(BaseModel):
+    date: str
+    runs: int
+    tokens: int
+    cost: float
+    errors: int
+
+
+class ProviderBreakdownModel(BaseModel):
+    provider: str | None
+    model: str | None
+    run_count: int
+    total_tokens: int
+    total_cost: float
+    avg_duration_ms: float | None
+    error_count: int
+    total_api_calls: int
+    total_tool_calls: int
+
+
+class DashboardOverviewModel(BaseModel):
+    total_sessions: int
+    total_runs: int
+    total_input_tokens: int
+    total_cached_tokens: int
+    total_output_tokens: int
+    total_reasoning_tokens: int
+    total_cost: float
+    total_api_calls: int
+    total_tool_calls: int
+    total_errors: int
+    avg_duration_ms: float | None
+    completed_runs: int
+    failed_runs: int
+
+
+class DashboardStatsResponse(BaseModel):
+    overview: DashboardOverviewModel
+    breakdown: list[ProviderBreakdownModel]
+    daily: list[DailyBucketModel]
+
+
+class AllRunsRunModel(RunSessionModel):
+    session_title: str | None = None
+
+
+class AllRunsResponse(BaseModel):
+    runs: list[AllRunsRunModel]
+    total_count: int

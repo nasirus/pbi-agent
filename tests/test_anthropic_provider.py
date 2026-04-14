@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from unittest.mock import Mock
 
 import pytest
 
@@ -890,3 +891,38 @@ def test_anthropic_request_turn_preserves_web_search_order_from_content_blocks(
         ("tool", "web_search"),
         ("message", "Bitcoin is $1."),
     ]
+
+
+def test_anthropic_request_turn_records_observability(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    tracer = Mock()
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ):
+        del request, timeout
+        return make_http_response(
+            {
+                "id": "msg_trace",
+                "content": [{"type": "text", "text": "Traced."}],
+                "usage": {"input_tokens": 7, "output_tokens": 3},
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = AnthropicProvider(_make_settings())
+    provider.request_turn(
+        user_message="hello",
+        display=display_spy,
+        session_usage=TokenUsage(),
+        turn_usage=TokenUsage(),
+        tracer=tracer,
+    )
+
+    tracer.log_model_call.assert_called_once()
+    assert tracer.log_model_call.call_args.kwargs["url"] == ANTHROPIC_API_URL
