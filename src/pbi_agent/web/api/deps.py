@@ -27,6 +27,10 @@ SessionIdPath = Annotated[
     str,
     FastAPIPath(min_length=1, description="The saved session identifier."),
 ]
+RunSessionIdPath = Annotated[
+    str,
+    FastAPIPath(min_length=1, description="The observability run session identifier."),
+]
 UploadIdPath = Annotated[
     str,
     FastAPIPath(min_length=1, description="The uploaded image identifier."),

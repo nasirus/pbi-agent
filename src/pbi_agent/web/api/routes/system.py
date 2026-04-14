@@ -6,6 +6,7 @@ from pbi_agent.web.api.deps import (
     LimitQuery,
     MentionLimitQuery,
     MentionQuery,
+    RunSessionIdPath,
     SessionIdPath,
     SessionManagerDep,
     model_from_payload,
@@ -20,8 +21,12 @@ from pbi_agent.web.api.schemas.system import (
     LiveSessionModel,
     LiveSessionSnapshotModel,
     LiveSessionsResponse,
+    ObservabilityEventModel,
+    RunSessionDetailResponse,
+    RunSessionModel,
     SessionDetailResponse,
     SessionRecordModel,
+    SessionRunsResponse,
     SessionsResponse,
     SlashCommandItemModel,
     SlashCommandSearchResponse,
@@ -73,6 +78,38 @@ def get_session_detail(
             if payload["active_live_session"] is not None
             else None
         ),
+    )
+
+
+@router.get("/sessions/{session_id}/runs", response_model=SessionRunsResponse)
+def list_session_runs(
+    session_id: SessionIdPath,
+    manager: SessionManagerDep,
+) -> SessionRunsResponse:
+    try:
+        payload = manager.list_session_runs(session_id)
+    except KeyError as exc:
+        raise not_found("Session not found.") from exc
+    return SessionRunsResponse(
+        runs=[model_from_payload(RunSessionModel, item) for item in payload]
+    )
+
+
+@router.get("/runs/{run_session_id}", response_model=RunSessionDetailResponse)
+def get_run_detail(
+    run_session_id: RunSessionIdPath,
+    manager: SessionManagerDep,
+) -> RunSessionDetailResponse:
+    try:
+        payload = manager.get_run_detail(run_session_id)
+    except KeyError as exc:
+        raise not_found("Run not found.") from exc
+    return RunSessionDetailResponse(
+        run=model_from_payload(RunSessionModel, payload["run"]),
+        events=[
+            model_from_payload(ObservabilityEventModel, item)
+            for item in payload["events"]
+        ],
     )
 
 

@@ -1176,6 +1176,152 @@ def test_get_session_detail_returns_saved_history(tmp_path, monkeypatch) -> None
     assert payload["live_session"] is None
 
 
+def test_list_session_runs_returns_observability_runs(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Saved chat",
+        )
+        parent_run_id = store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="chat_turn",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5.4",
+            metadata={"origin": "test"},
+        )
+        child_run_id = store.create_run_session(
+            session_id=session_id,
+            parent_run_session_id=parent_run_id,
+            agent_name="athena",
+            agent_type="reviewer",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5.4-mini",
+        )
+        store.update_run_session(
+            child_run_id,
+            status="completed",
+            total_duration_ms=42,
+            total_tool_calls=1,
+            total_api_calls=2,
+            error_count=0,
+        )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/sessions/{session_id}/runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [run["run_session_id"] for run in payload["runs"]] == [
+        parent_run_id,
+        child_run_id,
+    ]
+    assert payload["runs"][0]["metadata"] == {"origin": "test"}
+    assert payload["runs"][1]["parent_run_session_id"] == parent_run_id
+    assert payload["runs"][1]["status"] == "completed"
+    assert payload["runs"][1]["total_duration_ms"] == 42
+    assert payload["runs"][1]["total_tool_calls"] == 1
+    assert payload["runs"][1]["total_api_calls"] == 2
+
+
+def test_list_session_runs_returns_not_found_for_unknown_session() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.get("/api/sessions/missing-session/runs")
+
+    assert response.status_code == 404
+
+
+def test_get_run_detail_returns_observability_events(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    app = create_app(_settings())
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Saved chat",
+        )
+        run_session_id = store.create_run_session(
+            session_id=session_id,
+            agent_name="main",
+            agent_type="chat_turn",
+            provider="openai",
+            provider_id="default",
+            profile_id="analysis",
+            model="gpt-5.4",
+        )
+        store.add_observability_event(
+            run_session_id=run_session_id,
+            session_id=session_id,
+            step_index=0,
+            event_type="run_start",
+            request_config={"provider": "openai"},
+            metadata={"origin": "test"},
+        )
+        store.add_observability_event(
+            run_session_id=run_session_id,
+            session_id=session_id,
+            step_index=1,
+            event_type="model_call",
+            provider="openai",
+            model="gpt-5.4",
+            request_payload={"input": "Hello"},
+            response_payload={"output": "Hi"},
+            prompt_tokens=12,
+            completion_tokens=8,
+            total_tokens=20,
+            status_code=200,
+            success=True,
+        )
+        store.update_run_session(
+            run_session_id,
+            status="completed",
+            total_api_calls=1,
+        )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/runs/{run_session_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run"]["run_session_id"] == run_session_id
+    assert payload["run"]["status"] == "completed"
+    assert [event["event_type"] for event in payload["events"]] == [
+        "run_start",
+        "model_call",
+    ]
+    assert payload["events"][0]["request_config"] == {"provider": "openai"}
+    assert payload["events"][0]["metadata"] == {"origin": "test"}
+    assert payload["events"][1]["request_payload"] == {"input": "Hello"}
+    assert payload["events"][1]["response_payload"] == {"output": "Hi"}
+    assert payload["events"][1]["success"] is True
+    assert payload["events"][1]["status_code"] == 200
+    assert payload["events"][1]["total_tokens"] == 20
+
+
+def test_get_run_detail_returns_not_found_for_unknown_run() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.get("/api/runs/missing-run")
+
+    assert response.status_code == 404
+
+
 def test_get_session_detail_returns_not_found_for_unknown_session() -> None:
     app = create_app(_settings())
 

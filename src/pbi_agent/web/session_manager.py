@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import threading
 import uuid
 from dataclasses import dataclass, replace
@@ -52,6 +53,8 @@ from pbi_agent.session_store import (
     KanbanTaskRecord,
     MessageRecord,
     MessageImageAttachment,
+    ObservabilityEventRecord,
+    RunSessionRecord,
     SessionRecord,
     SessionStore,
 )
@@ -101,6 +104,75 @@ def _serialize_session(record: SessionRecord) -> dict[str, Any]:
         "cost_usd": record.cost_usd,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
+    }
+
+
+def _deserialize_json_field(raw_value: str | None) -> Any:
+    if not raw_value:
+        return None
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError:
+        return raw_value
+
+
+def _serialize_run_session(record: RunSessionRecord) -> dict[str, Any]:
+    return {
+        "run_session_id": record.run_session_id,
+        "session_id": record.session_id,
+        "parent_run_session_id": record.parent_run_session_id,
+        "agent_name": record.agent_name,
+        "agent_type": record.agent_type,
+        "provider": record.provider,
+        "provider_id": record.provider_id,
+        "profile_id": record.profile_id,
+        "model": record.model,
+        "status": record.status,
+        "started_at": record.started_at,
+        "ended_at": record.ended_at,
+        "total_duration_ms": record.total_duration_ms,
+        "input_tokens": record.input_tokens,
+        "cached_input_tokens": record.cached_input_tokens,
+        "cache_write_tokens": record.cache_write_tokens,
+        "cache_write_1h_tokens": record.cache_write_1h_tokens,
+        "output_tokens": record.output_tokens,
+        "reasoning_tokens": record.reasoning_tokens,
+        "tool_use_tokens": record.tool_use_tokens,
+        "provider_total_tokens": record.provider_total_tokens,
+        "estimated_cost_usd": record.estimated_cost_usd,
+        "total_tool_calls": record.total_tool_calls,
+        "total_api_calls": record.total_api_calls,
+        "error_count": record.error_count,
+        "metadata": _deserialize_json_field(record.metadata_json),
+    }
+
+
+def _serialize_observability_event(record: ObservabilityEventRecord) -> dict[str, Any]:
+    return {
+        "run_session_id": record.run_session_id,
+        "session_id": record.session_id,
+        "step_index": record.step_index,
+        "event_type": record.event_type,
+        "timestamp": record.timestamp,
+        "duration_ms": record.duration_ms,
+        "provider": record.provider,
+        "model": record.model,
+        "url": record.url,
+        "request_config": _deserialize_json_field(record.request_config_json),
+        "request_payload": _deserialize_json_field(record.request_payload_json),
+        "response_payload": _deserialize_json_field(record.response_payload_json),
+        "tool_name": record.tool_name,
+        "tool_call_id": record.tool_call_id,
+        "tool_input": _deserialize_json_field(record.tool_input_json),
+        "tool_output": _deserialize_json_field(record.tool_output_json),
+        "tool_duration_ms": record.tool_duration_ms,
+        "prompt_tokens": record.prompt_tokens,
+        "completion_tokens": record.completion_tokens,
+        "total_tokens": record.total_tokens,
+        "status_code": record.status_code,
+        "success": None if record.success is None else bool(record.success),
+        "error_message": record.error_message,
+        "metadata": _deserialize_json_field(record.metadata_json),
     }
 
 
@@ -486,6 +558,28 @@ class WebSessionManager:
                 if live_session is not None
                 else None
             ),
+        }
+
+    def list_session_runs(self, session_id: str) -> list[dict[str, Any]]:
+        with SessionStore() as store:
+            session = store.get_session(session_id)
+            if session is None or session.directory != self._directory_key:
+                raise KeyError(session_id)
+            runs = store.list_run_sessions(session_id)
+        return [_serialize_run_session(run) for run in runs]
+
+    def get_run_detail(self, run_session_id: str) -> dict[str, Any]:
+        with SessionStore() as store:
+            run = store.get_run_session(run_session_id)
+            if run is None or run.session_id is None:
+                raise KeyError(run_session_id)
+            session = store.get_session(run.session_id)
+            if session is None or session.directory != self._directory_key:
+                raise KeyError(run_session_id)
+            events = store.list_observability_events(run_session_id=run_session_id)
+        return {
+            "run": _serialize_run_session(run),
+            "events": [_serialize_observability_event(event) for event in events],
         }
 
     def list_live_sessions(self) -> list[dict[str, Any]]:
