@@ -1,5 +1,5 @@
 # TODO
 
-- [x] Clean remaining command example wording from `mode` to `command`.
-- [x] Rename residual command-related test names and fixtures for wording consistency.
-- [x] Run targeted validation, then append the cleanup note to `MEMORY.md`.
+- [x] Map uncovered FastAPI and app-level web routes after the `serve.py` refactor.
+- [x] Add integration coverage in `tests/test_web_serve.py` for the missing routes.
+- [x] Run targeted validation for the updated test file.

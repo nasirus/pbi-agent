@@ -271,7 +271,7 @@ export function BoardPage() {
           setIsCreateStagePromptOpen(true);
           return;
         }
-        setRunError((error as Error).message);
+        setRunError(error.message);
       },
     });
   };
