@@ -41,7 +41,7 @@ PROFILE_ID_ENV = "PBI_AGENT_PROFILE_ID"
 DEFAULT_INTERNAL_CONFIG_PATH = Path.home() / ".pbi-agent" / "config.json"
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 SLASH_ALIAS_RE = re.compile(r"^/[a-z0-9][a-z0-9-]*$")
-RESERVED_MODE_ALIASES = frozenset({"/skills", "/mcp", "/agents", "/agents-reload"})
+RESERVED_COMMAND_ALIASES = frozenset({"/skills", "/mcp", "/agents", "/agents-reload"})
 PROJECT_COMMANDS_DIR = Path(".agents") / "commands"
 
 
@@ -205,7 +205,7 @@ class ModelProfileConfig:
 
 
 @dataclass(slots=True)
-class ModeConfig:
+class CommandConfig:
     id: str
     name: str
     slash_alias: str
@@ -220,20 +220,20 @@ class ModeConfig:
         self.instructions = self.instructions.strip()
         self.slash_alias = normalize_slash_alias(self.slash_alias)
         if not self.name:
-            raise ConfigError("Mode name cannot be empty.")
-        if self.slash_alias in RESERVED_MODE_ALIASES:
+            raise ConfigError("Command name cannot be empty.")
+        if self.slash_alias in RESERVED_COMMAND_ALIASES:
             raise ConfigError(
-                f"Mode alias '{self.slash_alias}' is reserved for a local command."
+                f"Command alias '{self.slash_alias}' is reserved for a local command."
             )
         if not self.instructions:
-            raise ConfigError("Mode instructions cannot be empty.")
+            raise ConfigError("Command instructions cannot be empty.")
 
 
 @dataclass(slots=True)
 class InternalConfig:
     providers: list[ProviderConfig] = field(default_factory=list)
     model_profiles: list[ModelProfileConfig] = field(default_factory=list)
-    modes: list[ModeConfig] = field(default_factory=list)
+    commands: list[CommandConfig] = field(default_factory=list)
     web: WebConfig = field(default_factory=lambda: WebConfig())
 
 
@@ -276,27 +276,27 @@ def normalize_slash_alias(value: str) -> str:
         alias = f"/{alias}"
     if not SLASH_ALIAS_RE.fullmatch(alias):
         raise ConfigError(
-            "Mode alias must look like '/plan' and contain only lowercase "
+            "Command alias must look like '/plan' and contain only lowercase "
             "letters, numbers, or hyphens."
         )
     return alias
 
 
 def _config_sort_key(
-    item: ProviderConfig | ModelProfileConfig | ModeConfig,
+    item: ProviderConfig | ModelProfileConfig | CommandConfig,
 ) -> tuple[str, str]:
     return (item.name.lower(), item.id)
 
 
-def list_mode_configs(workspace: Path | None = None) -> list[ModeConfig]:
-    """Return project-local modes discovered from ``.agents/commands/*.md``."""
+def list_command_configs(workspace: Path | None = None) -> list[CommandConfig]:
+    """Return project-local commands discovered from ``.agents/commands/*.md``."""
 
     root = (workspace or Path.cwd()).resolve()
     commands_root = root / PROJECT_COMMANDS_DIR
     if not commands_root.is_dir():
         return []
 
-    modes: list[ModeConfig] = []
+    commands: list[CommandConfig] = []
     seen_ids: set[str] = set()
     for command_path in sorted(
         commands_root.iterdir(), key=lambda item: item.name.casefold()
@@ -310,36 +310,36 @@ def list_mode_configs(workspace: Path | None = None) -> list[ModeConfig]:
         if not instructions:
             continue
         try:
-            mode_id = slugify(command_path.stem)
+            command_id = slugify(command_path.stem)
         except ConfigError:
             continue
-        if mode_id in seen_ids:
+        if command_id in seen_ids:
             continue
-        slash_alias = f"/{mode_id}"
-        if slash_alias in RESERVED_MODE_ALIASES:
+        slash_alias = f"/{command_id}"
+        if slash_alias in RESERVED_COMMAND_ALIASES:
             continue
-        mode = ModeConfig(
-            id=mode_id,
-            name=_mode_name_from_id(mode_id),
+        command = CommandConfig(
+            id=command_id,
+            name=_command_name_from_id(command_id),
             slash_alias=slash_alias,
-            description=_mode_description_from_markdown(instructions, mode_id),
+            description=_command_description_from_markdown(instructions, command_id),
             instructions=instructions,
             path=str(command_path.relative_to(root)),
         )
         try:
-            mode.validate()
+            command.validate()
         except ConfigError:
             continue
-        seen_ids.add(mode.id)
-        modes.append(mode)
-    return modes
+        seen_ids.add(command.id)
+        commands.append(command)
+    return commands
 
 
-def _mode_name_from_id(mode_id: str) -> str:
-    return " ".join(part.capitalize() for part in mode_id.split("-") if part)
+def _command_name_from_id(command_id: str) -> str:
+    return " ".join(part.capitalize() for part in command_id.split("-") if part)
 
 
-def _mode_description_from_markdown(instructions: str, mode_id: str) -> str:
+def _command_description_from_markdown(instructions: str, command_id: str) -> str:
     for line in instructions.splitlines():
         stripped = line.strip()
         if not stripped.startswith("#"):
@@ -347,7 +347,7 @@ def _mode_description_from_markdown(instructions: str, mode_id: str) -> str:
         heading = stripped.lstrip("#").strip()
         if heading:
             return heading
-    return f"Activate {_mode_name_from_id(mode_id)}"
+    return f"Activate {_command_name_from_id(command_id)}"
 
 
 def _default_responses_url(provider: str) -> str:
@@ -1250,22 +1250,22 @@ def _require_provider(
     return provider
 
 
-def get_mode_config(mode_id: str, workspace: Path | None = None) -> ModeConfig:
-    mode = {mode.id: mode for mode in list_mode_configs(workspace)}.get(
-        slugify(mode_id)
+def get_command_config(command_id: str, workspace: Path | None = None) -> CommandConfig:
+    command = {command.id: command for command in list_command_configs(workspace)}.get(
+        slugify(command_id)
     )
-    if mode is None:
-        raise ConfigError(f"Unknown mode ID '{mode_id}'.")
-    return mode
+    if command is None:
+        raise ConfigError(f"Unknown command ID '{command_id}'.")
+    return command
 
 
-def find_mode_config_by_alias(
+def find_command_config_by_alias(
     alias: str, workspace: Path | None = None
-) -> ModeConfig | None:
+) -> CommandConfig | None:
     normalized_alias = normalize_slash_alias(alias)
-    for mode in list_mode_configs(workspace):
-        if mode.slash_alias == normalized_alias:
-            return mode
+    for command in list_command_configs(workspace):
+        if command.slash_alias == normalized_alias:
+            return command
     return None
 
 

@@ -14,7 +14,7 @@ import { ApiError } from "../../api";
 import type {
   ConfigBootstrapPayload,
   ModelProfileView,
-  ModeView,
+  CommandView,
   ProviderView,
 } from "../../types";
 import { LoadingSpinner } from "../shared/LoadingSpinner";
@@ -138,7 +138,7 @@ function ProfileCard({
 function CommandCard({
   command,
 }: {
-  command: ModeView;
+  command: CommandView;
 }) {
   return (
     <div className="settings-item settings-item--command">
@@ -321,7 +321,7 @@ export function SettingsPage() {
   const {
     providers,
     model_profiles,
-    modes: commands,
+    commands,
     active_profile_id,
     options,
   } = configQuery.data;

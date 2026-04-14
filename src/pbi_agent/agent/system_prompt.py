@@ -162,22 +162,22 @@ The `sub_agent` tool is available for delegated work.
     return f"{base_prompt}\n\n{instructions}\n{catalog}"
 
 
-def _append_active_mode(
+def _append_active_command(
     base_prompt: str,
-    active_mode_instructions: str | None = None,
+    active_command_instructions: str | None = None,
 ) -> str:
-    if active_mode_instructions is None:
+    if active_command_instructions is None:
         return base_prompt
-    instructions = active_mode_instructions.strip()
+    instructions = active_command_instructions.strip()
     if not instructions:
         return base_prompt
-    return f"{base_prompt}\n\n<active_mode>\n{instructions}\n</active_mode>"
+    return f"{base_prompt}\n\n<active_command>\n{instructions}\n</active_command>"
 
 
-def get_system_prompt(active_mode_instructions: str | None = None) -> str:
+def get_system_prompt(active_command_instructions: str | None = None) -> str:
     prompt = _append_available_skills(_append_project_rules(_resolve_base_prompt()))
     prompt = _append_available_sub_agents(prompt)
-    return _append_active_mode(prompt, active_mode_instructions)
+    return _append_active_command(prompt, active_command_instructions)
 
 
 def get_sub_agent_system_prompt(agent_prompt_override: str | None = None) -> str:

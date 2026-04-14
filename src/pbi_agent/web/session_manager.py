@@ -15,7 +15,7 @@ from pbi_agent.config import (
     ConfigError,
     InternalConfig,
     ModelProfileConfig,
-    ModeConfig,
+    CommandConfig,
     OPENAI_SERVICE_TIERS,
     PROVIDER_KINDS,
     ProviderConfig,
@@ -25,7 +25,7 @@ from pbi_agent.config import (
     create_provider_config,
     delete_model_profile_config,
     delete_provider_config,
-    list_mode_configs,
+    list_command_configs,
     load_internal_config,
     load_internal_config_snapshot,
     provider_has_secret,
@@ -173,7 +173,7 @@ def _serialize_board_stage(record: KanbanStageConfigRecord) -> dict[str, Any]:
         "name": record.name,
         "position": record.position,
         "profile_id": record.model_profile_id,
-        "mode_id": record.mode_id,
+        "command_id": record.command_id,
         "auto_start": record.auto_start,
     }
 
@@ -403,10 +403,10 @@ class WebSessionManager:
                     key=lambda item: _config_sort_key(item.name, item.id),
                 )
             ],
-            "modes": [
-                self._mode_view(mode)
-                for mode in sorted(
-                    list_mode_configs(self._workspace_root),
+            "commands": [
+                self._command_view(command)
+                for command in sorted(
+                    list_command_configs(self._workspace_root),
                     key=lambda item: _config_sort_key(item.name, item.id),
                 )
             ],
@@ -438,13 +438,13 @@ class WebSessionManager:
             )
             for command in list_slash_commands()
         ]
-        for mode in list_mode_configs(self._workspace_root):
+        for command in list_command_configs(self._workspace_root):
             command_tuples.append(
                 (
-                    mode.slash_alias,
-                    mode.description or f"Activate {mode.name}",
-                    f"{mode.name} mode prompt preset",
-                    "mode",
+                    command.slash_alias,
+                    command.description or f"Activate {command.name}",
+                    f"{command.name} command prompt preset",
+                    "command",
                 )
             )
         return [
@@ -530,7 +530,7 @@ class WebSessionManager:
             raise ConfigError("Board must contain at least one stage.")
         config = load_internal_config()
         profiles = self._profile_map(config)
-        modes = self._mode_map()
+        commands = self._command_map()
         stage_specs: list[KanbanStageConfigSpec] = []
         seen_stage_ids: set[str] = set()
         for item in stages:
@@ -546,7 +546,7 @@ class WebSessionManager:
             if is_fixed_stage:
                 raw_name = "Backlog" if stage_id == KANBAN_STAGE_BACKLOG else "Done"
                 profile_id = None
-                mode_id = None
+                command_id = None
                 auto_start = False
             else:
                 profile_id = item.get("profile_id")
@@ -555,19 +555,19 @@ class WebSessionManager:
                     if profiles.get(profile_key) is None:
                         raise ConfigError(f"Unknown profile ID '{profile_id}'.")
                     profile_id = profile_key
-                mode_id = item.get("mode_id")
-                if mode_id is not None:
-                    mode_key = slugify(str(mode_id))
-                    if modes.get(mode_key) is None:
-                        raise ConfigError(f"Unknown mode ID '{mode_id}'.")
-                    mode_id = mode_key
+                command_id = item.get("command_id")
+                if command_id is not None:
+                    command_key = slugify(str(command_id))
+                    if commands.get(command_key) is None:
+                        raise ConfigError(f"Unknown command ID '{command_id}'.")
+                    command_id = command_key
                 auto_start = bool(item.get("auto_start"))
             stage_specs.append(
                 KanbanStageConfigSpec(
                     stage_id=stage_id,
                     name=raw_name,
                     model_profile_id=profile_id,
-                    mode_id=mode_id,
+                    command_id=command_id,
                     auto_start=auto_start,
                 )
             )
@@ -1526,13 +1526,13 @@ class WebSessionManager:
             not stripped_prompt
             or stripped_prompt.startswith("/")
             or stage_record is None
-            or not stage_record.mode_id
+            or not stage_record.command_id
         ):
             return prompt
-        mode = self._mode_map().get(stage_record.mode_id)
-        if mode is None:
+        command = self._command_map().get(stage_record.command_id)
+        if command is None:
             return prompt
-        return f"{mode.slash_alias} {prompt}"
+        return f"{command.slash_alias} {prompt}"
 
     def _maybe_auto_start_task(self, record: KanbanTaskRecord) -> dict[str, Any] | None:
         if not self._should_auto_start_stage(record.stage):
@@ -1801,14 +1801,14 @@ class WebSessionManager:
             "resolved_runtime": _resolved_runtime_view(runtime),
         }
 
-    def _mode_view(self, mode: ModeConfig) -> dict[str, Any]:
+    def _command_view(self, command: CommandConfig) -> dict[str, Any]:
         return {
-            "id": mode.id,
-            "name": mode.name,
-            "slash_alias": mode.slash_alias,
-            "description": mode.description,
-            "instructions": mode.instructions,
-            "path": mode.path,
+            "id": command.id,
+            "name": command.name,
+            "slash_alias": command.slash_alias,
+            "description": command.description,
+            "instructions": command.instructions,
+            "path": command.path,
         }
 
     def _provider_map(self, config: InternalConfig) -> dict[str, ProviderConfig]:
@@ -1817,8 +1817,11 @@ class WebSessionManager:
     def _profile_map(self, config: InternalConfig) -> dict[str, ModelProfileConfig]:
         return {profile.id: profile for profile in config.model_profiles}
 
-    def _mode_map(self) -> dict[str, ModeConfig]:
-        return {mode.id: mode for mode in list_mode_configs(self._workspace_root)}
+    def _command_map(self) -> dict[str, CommandConfig]:
+        return {
+            command.id: command
+            for command in list_command_configs(self._workspace_root)
+        }
 
     def _require_provider(
         self, config: InternalConfig, provider_id: str

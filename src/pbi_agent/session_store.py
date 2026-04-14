@@ -23,13 +23,13 @@ KANBAN_DEFAULT_STAGE_SPECS = (
     {
         "stage_id": KANBAN_STAGE_BACKLOG,
         "name": "Backlog",
-        "mode_id": None,
+        "command_id": None,
         "auto_start": False,
     },
     {
         "stage_id": KANBAN_STAGE_DONE,
         "name": "Done",
-        "mode_id": None,
+        "command_id": None,
         "auto_start": False,
     },
 )
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS kanban_stage_configs (
     name              TEXT NOT NULL,
     position          INTEGER NOT NULL,
     model_profile_id  TEXT,
-    mode_id           TEXT,
+    command_id           TEXT,
     auto_start        INTEGER NOT NULL DEFAULT 0,
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
@@ -173,7 +173,7 @@ class KanbanStageConfigSpec:
     stage_id: str
     name: str
     model_profile_id: str | None = None
-    mode_id: str | None = None
+    command_id: str | None = None
     auto_start: bool = False
 
 
@@ -184,7 +184,7 @@ class KanbanStageConfigRecord:
     name: str
     position: int
     model_profile_id: str | None
-    mode_id: str | None
+    command_id: str | None
     auto_start: bool
     created_at: str
     updated_at: str
@@ -207,7 +207,7 @@ def _normalize_kanban_stage_specs(
             stage_id=KANBAN_STAGE_BACKLOG,
             name=_KANBAN_FIXED_STAGE_NAMES[KANBAN_STAGE_BACKLOG],
             model_profile_id=None,
-            mode_id=None,
+            command_id=None,
             auto_start=False,
         )
     ]
@@ -217,7 +217,7 @@ def _normalize_kanban_stage_specs(
             stage_id=KANBAN_STAGE_DONE,
             name=_KANBAN_FIXED_STAGE_NAMES[KANBAN_STAGE_DONE],
             model_profile_id=None,
-            mode_id=None,
+            command_id=None,
             auto_start=False,
         )
     )
@@ -230,7 +230,7 @@ def _normalize_kanban_stage_specs(
                 stage_id=stage_id,
                 name=_KANBAN_FIXED_STAGE_NAMES[stage_id],
                 model_profile_id=None,
-                mode_id=None,
+                command_id=None,
                 auto_start=False,
             )
         else:
@@ -238,7 +238,7 @@ def _normalize_kanban_stage_specs(
                 stage_id=stage_id,
                 name=_KANBAN_FIXED_STAGE_NAMES[stage_id],
                 model_profile_id=None,
-                mode_id=None,
+                command_id=None,
                 auto_start=False,
             )
     return normalized
@@ -250,9 +250,9 @@ def _default_kanban_stage_specs() -> list[KanbanStageConfigSpec]:
             stage_id=str(spec["stage_id"]),
             name=str(spec["name"]),
             model_profile_id=None,
-            mode_id=(
-                str(spec["mode_id"])
-                if isinstance(spec.get("mode_id"), str) and spec.get("mode_id")
+            command_id=(
+                str(spec["command_id"])
+                if isinstance(spec.get("command_id"), str) and spec.get("command_id")
                 else None
             ),
             auto_start=bool(spec["auto_start"]),
@@ -355,7 +355,7 @@ def _kanban_stage_config_record(row: sqlite3.Row) -> KanbanStageConfigRecord:
         name=str(data["name"]),
         position=int(data["position"]),
         model_profile_id=data.get("model_profile_id"),
-        mode_id=data.get("mode_id"),
+        command_id=data.get("command_id"),
         auto_start=bool(data.get("auto_start")),
         created_at=str(data["created_at"]),
         updated_at=str(data["updated_at"]),
@@ -679,9 +679,9 @@ class SessionStore:
                         and item.model_profile_id.strip()
                         else None
                     ),
-                    mode_id=(
-                        item.mode_id.strip()
-                        if isinstance(item.mode_id, str) and item.mode_id.strip()
+                    command_id=(
+                        item.command_id.strip()
+                        if isinstance(item.command_id, str) and item.command_id.strip()
                         else None
                     ),
                     auto_start=bool(item.auto_start),
@@ -726,7 +726,7 @@ class SessionStore:
                 )
                 self._conn.execute(
                     "INSERT INTO kanban_stage_configs "
-                    "(directory, stage_id, name, position, model_profile_id, mode_id, "
+                    "(directory, stage_id, name, position, model_profile_id, command_id, "
                     "auto_start, created_at, updated_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
@@ -735,7 +735,7 @@ class SessionStore:
                         item.name,
                         position,
                         item.model_profile_id,
-                        item.mode_id,
+                        item.command_id,
                         1 if item.auto_start else 0,
                         created_at,
                         now,
@@ -1117,7 +1117,7 @@ class SessionStore:
                         stage_id=record.stage_id,
                         name=record.name,
                         model_profile_id=record.model_profile_id,
-                        mode_id=record.mode_id,
+                        command_id=record.command_id,
                         auto_start=record.auto_start,
                     )
                     for record in existing_records
@@ -1128,7 +1128,7 @@ class SessionStore:
                 and record.position == position
                 and record.name == spec.name
                 and record.model_profile_id == spec.model_profile_id
-                and record.mode_id == spec.mode_id
+                and record.command_id == spec.command_id
                 and record.auto_start == spec.auto_start
                 for position, (record, spec) in enumerate(
                     zip(existing_records, desired_specs, strict=False)
@@ -1149,7 +1149,7 @@ class SessionStore:
             existing = existing_by_id.get(spec.stage_id)
             self._conn.execute(
                 "INSERT INTO kanban_stage_configs "
-                "(directory, stage_id, name, position, model_profile_id, mode_id, "
+                "(directory, stage_id, name, position, model_profile_id, command_id, "
                 "auto_start, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -1158,7 +1158,7 @@ class SessionStore:
                     spec.name,
                     position,
                     spec.model_profile_id,
-                    spec.mode_id,
+                    spec.command_id,
                     1 if spec.auto_start else 0,
                     existing.created_at if existing is not None else now,
                     now,

@@ -1,7 +1,5 @@
 # TODO
 
-- [x] Update project command discovery/config to use `.agents/commands`.
-- [x] Update tests and UI copy to match the project command directory.
-- [x] Rename the workspace command folder to `.agents/commands`.
-- [x] Rebuild and run targeted validation.
-- [x] Record the change in `MEMORY.md`.
+- [x] Clean remaining command example wording from `mode` to `command`.
+- [x] Rename residual command-related test names and fixtures for wording consistency.
+- [x] Run targeted validation, then append the cleanup note to `MEMORY.md`.

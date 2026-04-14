@@ -64,6 +64,7 @@ uv tool install --reinstall .
 
 - Use `MEMORY.md` for long-term agent memory and session continuity. At the start of substantive work, consult it when available for relevant prior context.
 - After each implementation, append a brief entry to `MEMORY.md` describing what changed, why it changed, validation performed, and any context useful for the next session.
+- Always add new `MEMORY.md` entries at the end of the file in append mode. Never insert a new memory entry in the middle of existing history.
 
 ## Current Task Tracking
 

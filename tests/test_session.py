@@ -291,7 +291,7 @@ def test_run_single_turn_executes_tool_loop_and_aggregates_usage(monkeypatch) ->
     ]
 
 
-def test_run_single_turn_uses_mode_specific_instructions_for_full_turn(
+def test_run_single_turn_uses_command_specific_instructions_for_full_turn(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -315,7 +315,7 @@ def test_run_single_turn_uses_mode_specific_instructions_for_full_turn(
 
     assert provider.request_calls[0]["user_message"] == "/plan inspect the workspace"
     assert provider.request_calls[0]["instructions"] is not None
-    assert "<active_mode>\nPlan before coding.\n</active_mode>" in str(
+    assert "<active_command>\nPlan before coding.\n</active_command>" in str(
         provider.request_calls[0]["instructions"]
     )
     assert (
@@ -324,7 +324,7 @@ def test_run_single_turn_uses_mode_specific_instructions_for_full_turn(
     )
 
 
-def test_run_single_turn_does_not_activate_mode_when_command_file_is_missing(
+def test_run_single_turn_does_not_activate_command_when_command_file_is_missing(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -650,7 +650,7 @@ def test_run_chat_loop_handles_agents_reload_command_locally(monkeypatch) -> Non
     assert display.assistant_start_calls == 0
 
 
-def test_run_chat_loop_keeps_mode_alias_and_uses_turn_specific_instructions(
+def test_run_chat_loop_keeps_command_alias_and_uses_turn_specific_instructions(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -670,12 +670,12 @@ def test_run_chat_loop_keeps_mode_alias_and_uses_turn_specific_instructions(
     assert exit_code == 0
     assert provider.request_messages == ["/plan draft the approach"]
     assert provider.request_instructions[0] is not None
-    assert "<active_mode>\nPlan before coding.\n</active_mode>" in str(
+    assert "<active_command>\nPlan before coding.\n</active_command>" in str(
         provider.request_instructions[0]
     )
 
 
-def test_run_chat_loop_accepts_mode_only_turn(monkeypatch, tmp_path) -> None:
+def test_run_chat_loop_accepts_command_only_turn(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     provider = _ChatProviderStub()
     display = _ChatDisplaySpy(["/plan", "quit"])
@@ -693,7 +693,9 @@ def test_run_chat_loop_accepts_mode_only_turn(monkeypatch, tmp_path) -> None:
     assert provider.request_messages == ["/plan"]
 
 
-def test_run_chat_loop_keeps_local_command_precedence_over_modes(monkeypatch) -> None:
+def test_run_chat_loop_keeps_local_command_precedence_over_command_files(
+    monkeypatch,
+) -> None:
     provider = _ChatProviderStub()
     display = _ChatDisplaySpy([SKILLS_COMMAND, "quit"])
     settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
