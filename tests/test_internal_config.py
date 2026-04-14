@@ -16,9 +16,9 @@ from pbi_agent.config import (
     WebConfig,
     create_model_profile_config,
     create_provider_config,
-    find_mode_config_by_alias,
+    find_command_config_by_alias,
     delete_provider_config,
-    list_mode_configs,
+    list_command_configs,
     load_internal_config,
     load_internal_config_snapshot,
     normalize_slash_alias,
@@ -61,7 +61,7 @@ def test_load_internal_config_treats_old_provider_scoped_shape_as_absent(
 
     assert config.providers == []
     assert config.model_profiles == []
-    assert config.modes == []
+    assert config.commands == []
     assert config.web.active_profile_id is None
 
 
@@ -72,25 +72,25 @@ def test_load_internal_config_does_not_seed_default_modes(
 
     config = load_internal_config()
 
-    assert config.modes == []
-    assert find_mode_config_by_alias("/plan") is None
+    assert config.commands == []
+    assert find_command_config_by_alias("/plan") is None
 
 
-def test_list_mode_configs_discovers_command_files(tmp_path: Path) -> None:
+def test_list_command_configs_discovers_command_files(tmp_path: Path) -> None:
     path = _write_command(
         tmp_path,
         "fix-issue.md",
         "# Fix GitHub Issue\n\nResolve the linked issue.",
     )
 
-    modes = list_mode_configs(tmp_path)
+    commands = list_command_configs(tmp_path)
 
-    assert [item.id for item in modes] == ["fix-issue"]
-    assert modes[0].name == "Fix Issue"
-    assert modes[0].slash_alias == "/fix-issue"
-    assert modes[0].description == "Fix GitHub Issue"
-    assert modes[0].instructions == "# Fix GitHub Issue\n\nResolve the linked issue."
-    assert modes[0].path == str(path.relative_to(tmp_path))
+    assert [item.id for item in commands] == ["fix-issue"]
+    assert commands[0].name == "Fix Issue"
+    assert commands[0].slash_alias == "/fix-issue"
+    assert commands[0].description == "Fix GitHub Issue"
+    assert commands[0].instructions == "# Fix GitHub Issue\n\nResolve the linked issue."
+    assert commands[0].path == str(path.relative_to(tmp_path))
 
 
 def test_config_store_roundtrip_and_active_profile_selection(monkeypatch) -> None:
@@ -132,39 +132,39 @@ def test_config_store_roundtrip_and_active_profile_selection(monkeypatch) -> Non
     assert config.model_profiles[0].service_tier == "flex"
 
 
-def test_find_mode_config_by_alias_reads_command_files(
+def test_find_command_config_by_alias_reads_command_files(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     _write_command(tmp_path, "plan.md", "Plan carefully before making changes.")
 
     config = load_internal_config()
-    mode = find_mode_config_by_alias("/plan")
+    mode = find_command_config_by_alias("/plan")
 
-    assert config.modes == []
+    assert config.commands == []
     assert mode is not None
     assert mode.instructions == "Plan carefully before making changes."
 
 
-def test_list_mode_configs_skips_reserved_command_alias(tmp_path: Path) -> None:
+def test_list_command_configs_skips_reserved_command_alias(tmp_path: Path) -> None:
     _write_command(tmp_path, "skills.md", "List project skills.")
 
-    assert list_mode_configs(tmp_path) == []
+    assert list_command_configs(tmp_path) == []
 
 
-def test_list_mode_configs_skips_empty_files(tmp_path: Path) -> None:
+def test_list_command_configs_skips_empty_files(tmp_path: Path) -> None:
     _write_command(tmp_path, "plan.md", "   \n")
 
-    assert list_mode_configs(tmp_path) == []
+    assert list_command_configs(tmp_path) == []
 
 
-def test_list_mode_configs_skips_duplicate_normalized_names(tmp_path: Path) -> None:
+def test_list_command_configs_skips_duplicate_normalized_names(tmp_path: Path) -> None:
     _write_command(tmp_path, "fix issue.md", "First instructions.")
     _write_command(tmp_path, "fix-issue.md", "Second instructions.")
 
-    modes = list_mode_configs(tmp_path)
+    commands = list_command_configs(tmp_path)
 
-    assert [item.instructions for item in modes] == ["First instructions."]
+    assert [item.instructions for item in commands] == ["First instructions."]
 
 
 def test_normalize_slash_alias_adds_prefix() -> None:
@@ -182,7 +182,7 @@ def test_config_payload_ignores_modes_from_global_config(
             {
                 "providers": [],
                 "model_profiles": [],
-                "modes": [
+                "commands": [
                     {
                         "id": "plan",
                         "name": "Plan",
@@ -198,8 +198,8 @@ def test_config_payload_ignores_modes_from_global_config(
 
     config = load_internal_config()
 
-    assert config.modes == []
-    assert find_mode_config_by_alias("/plan") is None
+    assert config.commands == []
+    assert find_command_config_by_alias("/plan") is None
 
 
 def test_resolve_web_runtime_uses_selected_web_profile(monkeypatch) -> None:

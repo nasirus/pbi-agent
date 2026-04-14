@@ -281,7 +281,7 @@ def test_default_kanban_stage_configs_are_neutral(tmp_path) -> None:
         KANBAN_STAGE_DONE,
     ]
     assert [stage.name for stage in stages] == ["Backlog", "Done"]
-    assert all(stage.mode_id is None for stage in stages)
+    assert all(stage.command_id is None for stage in stages)
     assert all(stage.auto_start is False for stage in stages)
 
 

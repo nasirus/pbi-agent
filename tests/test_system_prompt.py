@@ -307,12 +307,12 @@ def test_sub_agent_prompt_uses_instructions_md(tmp_path, monkeypatch):
     assert "Power BI" not in prompt
 
 
-def test_get_system_prompt_appends_active_mode_instructions(tmp_path, monkeypatch):
+def test_get_system_prompt_appends_active_command_instructions(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    prompt = get_system_prompt(active_mode_instructions="Plan before coding.")
+    prompt = get_system_prompt(active_command_instructions="Plan before coding.")
 
-    assert "<active_mode>\nPlan before coding.\n</active_mode>" in prompt
+    assert "<active_command>\nPlan before coding.\n</active_command>" in prompt
 
 
 # ---------------------------------------------------------------------------

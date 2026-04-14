@@ -222,7 +222,7 @@ export async function updateBoardStages(
       id?: string | null;
       name: string;
       profile_id?: string | null;
-      mode_id?: string | null;
+      command_id?: string | null;
       auto_start?: boolean;
     }>;
   },

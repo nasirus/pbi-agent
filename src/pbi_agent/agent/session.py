@@ -21,7 +21,7 @@ from pbi_agent.agent.skill_discovery import format_project_skills_markdown
 from pbi_agent.config import (
     ResolvedRuntime,
     Settings,
-    find_mode_config_by_alias,
+    find_command_config_by_alias,
 )
 from pbi_agent.media import load_workspace_image
 from pbi_agent.mcp import format_project_mcp_servers_markdown
@@ -95,24 +95,24 @@ def _coerce_runtime(value: Settings | ResolvedRuntime) -> ResolvedRuntime:
     )
 
 
-def _extract_active_mode_instructions(value: str) -> str | None:
+def _extract_active_command_instructions(value: str) -> str | None:
     stripped = value.strip()
     if not stripped.startswith("/"):
         return None
     head = stripped.partition(" ")[0]
     try:
-        mode = find_mode_config_by_alias(head)
+        command = find_command_config_by_alias(head)
     except Exception:
         return None
-    if mode is None:
+    if command is None:
         return None
-    return mode.instructions
+    return command.instructions
 
 
-def _turn_instructions(active_mode_instructions: str | None) -> str | None:
-    if active_mode_instructions is None:
+def _turn_instructions(active_command_instructions: str | None) -> str | None:
+    if active_command_instructions is None:
         return None
-    return get_system_prompt(active_mode_instructions=active_mode_instructions)
+    return get_system_prompt(active_command_instructions=active_command_instructions)
 
 
 def run_single_turn(
@@ -140,8 +140,8 @@ def run_single_turn(
     session_start = time.monotonic()
     turn_usage = TokenUsage(model=model, service_tier=_tier)
     prompt_text = prompt
-    active_mode_instructions = _extract_active_mode_instructions(prompt)
-    turn_instructions = _turn_instructions(active_mode_instructions)
+    active_command_instructions = _extract_active_command_instructions(prompt)
+    turn_instructions = _turn_instructions(active_command_instructions)
 
     user_input = _build_user_turn_input(
         text=prompt_text,
@@ -343,8 +343,10 @@ def run_chat_loop(
                         format_project_sub_agents_markdown(reloaded=True)
                     )
                     continue
-                active_mode_instructions = _extract_active_mode_instructions(user_input)
-                turn_instructions = _turn_instructions(active_mode_instructions)
+                active_command_instructions = _extract_active_command_instructions(
+                    user_input
+                )
+                turn_instructions = _turn_instructions(active_command_instructions)
                 if (
                     not user_input
                     and not image_paths

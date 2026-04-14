@@ -73,8 +73,8 @@ def test_bootstrap_endpoint_returns_workspace_metadata() -> None:
     assert payload["supports_image_inputs"] is True
     assert "workspace_root" in payload
     assert [stage["id"] for stage in payload["board_stages"]] == ["backlog", "done"]
-    assert payload["board_stages"][0]["mode_id"] is None
-    assert payload["board_stages"][1]["mode_id"] is None
+    assert payload["board_stages"][0]["command_id"] is None
+    assert payload["board_stages"][1]["command_id"] is None
 
 
 def test_config_bootstrap_and_crud_endpoints_round_trip(
@@ -92,12 +92,12 @@ def test_config_bootstrap_and_crud_endpoints_round_trip(
         bootstrap_payload = bootstrap_response.json()
         assert bootstrap_payload["providers"] == []
         assert bootstrap_payload["model_profiles"] == []
-        assert [item["id"] for item in bootstrap_payload["modes"]] == [
+        assert [item["id"] for item in bootstrap_payload["commands"]] == [
             "implement",
             "plan",
             "review",
         ]
-        assert bootstrap_payload["modes"][1]["path"] == ".agents/commands/plan.md"
+        assert bootstrap_payload["commands"][1]["path"] == ".agents/commands/plan.md"
         assert "config_revision" in bootstrap_payload
         revision = bootstrap_payload["config_revision"]
 
@@ -160,7 +160,7 @@ def test_config_bootstrap_and_crud_endpoints_round_trip(
             for item in refreshed_payload["model_profiles"]
             if item["id"] == "analysis"
         )
-        assert {item["id"] for item in refreshed_payload["modes"]} == {
+        assert {item["id"] for item in refreshed_payload["commands"]} == {
             "implement",
             "plan",
             "review",
@@ -201,10 +201,10 @@ def test_mode_list_endpoint_returns_command_files(monkeypatch, tmp_path: Path) -
     with TestClient(app) as client:
         revision = client.get("/api/config/bootstrap").json()["config_revision"]
 
-        list_response = client.get("/api/config/modes")
+        list_response = client.get("/api/config/commands")
         assert list_response.status_code == 200
         assert list_response.json()["config_revision"] == revision
-        assert list_response.json()["modes"] == [
+        assert list_response.json()["commands"] == [
             {
                 "id": "focus",
                 "name": "Focus",
@@ -216,7 +216,7 @@ def test_mode_list_endpoint_returns_command_files(monkeypatch, tmp_path: Path) -
         ]
 
         create_response = client.post(
-            "/api/config/modes",
+            "/api/config/commands",
             headers={"If-Match": revision},
             json={
                 "name": "Focus",
@@ -331,17 +331,17 @@ def test_slash_command_search_endpoint_includes_command_file_modes(
         {
             "name": "/implement",
             "description": "Implementation mode",
-            "kind": "mode",
+            "kind": "command",
         },
         {
             "name": "/plan",
             "description": "Planning mode",
-            "kind": "mode",
+            "kind": "command",
         },
         {
             "name": "/review",
             "description": "Code review mode",
-            "kind": "mode",
+            "kind": "command",
         },
     ]
 
@@ -363,7 +363,7 @@ def test_slash_command_search_endpoint_filters_command_file_modes(
         {
             "name": "/plan",
             "description": "Planning mode",
-            "kind": "mode",
+            "kind": "command",
         }
     ]
 
@@ -532,12 +532,12 @@ def test_board_stage_endpoints_round_trip(monkeypatch, tmp_path: Path) -> None:
                     {
                         "id": "build",
                         "name": "Build",
-                        "mode_id": "implement",
+                        "command_id": "implement",
                         "auto_start": True,
                     },
-                    {"id": "done", "name": "Completed", "mode_id": "review"},
+                    {"id": "done", "name": "Completed", "command_id": "review"},
                     {"id": "backlog", "name": "Inbox", "auto_start": True},
-                    {"id": "review", "name": "Review", "mode_id": "review"},
+                    {"id": "review", "name": "Review", "command_id": "review"},
                 ]
             },
         )
@@ -550,12 +550,12 @@ def test_board_stage_endpoints_round_trip(monkeypatch, tmp_path: Path) -> None:
             "done",
         ]
         assert payload["board_stages"][0]["name"] == "Backlog"
-        assert payload["board_stages"][0]["mode_id"] is None
+        assert payload["board_stages"][0]["command_id"] is None
         assert payload["board_stages"][0]["auto_start"] is False
         assert payload["board_stages"][1]["auto_start"] is True
-        assert payload["board_stages"][1]["mode_id"] == "implement"
+        assert payload["board_stages"][1]["command_id"] == "implement"
         assert payload["board_stages"][3]["name"] == "Done"
-        assert payload["board_stages"][3]["mode_id"] is None
+        assert payload["board_stages"][3]["command_id"] is None
         assert payload["board_stages"][3]["auto_start"] is False
 
 
@@ -578,8 +578,8 @@ def test_run_task_advances_to_next_configured_stage(monkeypatch, tmp_path) -> No
                 json={
                     "board_stages": [
                         {"id": "backlog", "name": "Backlog"},
-                        {"id": "plan", "name": "Plan", "mode_id": "plan"},
-                        {"id": "review", "name": "Review", "mode_id": "review"},
+                        {"id": "plan", "name": "Plan", "command_id": "plan"},
+                        {"id": "review", "name": "Review", "command_id": "review"},
                     ]
                 },
             )
@@ -632,8 +632,8 @@ def test_run_task_from_backlog_moves_to_next_stage_before_execution(
                 json={
                     "board_stages": [
                         {"id": "backlog", "name": "Backlog"},
-                        {"id": "plan", "name": "Plan", "mode_id": "plan"},
-                        {"id": "review", "name": "Review", "mode_id": "review"},
+                        {"id": "plan", "name": "Plan", "command_id": "plan"},
+                        {"id": "review", "name": "Review", "command_id": "review"},
                     ]
                 },
             )
@@ -692,11 +692,11 @@ def test_auto_start_stage_runs_once_before_done(monkeypatch, tmp_path) -> None:
                 json={
                     "board_stages": [
                         {"id": "backlog", "name": "Backlog"},
-                        {"id": "plan", "name": "Plan", "mode_id": "plan"},
+                        {"id": "plan", "name": "Plan", "command_id": "plan"},
                         {
                             "id": "fix-review",
                             "name": "Fix Review",
-                            "mode_id": "implement",
+                            "command_id": "implement",
                             "auto_start": True,
                         },
                     ]
@@ -871,10 +871,10 @@ def test_run_task_rejects_orphaned_stage_profile(monkeypatch, tmp_path) -> None:
                     {
                         "id": "plan",
                         "name": "Plan",
-                        "mode_id": "plan",
+                        "command_id": "plan",
                         "profile_id": "analysis",
                     },
-                    {"id": "review", "name": "Review", "mode_id": "review"},
+                    {"id": "review", "name": "Review", "command_id": "review"},
                 ]
             },
         )

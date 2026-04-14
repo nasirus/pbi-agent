@@ -113,7 +113,7 @@ class FileMentionSearchResponse(BaseModel):
 class SlashCommandItemModel(BaseModel):
     name: str
     description: str
-    kind: Literal["local_command", "mode"]
+    kind: Literal["local_command", "command"]
 
 
 class SlashCommandSearchResponse(BaseModel):
@@ -151,7 +151,7 @@ class BoardStageModel(BaseModel):
     name: str
     position: int
     profile_id: str | None
-    mode_id: str | None
+    command_id: str | None
     auto_start: bool
 
 
@@ -159,7 +159,7 @@ class BoardStageUpdateModel(BaseModel):
     id: str | None = None
     name: NonEmptyString
     profile_id: str | None = None
-    mode_id: str | None = None
+    command_id: str | None = None
     auto_start: bool = False
 
 
@@ -469,7 +469,7 @@ class ActiveProfileResponse(BaseModel):
     config_revision: str
 
 
-class ModeViewModel(BaseModel):
+class CommandViewModel(BaseModel):
     id: str
     name: str
     slash_alias: str
@@ -478,15 +478,15 @@ class ModeViewModel(BaseModel):
     path: str
 
 
-class ModeListResponse(BaseModel):
-    modes: list[ModeViewModel]
+class CommandListResponse(BaseModel):
+    commands: list[CommandViewModel]
     config_revision: str
 
 
 class ConfigBootstrapResponse(BaseModel):
     providers: list[ProviderViewModel]
     model_profiles: list[ModelProfileViewModel]
-    modes: list[ModeViewModel]
+    commands: list[CommandViewModel]
     active_profile_id: str | None
     config_revision: str
     options: ConfigOptionsModel
@@ -530,13 +530,13 @@ def _config_http_error(exc: Exception) -> HTTPException:
     if (
         detail.startswith("Unknown provider ID")
         or detail.startswith("Unknown profile ID")
-        or detail.startswith("Unknown mode ID")
+        or detail.startswith("Unknown command ID")
     ):
         return _not_found(detail)
     if (
         "already exists" in detail
         or "still references it" in detail
-        or detail.startswith("Mode alias '")
+        or detail.startswith("Command alias '")
     ):
         return _conflict(detail)
     return _bad_request(detail)
@@ -748,11 +748,13 @@ def set_active_model_profile(
     )
 
 
-@config_router.get("/modes", response_model=ModeListResponse)
-def list_modes(manager: SessionManagerDep) -> ModeListResponse:
+@config_router.get("/commands", response_model=CommandListResponse)
+def list_commands(manager: SessionManagerDep) -> CommandListResponse:
     payload = manager.config_bootstrap()
-    return ModeListResponse(
-        modes=[_model_from_payload(ModeViewModel, item) for item in payload["modes"]],
+    return CommandListResponse(
+        commands=[
+            _model_from_payload(CommandViewModel, item) for item in payload["commands"]
+        ],
         config_revision=str(payload["config_revision"]),
     )
 

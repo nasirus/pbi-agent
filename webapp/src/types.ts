@@ -47,7 +47,7 @@ export type BoardStage = {
   name: string;
   position: number;
   profile_id: string | null;
-  mode_id: string | null;
+  command_id: string | null;
   auto_start: boolean;
 };
 
@@ -139,7 +139,7 @@ export type FileMentionItem = {
 export type SlashCommandItem = {
   name: string;
   description: string;
-  kind: "local_command" | "mode";
+  kind: "local_command" | "command";
 };
 
 export type ImageAttachment = {
@@ -237,7 +237,7 @@ export type ModelProfileView = {
   resolved_runtime: ResolvedRuntimeView;
 };
 
-export type ModeView = {
+export type CommandView = {
   id: string;
   name: string;
   slash_alias: string;
@@ -249,7 +249,7 @@ export type ModeView = {
 export type ConfigBootstrapPayload = {
   providers: ProviderView[];
   model_profiles: ModelProfileView[];
-  modes: ModeView[];
+  commands: CommandView[];
   active_profile_id: string | null;
   config_revision: string;
   options: ConfigOptions;

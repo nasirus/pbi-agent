@@ -1,5 +1,5 @@
 # TODO
 
-- [x] Remove board-stage save normalization that clears cached profile/command IDs.
-- [x] Preserve existing stage defaults when opening and submitting the board stage editor.
-- [x] Run frontend validation and record the fix in `MEMORY.md`.
+- [x] Reproduce and trace the board run failure when only Backlog and Done exist.
+- [x] Update the board UI to prompt for stage creation instead of surfacing the empty-stage run error.
+- [x] Rebuild and validate the frontend changes, then record the result in `MEMORY.md`.

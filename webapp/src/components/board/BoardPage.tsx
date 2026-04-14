@@ -35,13 +35,15 @@ import { TaskCardContent } from "./TaskCard";
 
 const EMPTY_TASKS: TaskRecord[] = [];
 const EMPTY_STAGES: BoardStage[] = [];
+const BACKLOG_STAGE_ID = "backlog";
+const DONE_STAGE_ID = "done";
 
 function toBoardStagePayload(
   stages: Array<{
     id: string;
     name: string;
     profile_id: string;
-    mode_id: string;
+    command_id: string;
     auto_start: boolean;
   }>,
 ) {
@@ -50,7 +52,7 @@ function toBoardStagePayload(
       id: stage.id.trim() === "" ? null : stage.id,
       name: stage.name,
       profile_id: stage.profile_id.trim() === "" ? null : stage.profile_id,
-      mode_id: stage.mode_id.trim() === "" ? null : stage.mode_id,
+      command_id: stage.command_id.trim() === "" ? null : stage.command_id,
       auto_start: stage.auto_start,
     })),
   };
@@ -58,8 +60,14 @@ function toBoardStagePayload(
 
 function isUnknownStageReferenceError(error: unknown): error is ApiError {
   return error instanceof ApiError && error.status === 400 && (
-    error.message.includes("Unknown profile ID") || error.message.includes("Unknown mode ID")
+    error.message.includes("Unknown profile ID") || error.message.includes("Unknown command ID")
   );
+}
+
+function isMissingRunnableStageError(error: unknown): error is ApiError {
+  return error instanceof ApiError
+    && error.status === 400
+    && error.message.includes("Backlog tasks require a runnable board stage");
 }
 
 export function BoardPage() {
@@ -74,7 +82,10 @@ export function BoardPage() {
   const [editingTask, setEditingTask] = useState<EditableTask | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [isBoardEditorOpen, setIsBoardEditorOpen] = useState(false);
+  const [boardEditorStartsWithNewStage, setBoardEditorStartsWithNewStage] = useState(false);
+  const [isCreateStagePromptOpen, setIsCreateStagePromptOpen] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState<TaskRecord | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const createTaskMutation = useMutation({
     mutationFn: createTask,
@@ -103,7 +114,10 @@ export function BoardPage() {
   const tasks = tasksQuery.data ?? EMPTY_TASKS;
   const boardStages = stagesQuery.data ?? EMPTY_STAGES;
   const profiles = configQuery.data?.model_profiles ?? [];
-  const modes = configQuery.data?.modes ?? [];
+  const commands = configQuery.data?.commands ?? [];
+  const hasRunnableBoardStage = boardStages.some(
+    (stage) => stage.id !== BACKLOG_STAGE_ID && stage.id !== DONE_STAGE_ID,
+  );
   const tasksByStage = useMemo(
     () =>
       boardStages.reduce<Record<string, TaskRecord[]>>((acc, stage) => {
@@ -166,6 +180,16 @@ export function BoardPage() {
     });
   };
 
+  const openBoardEditor = (startWithNewStage = false) => {
+    setBoardEditorStartsWithNewStage(startWithNewStage);
+    setIsBoardEditorOpen(true);
+  };
+
+  const closeBoardEditor = () => {
+    setIsBoardEditorOpen(false);
+    setBoardEditorStartsWithNewStage(false);
+  };
+
   const openEditTask = (task: TaskRecord) =>
     setEditingTask({
       taskId: task.task_id,
@@ -210,7 +234,7 @@ export function BoardPage() {
       id: string;
       name: string;
       profile_id: string;
-      mode_id: string;
+      command_id: string;
       auto_start: boolean;
     }>,
   ) => {
@@ -224,11 +248,32 @@ export function BoardPage() {
       client.setQueryData(["config-bootstrap"], freshConfig);
       await updateBoardStagesMutation.mutateAsync(
         toBoardStagePayload(
-          sanitizeEditableBoardStages(stages, freshConfig.model_profiles, freshConfig.modes),
+          sanitizeEditableBoardStages(stages, freshConfig.model_profiles, freshConfig.commands),
         ),
       );
     }
-    setIsBoardEditorOpen(false);
+    closeBoardEditor();
+  };
+
+  const handleRunTask = (taskId: string) => {
+    const task = tasks.find((item) => item.task_id === taskId);
+    if (!task) {
+      return;
+    }
+    setRunError(null);
+    if (task.stage === BACKLOG_STAGE_ID && !hasRunnableBoardStage) {
+      setIsCreateStagePromptOpen(true);
+      return;
+    }
+    runTaskMutation.mutate(taskId, {
+      onError: (error) => {
+        if (isMissingRunnableStageError(error)) {
+          setIsCreateStagePromptOpen(true);
+          return;
+        }
+        setRunError((error as Error).message);
+      },
+    });
   };
 
   if (tasksQuery.isLoading || stagesQuery.isLoading || configQuery.isLoading) {
@@ -271,7 +316,7 @@ export function BoardPage() {
           </p>
         </div>
         <div className="board-layout__actions">
-          <button type="button" className="btn btn--ghost" onClick={() => setIsBoardEditorOpen(true)}>
+          <button type="button" className="btn btn--ghost" onClick={() => openBoardEditor(false)}>
             Edit Stages
           </button>
           <button type="button" className="btn btn--primary" onClick={openNewTask}>
@@ -279,6 +324,8 @@ export function BoardPage() {
           </button>
         </div>
       </div>
+
+      {runError ? <div className="settings-error-banner">{runError}</div> : null}
 
       {tasks.length === 0 ? (
         <EmptyState
@@ -312,7 +359,7 @@ export function BoardPage() {
                     const task = tasks.find((t) => t.task_id === taskId);
                     if (task) setTaskToDelete(task);
                   }}
-                  onRun={(taskId) => runTaskMutation.mutate(taskId)}
+                  onRun={handleRunTask}
                 />
               ))}
             </div>
@@ -377,11 +424,57 @@ export function BoardPage() {
         <BoardStageEditorModal
           stages={boardStages}
           profiles={profiles}
-          modes={modes}
+          commands={commands}
+          startWithNewStage={boardEditorStartsWithNewStage}
           isSaving={updateBoardStagesMutation.isPending}
           onSave={saveBoardStages}
-          onClose={() => setIsBoardEditorOpen(false)}
+          onClose={closeBoardEditor}
         />
+      ) : null}
+
+      {isCreateStagePromptOpen ? (
+        <div className="modal-backdrop" onClick={() => setIsCreateStagePromptOpen(false)}>
+          <div
+            className="modal-card modal-card--confirm"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-card__header">
+              <h2 className="modal-card__title">Create Runnable Stage</h2>
+              <button
+                type="button"
+                className="modal-card__close"
+                onClick={() => setIsCreateStagePromptOpen(false)}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="confirm-modal">
+              <p className="confirm-modal__body">
+                This board only has <strong>Backlog</strong> and <strong>Done</strong>.
+                Add a stage between them before starting backlog tasks.
+              </p>
+              <div className="confirm-modal__actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setIsCreateStagePromptOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => {
+                    setIsCreateStagePromptOpen(false);
+                    openBoardEditor(true);
+                  }}
+                >
+                  Create Stage
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );

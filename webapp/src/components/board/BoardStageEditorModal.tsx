@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { BoardStage, ModeView, ModelProfileView } from "../../types";
+import type { BoardStage, CommandView, ModelProfileView } from "../../types";
 import { type EditableBoardStage, toEditableBoardStages } from "./stageConfig";
 
 const BACKLOG_STAGE_ID = "backlog";
@@ -9,25 +9,55 @@ function isFixedStage(stageId: string): boolean {
   return stageId === BACKLOG_STAGE_ID || stageId === DONE_STAGE_ID;
 }
 
+function buildInitialItems(
+  stages: BoardStage[],
+  startWithNewStage: boolean,
+): EditableBoardStage[] {
+  const items = toEditableBoardStages(stages);
+  if (!startWithNewStage) {
+    return items;
+  }
+  const nextStage: EditableBoardStage = {
+    id: "",
+    name: "",
+    profile_id: "",
+    command_id: "",
+    auto_start: false,
+  };
+  const doneIndex = items.findIndex((item) => item.id === DONE_STAGE_ID);
+  if (doneIndex === -1) {
+    return [...items, nextStage];
+  }
+  const nextItems = [...items];
+  nextItems.splice(doneIndex, 0, nextStage);
+  return nextItems;
+}
+
 export function BoardStageEditorModal({
   stages,
   profiles,
-  modes,
+  commands,
+  startWithNewStage = false,
   isSaving,
   onSave,
   onClose,
 }: {
   stages: BoardStage[];
   profiles: ModelProfileView[];
-  modes: ModeView[];
+  commands: CommandView[];
+  startWithNewStage?: boolean;
   isSaving: boolean;
   onSave: (stages: EditableBoardStage[]) => Promise<void>;
   onClose: () => void;
 }) {
   const [items, setItems] = useState<EditableBoardStage[]>(() =>
-    toEditableBoardStages(stages),
+    buildInitialItems(stages, startWithNewStage),
   );
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setItems(buildInitialItems(stages, startWithNewStage));
+  }, [stages, startWithNewStage]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -62,7 +92,7 @@ export function BoardStageEditorModal({
         id: "",
         name: "",
         profile_id: "",
-        mode_id: "",
+        command_id: "",
         auto_start: false,
       };
       const doneIndex = current.findIndex((item) => item.id === DONE_STAGE_ID);
@@ -172,14 +202,14 @@ export function BoardStageEditorModal({
                       <label className="task-form__label">Default Command</label>
                       <select
                         className="task-form__select"
-                        value={item.mode_id}
-                        onChange={(event) => updateItem(index, { mode_id: event.target.value })}
+                        value={item.command_id}
+                        onChange={(event) => updateItem(index, { command_id: event.target.value })}
                         disabled={fixedStage}
                       >
                         <option value="">No default command</option>
-                        {modes.map((mode) => (
-                          <option key={mode.id} value={mode.id}>
-                            {mode.name} ({mode.slash_alias})
+                        {commands.map((command) => (
+                          <option key={command.id} value={command.id}>
+                            {command.name} ({command.slash_alias})
                           </option>
                         ))}
                       </select>
