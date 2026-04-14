@@ -245,13 +245,11 @@ function PayloadSection({
   variant?: "error";
 }) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  const isTruncated = text.length > 5000;
-  const displayText = isTruncated ? text.slice(0, 5000) + "\n…[truncated]" : text;
 
   return (
     <div className={`payload-section${variant === "error" ? " payload-section--error" : ""}`}>
       <span className="payload-section__label">{label}</span>
-      <pre className="payload-section__content">{displayText}</pre>
+      <pre className="payload-section__content">{text}</pre>
     </div>
   );
 }

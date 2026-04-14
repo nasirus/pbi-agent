@@ -1,5 +1,5 @@
 # TODO
 
-- [x] Review observability fix for per-turn usage, metadata preservation, and image payload redaction
-- [x] Validate targeted tests and look for regressions
-- [x] Summarize findings with file references
+- [x] Remove payload truncation from observability run detail UI
+- [x] Validate frontend change with lint, typecheck, and web build
+- [x] Append MEMORY.md entry
