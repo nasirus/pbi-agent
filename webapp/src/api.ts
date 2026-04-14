@@ -9,7 +9,9 @@ import type {
   LiveSession,
   LiveSessionSnapshot,
   ModelProfileView,
+  ObservabilityEvent,
   ProviderView,
+  RunSession,
   SessionDetailPayload,
   SessionRecord,
   SlashCommandItem,
@@ -385,4 +387,17 @@ export async function setActiveModelProfile(
     headers: { "If-Match": configRevision },
     body: JSON.stringify({ profile_id: modelProfileId }),
   });
+}
+
+export async function fetchSessionRuns(sessionId: string): Promise<RunSession[]> {
+  const result = await requestJson<{ runs: RunSession[] }>(
+    `/api/sessions/${sessionId}/runs`,
+  );
+  return result.runs;
+}
+
+export async function fetchRunDetail(
+  runSessionId: string,
+): Promise<{ run: RunSession; events: ObservabilityEvent[] }> {
+  return requestJson(`/api/runs/${runSessionId}`);
 }
