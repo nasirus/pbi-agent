@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">37.03% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>10/27</span>
+                <span class='fraction'>27/27</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">88.88% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>8/9</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
-                <span class="quiet">Branches</span>
-                <span class='fraction'>2/2</span>
-            </div>
-        
-            
-            <div class='fl pad1y space-right2'>
-                <span class="strong">33.33% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>1/3</span>
+                <span class='fraction'>3/3</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">37.03% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>10/27</span>
+                <span class='fraction'>27/27</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line low'></div>
+    <div class='status-line high'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -113,26 +113,26 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">2x</span>
@@ -153,26 +153,26 @@ export type EditableBoardStage = {
   auto_start: boolean;
 };
 &nbsp;
-<span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >function sanitizeReference(value: string | null | undefined, allowedIds: Set&lt;string&gt;): string {</span></span>
-<span class="cstat-no" title="statement not covered" >  if (!value) {</span>
-<span class="cstat-no" title="statement not covered" >    return "";</span>
-<span class="cstat-no" title="statement not covered" >  }</span>
-<span class="cstat-no" title="statement not covered" >  return allowedIds.has(value) ? value : "";</span>
-<span class="cstat-no" title="statement not covered" >}</span>
+function sanitizeReference(value: string | null | undefined, allowedIds: Set&lt;string&gt;): string {
+  if (!value) {
+    return "";
+  }
+  return allowedIds.has(<span class="branch-0 cbranch-no" title="branch not covered" >value) ? value : "</span>";
+}
 &nbsp;
-export <span class="fstat-no" title="function not covered" >function sanitizeEditableBoardStages(</span>
-<span class="cstat-no" title="statement not covered" >  stages: EditableBoardStage[],</span>
-<span class="cstat-no" title="statement not covered" >  profiles: ModelProfileView[],</span>
-<span class="cstat-no" title="statement not covered" >  commands: CommandView[],</span>
+export function sanitizeEditableBoardStages(
+  stages: EditableBoardStage[],
+  profiles: ModelProfileView[],
+  commands: CommandView[],
 ): EditableBoardStage[] {
-<span class="cstat-no" title="statement not covered" >  const allowedProfileIds = new Set(profiles.map((profile) =&gt; profile.id));</span>
-<span class="cstat-no" title="statement not covered" >  const allowedCommandIds = new Set(commands.map((command) =&gt; command.id));</span>
-<span class="cstat-no" title="statement not covered" >  return stages.map((stage) =&gt; ({</span>
-<span class="cstat-no" title="statement not covered" >    ...stage,</span>
-<span class="cstat-no" title="statement not covered" >    profile_id: sanitizeReference(stage.profile_id, allowedProfileIds),</span>
-<span class="cstat-no" title="statement not covered" >    command_id: sanitizeReference(stage.command_id, allowedCommandIds),</span>
-<span class="cstat-no" title="statement not covered" >  }));</span>
-<span class="cstat-no" title="statement not covered" >}</span>
+  const allowedProfileIds = new Set(profiles.map((profile) =&gt; profile.id));
+  const allowedCommandIds = new Set(commands.map((command) =&gt; command.id));
+  return stages.map((stage) =&gt; ({
+    ...stage,
+    profile_id: sanitizeReference(stage.profile_id, allowedProfileIds),
+    command_id: sanitizeReference(stage.command_id, allowedCommandIds),
+  }));
+}
 &nbsp;
 export function toEditableBoardStages(stages: BoardStage[]): EditableBoardStage[] {
   return stages.map((stage) =&gt; ({
@@ -190,7 +190,7 @@ export function toEditableBoardStages(stages: BoardStage[]): EditableBoardStage[
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-04-16T09:42:50.232Z
+                at 2026-04-16T09:51:36.271Z
             </div>
         <script src="../../../prettify.js"></script>
         <script>

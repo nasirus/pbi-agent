@@ -90,17 +90,25 @@ describe("BoardStageEditorModal", () => {
     const stageNameInput = screen.getAllByRole("textbox").find(
       (textbox) => !textbox.hasAttribute("disabled"),
     );
-    expect(stageNameInput).toBeDefined();
+    if (!stageNameInput) {
+      throw new Error("Expected an editable stage name input.");
+    }
     await user.type(stageNameInput, "Implement");
 
     const selects = screen.getAllByRole("combobox").filter(
       (combobox) => !combobox.hasAttribute("disabled"),
     );
-    await user.selectOptions(selects[0], "analysis");
-    await user.selectOptions(selects[1], "plan");
+    const [profileSelect, commandSelect] = selects;
+    if (!profileSelect || !commandSelect) {
+      throw new Error("Expected editable profile and command selects.");
+    }
+    await user.selectOptions(profileSelect, "analysis");
+    await user.selectOptions(commandSelect, "plan");
     const editableToggle = screen.getAllByRole("checkbox").find((checkbox) => !checkbox.hasAttribute("disabled"));
-    expect(editableToggle).toBeDefined();
-    await user.click(editableToggle!);
+    if (!editableToggle) {
+      throw new Error("Expected an editable auto-start toggle.");
+    }
+    await user.click(editableToggle);
     await user.click(screen.getByRole("button", { name: "Save Board" }));
 
     expect(onSave).toHaveBeenCalledWith([

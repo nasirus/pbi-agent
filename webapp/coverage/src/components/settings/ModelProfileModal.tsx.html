@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">0.73% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/273</span>
+                <span class='fraction'>2/273</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/1</span>
+                <span class='fraction'>0/0</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/1</span>
+                <span class='fraction'>0/3</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">0.73% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/273</span>
+                <span class='fraction'>2/273</span>
             </div>
         
             
@@ -463,7 +463,7 @@
 <a name='L398'></a><a href='#L398'>398</a>
 <a name='L399'></a><a href='#L399'>399</a>
 <a name='L400'></a><a href='#L400'>400</a>
-<a name='L401'></a><a href='#L401'>401</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L401'></a><a href='#L401'>401</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -552,6 +552,7 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -561,7 +562,6 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -863,7 +863,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js"><span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" ><span class="branch-0 cbranch-no" title="branch not covered" >import { useEffect, useState, type FormEvent } from "react";</span></span></span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { useEffect, useState, type FormEvent } from "react";
 import type { ConfigOptions, ModelProfileView, ProviderView } from "../../types";
 &nbsp;
 type WebSearchMode = "default" | "true" | "false";
@@ -883,7 +883,7 @@ interface FormState {
   compact_threshold: string;
 }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >function initForm(</span>
+<span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >function initForm(</span></span>
 <span class="cstat-no" title="statement not covered" >  profile?: ModelProfileView,</span>
 <span class="cstat-no" title="statement not covered" >  providers?: ProviderView[],</span>
 ): FormState {
@@ -947,12 +947,12 @@ interface Props {
   onClose: () =&gt; void;
 }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >function toInt(s: string): number | null {</span>
+<span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >function toInt(s: string): number | null {</span></span>
 <span class="cstat-no" title="statement not covered" >  const n = parseInt(s, 10);</span>
 <span class="cstat-no" title="statement not covered" >  return isNaN(n) ? null : n;</span>
 <span class="cstat-no" title="statement not covered" >}</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >export function ModelProfileModal({</span>
+export <span class="fstat-no" title="function not covered" >function ModelProfileModal({</span>
 <span class="cstat-no" title="statement not covered" >  profile,</span>
 <span class="cstat-no" title="statement not covered" >  providers,</span>
 <span class="cstat-no" title="statement not covered" >  options,</span>
@@ -1270,7 +1270,7 @@ interface Props {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-04-16T09:42:50.232Z
+                at 2026-04-16T09:51:36.271Z
             </div>
         <script src="../../../prettify.js"></script>
         <script>
