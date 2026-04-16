@@ -256,7 +256,17 @@ class DefaultWebCommandTests(unittest.TestCase):
 
     def test_open_browser_when_ready_opens_browser_by_default(self) -> None:
         with (
-            patch("pbi_agent.cli._wait_for_web_server", return_value=True),
+            patch(
+                "pbi_agent.cli._wait_for_web_server",
+                return_value=cli.WebServerWaitResult(
+                    ready=True,
+                    connect_host="127.0.0.1",
+                    port=9001,
+                    timeout_seconds=20.0,
+                    elapsed_seconds=0.5,
+                    attempts=3,
+                ),
+            ),
             patch("pbi_agent.cli._is_wsl_environment", return_value=False),
             patch("pbi_agent.cli.webbrowser.open", return_value=True) as mock_open,
         ):
@@ -266,7 +276,17 @@ class DefaultWebCommandTests(unittest.TestCase):
 
     def test_open_browser_when_ready_continues_when_browser_open_fails(self) -> None:
         with (
-            patch("pbi_agent.cli._wait_for_web_server", return_value=True),
+            patch(
+                "pbi_agent.cli._wait_for_web_server",
+                return_value=cli.WebServerWaitResult(
+                    ready=True,
+                    connect_host="127.0.0.1",
+                    port=9001,
+                    timeout_seconds=20.0,
+                    elapsed_seconds=0.5,
+                    attempts=3,
+                ),
+            ),
             patch("pbi_agent.cli._is_wsl_environment", return_value=False),
             patch("pbi_agent.cli.webbrowser.open", return_value=False) as mock_open,
         ):
@@ -276,7 +296,17 @@ class DefaultWebCommandTests(unittest.TestCase):
 
     def test_open_browser_when_ready_uses_windows_browser_opener_on_wsl(self) -> None:
         with (
-            patch("pbi_agent.cli._wait_for_web_server", return_value=True),
+            patch(
+                "pbi_agent.cli._wait_for_web_server",
+                return_value=cli.WebServerWaitResult(
+                    ready=True,
+                    connect_host="127.0.0.1",
+                    port=9001,
+                    timeout_seconds=20.0,
+                    elapsed_seconds=0.5,
+                    attempts=3,
+                ),
+            ),
             patch("pbi_agent.cli._is_wsl_environment", return_value=True),
             patch.dict(os.environ, {}, clear=False),
             patch(
@@ -292,7 +322,17 @@ class DefaultWebCommandTests(unittest.TestCase):
 
     def test_open_browser_when_ready_respects_explicit_browser_env_on_wsl(self) -> None:
         with (
-            patch("pbi_agent.cli._wait_for_web_server", return_value=True),
+            patch(
+                "pbi_agent.cli._wait_for_web_server",
+                return_value=cli.WebServerWaitResult(
+                    ready=True,
+                    connect_host="127.0.0.1",
+                    port=9001,
+                    timeout_seconds=20.0,
+                    elapsed_seconds=0.5,
+                    attempts=3,
+                ),
+            ),
             patch("pbi_agent.cli._is_wsl_environment", return_value=True),
             patch.dict(os.environ, {"BROWSER": "custom-browser"}, clear=False),
             patch(
@@ -307,7 +347,17 @@ class DefaultWebCommandTests(unittest.TestCase):
 
     def test_open_browser_when_ready_falls_back_to_standard_open_on_wsl(self) -> None:
         with (
-            patch("pbi_agent.cli._wait_for_web_server", return_value=True),
+            patch(
+                "pbi_agent.cli._wait_for_web_server",
+                return_value=cli.WebServerWaitResult(
+                    ready=True,
+                    connect_host="127.0.0.1",
+                    port=9001,
+                    timeout_seconds=20.0,
+                    elapsed_seconds=0.5,
+                    attempts=3,
+                ),
+            ),
             patch("pbi_agent.cli._is_wsl_environment", return_value=True),
             patch.dict(os.environ, {}, clear=False),
             patch(
@@ -320,6 +370,83 @@ class DefaultWebCommandTests(unittest.TestCase):
 
         mock_windows_open.assert_called_once_with("http://127.0.0.1:9001")
         mock_open.assert_called_once_with("http://127.0.0.1:9001")
+
+    def test_open_browser_when_ready_retries_after_initial_timeout(self) -> None:
+        first_result = cli.WebServerWaitResult(
+            ready=False,
+            connect_host="127.0.0.1",
+            port=9001,
+            timeout_seconds=20.0,
+            elapsed_seconds=20.0,
+            attempts=100,
+            last_error="[Errno 111] Connection refused",
+        )
+        retry_result = cli.WebServerWaitResult(
+            ready=True,
+            connect_host="127.0.0.1",
+            port=9001,
+            timeout_seconds=10.0,
+            elapsed_seconds=1.2,
+            attempts=6,
+            last_error="[Errno 111] Connection refused",
+        )
+
+        with (
+            self.assertLogs("pbi_agent.cli", level="WARNING") as logs,
+            patch(
+                "pbi_agent.cli._wait_for_web_server",
+                side_effect=[first_result, retry_result],
+            ) as mock_wait,
+            patch("pbi_agent.cli._is_wsl_environment", return_value=False),
+            patch("pbi_agent.cli.webbrowser.open", return_value=True) as mock_open,
+        ):
+            cli._open_browser_when_ready("127.0.0.1", 9001, "http://127.0.0.1:9001")
+
+        self.assertEqual(mock_wait.call_count, 2)
+        self.assertEqual(
+            mock_wait.call_args_list[1].kwargs,
+            {"timeout_seconds": cli.WEB_SERVER_BROWSER_WAIT_RETRY_SECONDS},
+        )
+        mock_open.assert_called_once_with("http://127.0.0.1:9001")
+        self.assertIn("Retrying browser launch", "\n".join(logs.output))
+        self.assertIn("Connection refused", "\n".join(logs.output))
+
+    def test_open_browser_when_ready_logs_diagnostics_after_retry_failure(self) -> None:
+        first_result = cli.WebServerWaitResult(
+            ready=False,
+            connect_host="127.0.0.1",
+            port=9001,
+            timeout_seconds=20.0,
+            elapsed_seconds=20.0,
+            attempts=100,
+            last_error="[Errno 111] Connection refused",
+        )
+        retry_result = cli.WebServerWaitResult(
+            ready=False,
+            connect_host="127.0.0.1",
+            port=9001,
+            timeout_seconds=10.0,
+            elapsed_seconds=10.0,
+            attempts=50,
+            last_error="[Errno 111] Connection refused",
+        )
+
+        with (
+            self.assertLogs("pbi_agent.cli", level="WARNING") as logs,
+            patch(
+                "pbi_agent.cli._wait_for_web_server",
+                side_effect=[first_result, retry_result],
+            ),
+            patch("pbi_agent.cli._is_wsl_environment", return_value=False),
+            patch("pbi_agent.cli.webbrowser.open", return_value=True) as mock_open,
+        ):
+            cli._open_browser_when_ready("127.0.0.1", 9001, "http://127.0.0.1:9001")
+
+        mock_open.assert_not_called()
+        log_output = "\n".join(logs.output)
+        self.assertIn("Retrying browser launch", log_output)
+        self.assertIn("still was not reachable", log_output)
+        self.assertIn("attempts=50", log_output)
 
     def test_open_url_in_windows_browser_uses_first_successful_command(self) -> None:
         process = Mock()

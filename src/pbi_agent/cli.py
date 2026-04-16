@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import logging
 import os
 import shutil
@@ -57,6 +58,24 @@ from pbi_agent.log_config import configure_logging
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_COMMAND = "web"
+WEB_SERVER_BROWSER_WAIT_TIMEOUT_SECONDS = 20.0
+WEB_SERVER_BROWSER_WAIT_RETRY_SECONDS = 10.0
+WEB_SERVER_BROWSER_POLL_INTERVAL_SECONDS = 0.1
+WEB_SERVER_BROWSER_CONNECT_TIMEOUT_SECONDS = 0.2
+
+
+@dataclasses.dataclass(frozen=True)
+class WebServerWaitResult:
+    ready: bool
+    connect_host: str
+    port: int
+    timeout_seconds: float
+    elapsed_seconds: float
+    attempts: int
+    last_error: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.ready
 
 
 class CleanHelpFormatter(argparse.HelpFormatter):
@@ -1392,21 +1411,49 @@ def _browser_target_url(args: argparse.Namespace) -> str:
     return f"http://{host}:{args.port}"
 
 
-def _wait_for_web_server(host: str, port: int, timeout_seconds: float = 10.0) -> bool:
+def _wait_for_web_server(
+    host: str,
+    port: int,
+    timeout_seconds: float = WEB_SERVER_BROWSER_WAIT_TIMEOUT_SECONDS,
+) -> WebServerWaitResult:
     connect_host = host
     if host == "0.0.0.0":
         connect_host = "127.0.0.1"
     elif host == "::":
         connect_host = "::1"
 
-    deadline = time.monotonic() + timeout_seconds
+    start_time = time.monotonic()
+    deadline = start_time + timeout_seconds
+    attempts = 0
+    last_error: str | None = None
     while time.monotonic() < deadline:
+        attempts += 1
         try:
-            with socket.create_connection((connect_host, port), timeout=0.2):
-                return True
-        except OSError:
-            time.sleep(0.1)
-    return False
+            with socket.create_connection(
+                (connect_host, port),
+                timeout=WEB_SERVER_BROWSER_CONNECT_TIMEOUT_SECONDS,
+            ):
+                return WebServerWaitResult(
+                    ready=True,
+                    connect_host=connect_host,
+                    port=port,
+                    timeout_seconds=timeout_seconds,
+                    elapsed_seconds=time.monotonic() - start_time,
+                    attempts=attempts,
+                    last_error=last_error,
+                )
+        except OSError as exc:
+            last_error = str(exc)
+            time.sleep(WEB_SERVER_BROWSER_POLL_INTERVAL_SECONDS)
+    return WebServerWaitResult(
+        ready=False,
+        connect_host=connect_host,
+        port=port,
+        timeout_seconds=timeout_seconds,
+        elapsed_seconds=time.monotonic() - start_time,
+        attempts=attempts,
+        last_error=last_error,
+    )
 
 
 def _start_browser_open_thread(host: str, port: int, browser_url: str) -> None:
@@ -1419,14 +1466,48 @@ def _start_browser_open_thread(host: str, port: int, browser_url: str) -> None:
 
 
 def _open_browser_when_ready(host: str, port: int, browser_url: str) -> None:
-    if _wait_for_web_server(host, port):
+    result = _wait_for_web_server(host, port)
+    if result:
         if not _open_browser_url(browser_url):
             LOGGER.warning("Failed to open browser for %s", browser_url)
         return
 
     LOGGER.warning(
-        "Timed out waiting for the web server to start before opening %s",
+        (
+            "Timed out waiting for the web server to start before opening %s "
+            "(host=%s port=%s waited=%.1fs attempts=%s last_error=%s). "
+            "Retrying browser launch for up to %.1fs."
+        ),
         browser_url,
+        result.connect_host,
+        result.port,
+        result.elapsed_seconds,
+        result.attempts,
+        result.last_error or "none",
+        WEB_SERVER_BROWSER_WAIT_RETRY_SECONDS,
+    )
+
+    retry_result = _wait_for_web_server(
+        host,
+        port,
+        timeout_seconds=WEB_SERVER_BROWSER_WAIT_RETRY_SECONDS,
+    )
+    if retry_result:
+        if not _open_browser_url(browser_url):
+            LOGGER.warning("Failed to open browser for %s", browser_url)
+        return
+
+    LOGGER.warning(
+        (
+            "Web server still was not reachable for browser launch: %s "
+            "(host=%s port=%s waited=%.1fs attempts=%s last_error=%s)."
+        ),
+        browser_url,
+        retry_result.connect_host,
+        retry_result.port,
+        retry_result.elapsed_seconds,
+        retry_result.attempts,
+        retry_result.last_error or "none",
     )
 
 
