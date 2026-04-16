@@ -12,6 +12,13 @@ from typing import Any
 
 from pbi_agent.agent.error_formatting import format_user_facing_error
 from pbi_agent.agent.session import run_session_loop
+from pbi_agent.auth.models import AUTH_MODE_API_KEY
+from pbi_agent.auth.service import (
+    delete_provider_auth_session,
+    get_provider_auth_status,
+    import_provider_auth_session,
+    refresh_provider_auth_session,
+)
 from pbi_agent.config import (
     ConfigError,
     InternalConfig,
@@ -1123,18 +1130,24 @@ class WebSessionManager:
         provider_id: str | None,
         name: str,
         kind: str,
+        auth_mode: str,
         api_key: str | None,
         api_key_env: str | None,
         responses_url: str | None,
         generic_api_url: str | None,
         expected_revision: str,
     ) -> dict[str, Any]:
-        self._validate_secret_inputs(api_key=api_key, api_key_env=api_key_env)
+        self._validate_secret_inputs(
+            auth_mode=auth_mode,
+            api_key=api_key,
+            api_key_env=api_key_env,
+        )
         provider, revision = create_provider_config(
             ProviderConfig(
                 id=slugify(provider_id or name),
                 name=name,
                 kind=kind,
+                auth_mode=auth_mode,
                 api_key=api_key or "",
                 api_key_env=api_key_env,
                 responses_url=responses_url,
@@ -1150,6 +1163,7 @@ class WebSessionManager:
         *,
         name: str | None,
         kind: str | None,
+        auth_mode: str | None,
         api_key: str | None,
         api_key_env: str | None,
         responses_url: str | None,
@@ -1161,14 +1175,20 @@ class WebSessionManager:
             raise ConfigError("Provider name cannot be null.")
         if "kind" in fields_set and kind is None:
             raise ConfigError("Provider kind cannot be null.")
-        self._validate_secret_inputs(
-            api_key=api_key if "api_key" in fields_set else None,
-            api_key_env=api_key_env if "api_key_env" in fields_set else None,
-        )
         config = load_internal_config()
         provider = self._provider_map(config).get(slugify(provider_id))
         if provider is None:
             raise ConfigError(f"Unknown provider ID '{provider_id}'.")
+        next_auth_mode = (
+            auth_mode
+            if "auth_mode" in fields_set and auth_mode is not None
+            else provider.auth_mode
+        )
+        self._validate_secret_inputs(
+            auth_mode=next_auth_mode,
+            api_key=api_key if "api_key" in fields_set else None,
+            api_key_env=api_key_env if "api_key_env" in fields_set else None,
+        )
         next_api_key = provider.api_key
         next_api_key_env = provider.api_key_env
         if "api_key" in fields_set:
@@ -1179,10 +1199,14 @@ class WebSessionManager:
             next_api_key_env = (api_key_env or "").strip() or None
             if next_api_key_env:
                 next_api_key = ""
+        if next_auth_mode != AUTH_MODE_API_KEY:
+            next_api_key = ""
+            next_api_key_env = None
         merged = replace(
             provider,
             name=name if "name" in fields_set else provider.name,
             kind=kind if "kind" in fields_set else provider.kind,
+            auth_mode=next_auth_mode,
             api_key=next_api_key,
             api_key_env=next_api_key_env,
             responses_url=(
@@ -1200,6 +1224,106 @@ class WebSessionManager:
             provider_id, merged, expected_revision=expected_revision
         )
         return {"provider": self._provider_view(updated), "config_revision": revision}
+
+    def get_provider_auth_status(self, provider_id: str) -> dict[str, Any]:
+        config = load_internal_config()
+        provider = self._require_provider(config, provider_id)
+        status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        return {
+            "provider": self._provider_view(provider),
+            "auth_status": self._auth_status_view(status),
+        }
+
+    def import_provider_auth(
+        self,
+        provider_id: str,
+        *,
+        access_token: str,
+        refresh_token: str | None,
+        account_id: str | None,
+        email: str | None,
+        plan_type: str | None,
+        expires_at: int | None,
+        id_token: str | None,
+    ) -> dict[str, Any]:
+        config = load_internal_config()
+        provider = self._require_provider(config, provider_id)
+        session = import_provider_auth_session(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+            payload={
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "account_id": account_id,
+                "email": email,
+                "plan_type": plan_type,
+                "expires_at": expires_at,
+                "id_token": id_token,
+            },
+        )
+        status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        return {
+            "provider": self._provider_view(provider),
+            "auth_status": self._auth_status_view(status),
+            "session": {
+                "provider_id": session.provider_id,
+                "backend": session.backend,
+                "expires_at": session.expires_at,
+                "account_id": session.account_id,
+                "email": session.email,
+                "plan_type": session.plan_type,
+            },
+        }
+
+    def refresh_provider_auth(self, provider_id: str) -> dict[str, Any]:
+        config = load_internal_config()
+        provider = self._require_provider(config, provider_id)
+        session = refresh_provider_auth_session(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        return {
+            "provider": self._provider_view(provider),
+            "auth_status": self._auth_status_view(status),
+            "session": {
+                "provider_id": session.provider_id,
+                "backend": session.backend,
+                "expires_at": session.expires_at,
+                "account_id": session.account_id,
+                "email": session.email,
+                "plan_type": session.plan_type,
+            },
+        }
+
+    def logout_provider_auth(self, provider_id: str) -> dict[str, Any]:
+        config = load_internal_config()
+        provider = self._require_provider(config, provider_id)
+        removed = delete_provider_auth_session(provider.id)
+        status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        return {
+            "provider": self._provider_view(provider),
+            "auth_status": self._auth_status_view(status),
+            "removed": removed,
+        }
 
     def delete_provider(
         self,
@@ -1917,15 +2041,35 @@ class WebSessionManager:
         )
 
     def _provider_view(self, provider: ProviderConfig) -> dict[str, Any]:
+        auth_status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
         return {
             "id": provider.id,
             "name": provider.name,
             "kind": provider.kind,
+            "auth_mode": provider.auth_mode,
             "responses_url": provider.responses_url,
             "generic_api_url": provider.generic_api_url,
             "secret_source": provider_secret_source(provider),
             "secret_env_var": provider.api_key_env,
             "has_secret": provider_has_secret(provider),
+            "auth_status": self._auth_status_view(auth_status),
+        }
+
+    def _auth_status_view(self, status: Any) -> dict[str, Any]:
+        return {
+            "auth_mode": status.auth_mode,
+            "backend": status.backend,
+            "session_status": status.session_status,
+            "has_session": status.has_session,
+            "can_refresh": status.can_refresh,
+            "account_id": status.account_id,
+            "email": status.email,
+            "plan_type": status.plan_type,
+            "expires_at": status.expires_at,
         }
 
     def _model_profile_view(
@@ -1991,9 +2135,20 @@ class WebSessionManager:
     def _validate_secret_inputs(
         self,
         *,
+        auth_mode: str | None = None,
         api_key: str | None,
         api_key_env: str | None,
     ) -> None:
+        if auth_mode is not None and auth_mode != AUTH_MODE_API_KEY:
+            if api_key:
+                raise ConfigError(
+                    "api_key is only valid when provider auth_mode is 'api_key'."
+                )
+            if api_key_env:
+                raise ConfigError(
+                    "api_key_env is only valid when provider auth_mode is 'api_key'."
+                )
+            return
         if api_key and api_key_env:
             raise ConfigError(
                 "api_key and api_key_env cannot both be set in the same request."

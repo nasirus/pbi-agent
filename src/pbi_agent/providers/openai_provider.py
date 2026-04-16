@@ -13,6 +13,8 @@ import urllib.request
 from typing import Any, TYPE_CHECKING
 
 from pbi_agent import __version__
+from pbi_agent.auth.models import OAuthSessionAuth
+from pbi_agent.auth.service import build_runtime_request_auth, refresh_runtime_auth
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import (
     execute_tool_calls as _execute_tool_calls,
@@ -83,10 +85,9 @@ class OpenAIProvider(Provider):
         return self._branch_response_id
 
     def connect(self) -> None:
-        if not self._settings.api_key:
+        if self._settings.auth is None:
             raise ValueError(
-                "Missing API key. Set PBI_AGENT_API_KEY in environment or pass "
-                "--api-key."
+                "Missing authentication. Configure an API key or ChatGPT account session."
             )
 
     def close(self) -> None:
@@ -251,12 +252,6 @@ class OpenAIProvider(Provider):
             instructions=instructions,
         )
         request_data = json.dumps(request_body).encode("utf-8")
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._settings.api_key}",
-            "User-Agent": f"pbi-agent/{__version__}",
-        }
 
         max_retries = self._settings.max_retries
         rate_limit_max_retries = max(max_retries, _RATE_LIMIT_MAX_RETRIES)
@@ -264,15 +259,27 @@ class OpenAIProvider(Provider):
         last_error: Exception | None = None
         last_error_message: str | None = None
         retried_missing_previous_response = False
+        retried_unauthorized_refresh = False
 
         for attempt in range(rate_limit_max_retries + 1):
             if attempt > 0:
                 display.retry_notice(attempt, retry_notice_max_retries)
 
             req_start = time.perf_counter()
+            request_auth = build_runtime_request_auth(
+                provider_kind=self._settings.provider,
+                request_url=self._settings.responses_url,
+                auth=self._settings.auth,
+            )
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": f"pbi-agent/{__version__}",
+                **request_auth.headers,
+            }
             try:
                 req = urllib.request.Request(
-                    self._settings.responses_url,
+                    request_auth.request_url,
                     data=request_data,
                     headers=headers,
                     method="POST",
@@ -286,7 +293,7 @@ class OpenAIProvider(Provider):
                     tracer=tracer,
                     provider=self._settings.provider,
                     model=self._settings.model,
-                    url=self._settings.responses_url,
+                    url=request_auth.request_url,
                     request_config=self._settings.redacted(),
                     request_payload=_sanitize_request_payload_for_observability(
                         request_body
@@ -309,7 +316,7 @@ class OpenAIProvider(Provider):
                     tracer=tracer,
                     provider=self._settings.provider,
                     model=self._settings.model,
-                    url=self._settings.responses_url,
+                    url=request_auth.request_url,
                     request_config=self._settings.redacted(),
                     request_payload=_sanitize_request_payload_for_observability(
                         request_body
@@ -324,6 +331,18 @@ class OpenAIProvider(Provider):
                     ),
                     metadata={"attempt": attempt + 1},
                 )
+
+                if (
+                    exc.code == 401
+                    and not retried_unauthorized_refresh
+                    and isinstance(self._settings.auth, OAuthSessionAuth)
+                ):
+                    self._settings.auth = refresh_runtime_auth(
+                        provider_kind=self._settings.provider,
+                        auth=self._settings.auth,
+                    )
+                    retried_unauthorized_refresh = True
+                    continue
 
                 # Rate limiting
                 if exc.code == 429:
@@ -412,7 +431,7 @@ class OpenAIProvider(Provider):
                     tracer=tracer,
                     provider=self._settings.provider,
                     model=self._settings.model,
-                    url=self._settings.responses_url,
+                    url=request_auth.request_url,
                     request_config=self._settings.redacted(),
                     request_payload=_sanitize_request_payload_for_observability(
                         request_body

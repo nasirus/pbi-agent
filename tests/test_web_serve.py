@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from io import StringIO
 from pathlib import Path
 import time
@@ -46,6 +48,14 @@ def _write_default_commands(root: Path) -> None:
     )
     _write_command(root, "plan", "# Planning command\n\nPlan before coding.")
     _write_command(root, "review", "# Code review command\n\nReview the change.")
+
+
+def _jwt(payload: dict[str, object]) -> str:
+    def encode(part: dict[str, object]) -> str:
+        raw = json.dumps(part, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    return f"{encode({'alg': 'none', 'typ': 'JWT'})}.{encode(payload)}."
 
 
 def test_web_server_prints_banner_and_starts_uvicorn() -> None:
@@ -1705,11 +1715,23 @@ def test_config_provider_and_profile_list_update_delete_endpoints(
                 "id": "openai-main",
                 "name": "OpenAI Main",
                 "kind": "openai",
+                "auth_mode": "api_key",
                 "responses_url": None,
                 "generic_api_url": None,
                 "secret_source": "env_var",
                 "secret_env_var": "OPENAI_API_KEY",
                 "has_secret": True,
+                "auth_status": {
+                    "auth_mode": "api_key",
+                    "backend": None,
+                    "session_status": "missing",
+                    "has_session": False,
+                    "can_refresh": False,
+                    "account_id": None,
+                    "email": None,
+                    "plan_type": None,
+                    "expires_at": None,
+                },
             }
         ]
 
@@ -1794,6 +1816,58 @@ def test_config_provider_and_profile_list_update_delete_endpoints(
         providers_response = client.get("/api/config/providers")
         assert providers_response.status_code == 200
         assert providers_response.json()["providers"] == []
+
+
+def test_provider_auth_endpoints_round_trip(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PBI_AGENT_AUTH_STORE_PATH", str(tmp_path / "auth.json"))
+    app = create_app(_settings(), runtime_args=_runtime_args("web"))
+
+    with TestClient(app) as client:
+        revision = client.get("/api/config/bootstrap").json()["config_revision"]
+        create_provider_response = client.post(
+            "/api/config/providers",
+            headers={"If-Match": revision},
+            json={
+                "name": "OpenAI ChatGPT",
+                "kind": "openai",
+                "auth_mode": "chatgpt_account",
+            },
+        )
+        assert create_provider_response.status_code == 200
+
+        status_response = client.get("/api/provider-auth/openai-chatgpt")
+        assert status_response.status_code == 200
+        assert status_response.json()["auth_status"]["session_status"] == "missing"
+
+        import_response = client.post(
+            "/api/provider-auth/openai-chatgpt/import",
+            json={
+                "access_token": _jwt(
+                    {
+                        "exp": 4102444800,
+                        "chatgpt_account_id": "acct_123",
+                        "email": "user@example.com",
+                    }
+                ),
+                "refresh_token": "refresh-token",
+                "plan_type": "chatgpt_plus",
+            },
+        )
+        assert import_response.status_code == 200
+        import_payload = import_response.json()
+        assert import_payload["provider"]["auth_mode"] == "chatgpt_account"
+        assert import_payload["auth_status"]["session_status"] == "connected"
+        assert import_payload["auth_status"]["can_refresh"] is True
+        assert import_payload["auth_status"]["email"] == "user@example.com"
+        assert import_payload["session"]["account_id"] == "acct_123"
+        assert import_payload["session"]["plan_type"] == "chatgpt_plus"
+
+        logout_response = client.delete("/api/provider-auth/openai-chatgpt")
+        assert logout_response.status_code == 200
+        logout_payload = logout_response.json()
+        assert logout_payload["removed"] is True
+        assert logout_payload["auth_status"]["session_status"] == "missing"
 
 
 def test_sessions_endpoint_lists_saved_sessions(tmp_path, monkeypatch) -> None:

@@ -15,6 +15,13 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
 
+from pbi_agent.auth.models import AUTH_MODE_API_KEY, AUTH_MODE_CHATGPT_ACCOUNT
+from pbi_agent.auth.service import (
+    delete_provider_auth_session,
+    get_provider_auth_status,
+    import_provider_auth_session,
+    refresh_provider_auth_session,
+)
 from pbi_agent.config import (
     ConfigError,
     ModelProfileConfig,
@@ -357,7 +364,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Provider backend kind.",
     )
+    providers_create.add_argument(
+        "--auth-mode",
+        choices=[AUTH_MODE_API_KEY, AUTH_MODE_CHATGPT_ACCOUNT],
+        default=AUTH_MODE_API_KEY,
+        help="Provider authentication mode.",
+    )
     providers_create.add_argument("--api-key", dest="provider_api_key")
+    providers_create.add_argument("--api-key-env", default=None)
     providers_create.add_argument("--responses-url")
     providers_create.add_argument("--generic-api-url")
 
@@ -376,7 +390,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Provider backend kind.",
     )
+    providers_update.add_argument(
+        "--auth-mode",
+        choices=[AUTH_MODE_API_KEY, AUTH_MODE_CHATGPT_ACCOUNT],
+        default=None,
+        help="Provider authentication mode.",
+    )
     providers_update.add_argument("--api-key", dest="provider_api_key", default=None)
+    providers_update.add_argument("--api-key-env", default=None)
     providers_update.add_argument("--responses-url", default=None)
     providers_update.add_argument("--generic-api-url", default=None)
 
@@ -388,6 +409,49 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=CleanHelpFormatter,
     )
     providers_delete.add_argument("provider_id", help="Provider ID.")
+
+    providers_auth_status = providers_actions.add_parser(
+        "auth-status",
+        prog="pbi-agent config providers auth-status",
+        description="Show stored auth session status for a provider.",
+        help="Show provider auth status.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_auth_status.add_argument("provider_id", help="Provider ID.")
+
+    providers_auth_import = providers_actions.add_parser(
+        "auth-import",
+        prog="pbi-agent config providers auth-import",
+        description="Import an account session for a provider.",
+        help="Import provider auth session.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_auth_import.add_argument("provider_id", help="Provider ID.")
+    providers_auth_import.add_argument("--access-token", required=True)
+    providers_auth_import.add_argument("--refresh-token", default=None)
+    providers_auth_import.add_argument("--account-id", default=None)
+    providers_auth_import.add_argument("--email", default=None)
+    providers_auth_import.add_argument("--plan-type", default=None)
+    providers_auth_import.add_argument("--expires-at", type=int, default=None)
+    providers_auth_import.add_argument("--id-token", default=None)
+
+    providers_auth_refresh = providers_actions.add_parser(
+        "auth-refresh",
+        prog="pbi-agent config providers auth-refresh",
+        description="Refresh a stored account session for a provider.",
+        help="Refresh provider auth session.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_auth_refresh.add_argument("provider_id", help="Provider ID.")
+
+    providers_auth_logout = providers_actions.add_parser(
+        "auth-logout",
+        prog="pbi-agent config providers auth-logout",
+        description="Delete a stored account session for a provider.",
+        help="Delete provider auth session.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_auth_logout.add_argument("provider_id", help="Provider ID.")
 
     profiles_parser = config_subparsers.add_parser(
         "profiles",
@@ -690,7 +754,7 @@ def _handle_config_providers_command(args: argparse.Namespace) -> int:
     from rich.console import Console
     from rich.table import Table
 
-    console = Console()
+    console = Console(width=160)
 
     if args.config_action == "list":
         providers = list_provider_configs()
@@ -701,6 +765,8 @@ def _handle_config_providers_command(args: argparse.Namespace) -> int:
         table.add_column("ID", style="green")
         table.add_column("Name")
         table.add_column("Kind", style="yellow")
+        table.add_column("Auth Mode", style="yellow")
+        table.add_column("Auth Status")
         table.add_column("API Key")
         table.add_column("Responses URL")
         table.add_column("Generic API URL")
@@ -709,6 +775,8 @@ def _handle_config_providers_command(args: argparse.Namespace) -> int:
                 provider.id,
                 provider.name,
                 provider.kind,
+                provider.auth_mode,
+                _format_provider_auth_status(provider),
                 _display_secret(provider.api_key),
                 provider.responses_url or "",
                 provider.generic_api_url or "",
@@ -722,7 +790,9 @@ def _handle_config_providers_command(args: argparse.Namespace) -> int:
                 id=slugify(args.id or args.name),
                 name=args.name,
                 kind=args.kind,
+                auth_mode=args.auth_mode,
                 api_key=args.provider_api_key or "",
+                api_key_env=args.api_key_env,
                 responses_url=args.responses_url,
                 generic_api_url=args.generic_api_url,
             )
@@ -735,7 +805,9 @@ def _handle_config_providers_command(args: argparse.Namespace) -> int:
             args.provider_id,
             name=args.name,
             kind=args.kind,
+            auth_mode=args.auth_mode,
             api_key=args.provider_api_key,
+            api_key_env=args.api_key_env,
             responses_url=args.responses_url,
             generic_api_url=args.generic_api_url,
         )
@@ -745,6 +817,60 @@ def _handle_config_providers_command(args: argparse.Namespace) -> int:
     if args.config_action == "delete":
         delete_provider_config(args.provider_id)
         print(f"Deleted provider '{slugify(args.provider_id)}'.")
+        return 0
+
+    if args.config_action == "auth-status":
+        provider = _require_provider_config(args.provider_id)
+        _print_provider_auth_status(provider)
+        return 0
+
+    if args.config_action == "auth-import":
+        provider = _require_provider_config(args.provider_id)
+        session = import_provider_auth_session(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+            payload={
+                "access_token": args.access_token,
+                "refresh_token": args.refresh_token,
+                "account_id": args.account_id,
+                "email": args.email,
+                "plan_type": args.plan_type,
+                "expires_at": args.expires_at,
+                "id_token": args.id_token,
+            },
+        )
+        print(
+            f"Imported auth session for '{provider.id}'"
+            + (f" ({session.email})" if session.email else "")
+            + "."
+        )
+        _print_provider_auth_status(provider)
+        return 0
+
+    if args.config_action == "auth-refresh":
+        provider = _require_provider_config(args.provider_id)
+        session = refresh_provider_auth_session(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        print(
+            f"Refreshed auth session for '{provider.id}'"
+            + (f" ({session.email})" if session.email else "")
+            + "."
+        )
+        _print_provider_auth_status(provider)
+        return 0
+
+    if args.config_action == "auth-logout":
+        provider = _require_provider_config(args.provider_id)
+        removed = delete_provider_auth_session(provider.id)
+        if removed:
+            print(f"Deleted auth session for '{provider.id}'.")
+        else:
+            print(f"No stored auth session for '{provider.id}'.")
+        _print_provider_auth_status(provider)
         return 0
 
     raise ConfigError(f"Unknown providers action '{args.config_action}'.")
@@ -835,6 +961,55 @@ def _handle_config_profiles_command(args: argparse.Namespace) -> int:
 
 def _display_secret(value: str) -> str:
     return value and f"{value[:4]}...{value[-4:]}" if value else ""
+
+
+def _require_provider_config(provider_id: str) -> ProviderConfig:
+    normalized_id = slugify(provider_id)
+    for provider in list_provider_configs():
+        if provider.id == normalized_id:
+            return provider
+    raise ConfigError(f"Unknown provider ID '{provider_id}'.")
+
+
+def _provider_auth_status(provider: ProviderConfig):
+    return get_provider_auth_status(
+        provider_kind=provider.kind,
+        provider_id=provider.id,
+        auth_mode=provider.auth_mode,
+    )
+
+
+def _format_provider_auth_status(provider: ProviderConfig) -> str:
+    if provider.auth_mode == AUTH_MODE_API_KEY:
+        if provider.api_key_env:
+            return f"env:{provider.api_key_env}"
+        if provider.api_key:
+            return "configured"
+        return "missing"
+    status = _provider_auth_status(provider)
+    if status.email:
+        return f"{status.session_status}:{status.email}"
+    if status.plan_type:
+        return f"{status.session_status}:{status.plan_type}"
+    return status.session_status
+
+
+def _print_provider_auth_status(provider: ProviderConfig) -> None:
+    status = _provider_auth_status(provider)
+    print(f"Provider: {provider.id}")
+    print(f"Kind: {provider.kind}")
+    print(f"Auth mode: {status.auth_mode}")
+    print(f"Session status: {status.session_status}")
+    print(f"Backend: {status.backend or 'n/a'}")
+    print(f"Can refresh: {'yes' if status.can_refresh else 'no'}")
+    if status.email:
+        print(f"Email: {status.email}")
+    if status.account_id:
+        print(f"Account ID: {status.account_id}")
+    if status.plan_type:
+        print(f"Plan: {status.plan_type}")
+    if status.expires_at is not None:
+        print(f"Expires at: {status.expires_at}")
 
 
 def _handle_skills_flag(args: argparse.Namespace) -> int:

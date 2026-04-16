@@ -7,6 +7,8 @@ from unittest.mock import Mock
 import pytest
 
 from pbi_agent.cli import build_parser
+from pbi_agent.auth.models import OAuthSessionAuth
+from pbi_agent.auth.providers.openai_chatgpt import OPENAI_CHATGPT_RESPONSES_URL
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import ToolExecutionBatch
 from pbi_agent.config import (
@@ -500,6 +502,71 @@ def test_openai_request_turn_reuses_previous_response_id(monkeypatch) -> None:
         }
     ]
     assert requests[1]["reasoning"] == {"effort": "xhigh", "summary": "auto"}
+
+
+def test_openai_request_turn_uses_chatgpt_account_auth_headers(monkeypatch) -> None:
+    request_details: dict[str, object] = {}
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        request_details["url"] = request.full_url
+        request_details["authorization"] = request.get_header("Authorization")
+        request_details["headers"] = dict(request.header_items())
+        return _FakeHTTPResponse(
+            {
+                "id": "resp_chatgpt",
+                "model": DEFAULT_MODEL,
+                "usage": {
+                    "input_tokens": 5,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 3,
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Done."}],
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(
+        _make_settings(
+            api_key="",
+            auth=OAuthSessionAuth(
+                provider_id="openai-chatgpt",
+                backend="openai_chatgpt",
+                access_token="access-token",
+                refresh_token="refresh-token",
+                account_id="acct_123",
+                email="user@example.com",
+                plan_type="chatgpt_plus",
+            ),
+            responses_url=OPENAI_CHATGPT_RESPONSES_URL,
+        )
+    )
+    display = _DisplayStub()
+    session_usage = TokenUsage(model=DEFAULT_MODEL)
+    turn_usage = TokenUsage(model=DEFAULT_MODEL)
+
+    response = provider.request_turn(
+        user_message="Hello",
+        display=display,
+        session_usage=session_usage,
+        turn_usage=turn_usage,
+    )
+
+    assert response.text == "Done."
+    assert request_details["url"] == OPENAI_CHATGPT_RESPONSES_URL
+    assert request_details["authorization"] == "Bearer access-token"
+    assert request_details["headers"]["Chatgpt-account-id"] == "acct_123"
 
 
 def test_openai_execute_tool_calls_returns_function_call_outputs(
