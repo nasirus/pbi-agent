@@ -22,6 +22,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -32,6 +37,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install uv
           uv sync --group dev
+          bun install --frozen-lockfile
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Run web tests
+        run: bun run test:web
