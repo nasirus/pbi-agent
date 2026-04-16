@@ -869,7 +869,7 @@ def test_openai_execute_tool_calls_returns_function_call_outputs(
     assert display_spy.tool_group_end_count == 1
 
 
-def test_openai_execute_tool_calls_replays_function_calls_for_chatgpt_backend(
+def test_openai_execute_tool_calls_returns_only_outputs_for_chatgpt_backend(
     monkeypatch,
     display_spy,
 ) -> None:
@@ -934,25 +934,9 @@ def test_openai_execute_tool_calls_replays_function_calls_for_chatgpt_backend(
     assert had_errors is False
     assert tool_result_items == [
         {
-            "type": "function_call",
-            "id": "fc_1",
-            "call_id": "call_1",
-            "name": "shell",
-            "arguments": '{"command":"pwd"}',
-            "status": "completed",
-        },
-        {
             "type": "function_call_output",
             "call_id": "call_1",
             "output": '{"ok": true, "result": "/workspace"}',
-        },
-        {
-            "type": "function_call",
-            "id": "fc_2",
-            "call_id": "call_2",
-            "name": "init_report",
-            "arguments": '{"dest":"."}',
-            "status": "completed",
         },
         {
             "type": "function_call_output",
@@ -1321,10 +1305,9 @@ def test_openai_request_turn_retries_with_restored_transcript_when_previous_resp
     ]
 
 
-def test_openai_chatgpt_tool_follow_up_retries_without_previous_response_id(
+def test_openai_chatgpt_http_replays_explicit_transcript_with_reasoning(
     monkeypatch,
     display_spy,
-    make_http_error,
 ) -> None:
     requests: list[dict[str, object]] = []
     responses = iter(
@@ -1334,14 +1317,9 @@ def test_openai_chatgpt_tool_follow_up_retries_without_previous_response_id(
 data: {"type":"response.created","response":{"id":"resp_1"}}
 
 event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":5,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0}},"output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"list_files","status":"completed","arguments":"{\\"path\\":\\".\\"}"}]}}
+data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":5,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1}},"output":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Need to inspect files"}],"content":[{"type":"reasoning_text","text":"Checking the workspace before answering."}]},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"list_files","status":"completed","arguments":"{\\"path\\":\\".\\"}"}]}}
 
 """
-            ),
-            make_http_error(
-                url=OPENAI_CHATGPT_RESPONSES_URL,
-                code=400,
-                body='{"error":{"type":"invalid_request_error","message":"HTTP 400"},"status":400,"type":"error"}',
             ),
             _FakeHTTPResponse(
                 """event: response.created
@@ -1397,14 +1375,6 @@ data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-5","us
     second = provider.request_turn(
         tool_result_items=[
             {
-                "type": "function_call",
-                "id": "fc_1",
-                "call_id": "call_1",
-                "name": "list_files",
-                "status": "completed",
-                "arguments": '{"path":"."}',
-            },
-            {
                 "type": "function_call_output",
                 "call_id": "call_1",
                 "output": '{"ok": true, "result": []}',
@@ -1417,13 +1387,22 @@ data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-5","us
     )
 
     assert second.text == "Done."
-    assert requests[1]["previous_response_id"] == "resp_1"
-    assert "previous_response_id" not in requests[2]
-    assert requests[2]["input"] == [
+    assert "previous_response_id" not in requests[0]
+    assert "previous_response_id" not in requests[1]
+    assert requests[1]["input"] == [
         {"role": "user", "content": "Find instructions"},
         {
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "Need to inspect files"}],
+            "content": [
+                {
+                    "type": "reasoning_text",
+                    "text": "Checking the workspace before answering.",
+                }
+            ],
+        },
+        {
             "type": "function_call",
-            "id": "fc_1",
             "call_id": "call_1",
             "name": "list_files",
             "status": "completed",

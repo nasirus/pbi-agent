@@ -120,6 +120,7 @@ class OpenAIProvider(Provider):
             for message in messages
             if message.role in {"user", "assistant"} and message.content
         ]
+        self._chatgpt_backend.restore_conversation(self._restored_input_items)
 
     def request_turn(
         self,
@@ -153,8 +154,7 @@ class OpenAIProvider(Provider):
             tracer=tracer,
         )
         self._previous_response_id = result.response_id
-        if tool_result_items is not None:
-            self._chatgpt_backend.record_tool_result_request(input_items)
+        self._chatgpt_backend.record_exchange(input_items, result)
         if not result.has_tool_calls:
             # Only completed assistant responses are safe to branch from.
             self._branch_response_id = result.response_id
@@ -278,7 +278,6 @@ class OpenAIProvider(Provider):
         last_error: Exception | None = None
         last_error_message: str | None = None
         retried_missing_previous_response = False
-        retried_chatgpt_tool_follow_up_without_previous_response = False
         retried_unauthorized_refresh = False
 
         for attempt in range(rate_limit_max_retries + 1):
@@ -445,25 +444,6 @@ class OpenAIProvider(Provider):
                     request_data = json.dumps(request_body).encode("utf-8")
                     retried_missing_previous_response = True
                     continue
-                if (
-                    not retried_chatgpt_tool_follow_up_without_previous_response
-                    and self._chatgpt_backend.should_retry_without_previous_response_id(
-                        input_items=input_items,
-                        include_previous_response_id=include_previous_response_id,
-                        previous_response_id=self._previous_response_id,
-                        error_payload=error_payload,
-                    )
-                ):
-                    include_previous_response_id = False
-                    request_body = self._build_request_body(
-                        input_items=input_items,
-                        instructions=instructions,
-                        session_id=session_id,
-                        include_previous_response_id=False,
-                    )
-                    request_data = json.dumps(request_body).encode("utf-8")
-                    retried_chatgpt_tool_follow_up_without_previous_response = True
-                    continue
                 display.wait_stop()
                 raise RuntimeError(
                     _format_error_message("OpenAI Responses API error", error_payload)
@@ -509,13 +489,16 @@ class OpenAIProvider(Provider):
         request_options = self._responses_request_options()
         input_payload = self._chatgpt_backend.build_input_payload(
             input_items=input_items,
-            include_previous_response_id=include_previous_response_id,
         )
         body: dict[str, Any] = {
             "model": self._settings.model,
             "input": (
                 [*self._restored_input_items, *input_payload]
-                if self._restored_input_items and not self._previous_response_id
+                if (
+                    self._restored_input_items
+                    and not self._previous_response_id
+                    and not self._chatgpt_backend.enabled
+                )
                 else input_payload
             ),
             "tools": self._tools,
@@ -546,7 +529,11 @@ class OpenAIProvider(Provider):
             ]
         if instructions:
             body["instructions"] = instructions
-        if include_previous_response_id and self._previous_response_id:
+        if (
+            include_previous_response_id
+            and self._previous_response_id
+            and not self._chatgpt_backend.enabled
+        ):
             body["previous_response_id"] = self._previous_response_id
         if self._settings.service_tier:
             body["service_tier"] = self._settings.service_tier
@@ -714,6 +701,7 @@ class OpenAIProvider(Provider):
                 "reasoning": response_json.get("reasoning"),
                 "display_items": display_items,
                 "function_call_items": function_call_items,
+                "output_items": output_items,
             },
             web_search_sources=web_search_sources,
             had_web_search_call=had_web_search_call,

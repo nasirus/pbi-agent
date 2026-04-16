@@ -8,7 +8,7 @@ from typing import Any
 from pbi_agent import __version__
 from pbi_agent.auth.providers.openai_chatgpt import OPENAI_CHATGPT_RESPONSES_URL
 from pbi_agent.agent.tool_runtime import to_function_call_output_items
-from pbi_agent.models.messages import CompletedResponse, ToolCall
+from pbi_agent.models.messages import CompletedResponse
 from pbi_agent.tools.types import ToolResult
 
 CHATGPT_TURN_STATE_HEADER = "x-codex-turn-state"
@@ -37,7 +37,7 @@ class ChatGPTCodexBackend:
     def __init__(self, *, responses_url: str) -> None:
         self._enabled = responses_url == OPENAI_CHATGPT_RESPONSES_URL
         self._turn_state: str | None = None
-        self._turn_replay_items: list[dict[str, Any]] = []
+        self._conversation_items: list[dict[str, Any]] = []
 
     @property
     def enabled(self) -> bool:
@@ -45,24 +45,35 @@ class ChatGPTCodexBackend:
 
     def reset(self) -> None:
         self._turn_state = None
-        self._turn_replay_items.clear()
+        self._conversation_items.clear()
+
+    def restore_conversation(self, items: list[dict[str, Any]]) -> None:
+        if not self._enabled:
+            return
+        self._conversation_items = [_clone_item(item) for item in items]
 
     def start_turn(self, input_items: list[dict[str, Any]]) -> None:
         if not self._enabled:
             return
+        del input_items
         self._turn_state = None
-        self._turn_replay_items = [dict(item) for item in input_items]
-
-    def record_tool_result_request(self, input_items: list[dict[str, Any]]) -> None:
-        if not self._enabled:
-            return
-        self._turn_replay_items.extend(dict(item) for item in input_items)
 
     def finish_turn(self) -> None:
         if not self._enabled:
             return
         self._turn_state = None
-        self._turn_replay_items.clear()
+
+    def record_exchange(
+        self,
+        input_items: list[dict[str, Any]],
+        response: CompletedResponse,
+    ) -> None:
+        if not self._enabled:
+            return
+        self._conversation_items.extend(_clone_item(item) for item in input_items)
+        self._conversation_items.extend(
+            _sanitize_output_item(item) for item in output_items(response.provider_data)
+        )
 
     def serialize_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not self._enabled:
@@ -108,107 +119,49 @@ class ChatGPTCodexBackend:
         self,
         *,
         input_items: list[dict[str, Any]],
-        include_previous_response_id: bool,
     ) -> list[dict[str, Any]]:
-        if (
-            not self._enabled
-            or include_previous_response_id
-            or not has_function_call_output_items(input_items)
-            or not self._turn_replay_items
-        ):
+        if not self._enabled:
             return list(input_items)
         return [
-            *(dict(item) for item in self._turn_replay_items),
+            *(_clone_item(item) for item in self._conversation_items),
             *list(input_items),
         ]
-
-    def should_retry_without_previous_response_id(
-        self,
-        *,
-        input_items: list[dict[str, Any]],
-        include_previous_response_id: bool,
-        previous_response_id: str | None,
-        error_payload: dict[str, Any] | None,
-    ) -> bool:
-        return (
-            self._enabled
-            and include_previous_response_id
-            and previous_response_id is not None
-            and has_function_call_output_items(input_items)
-            and is_invalid_request_error(error_payload)
-        )
 
     def tool_result_items_for_response(
         self,
         response: CompletedResponse,
         results: list[ToolResult],
     ) -> list[dict[str, Any]]:
-        output_items = to_function_call_output_items(results)
-        if not self._enabled:
-            return output_items
-
-        calls_by_id = {call.call_id: call for call in response.function_calls}
-        raw_items_by_id = function_call_items_by_call_id(response.provider_data)
-        items: list[dict[str, Any]] = []
-        for output_item in output_items:
-            call_id = output_item.get("call_id")
-            if not isinstance(call_id, str):
-                items.append(output_item)
-                continue
-            raw_item = raw_items_by_id.get(call_id)
-            if raw_item is not None:
-                items.append(dict(raw_item))
-            else:
-                call = calls_by_id.get(call_id)
-                if call is not None:
-                    items.append(function_call_input_item(call))
-            items.append(output_item)
-        return items
+        del response
+        return to_function_call_output_items(results)
 
 
-def function_call_input_item(call: ToolCall) -> dict[str, Any]:
-    arguments = call.arguments
-    if isinstance(arguments, str):
-        encoded_arguments = arguments
-    elif arguments is None:
-        encoded_arguments = "{}"
-    else:
-        encoded_arguments = json.dumps(arguments)
-    return {
-        "type": "function_call",
-        "call_id": call.call_id,
-        "name": call.name,
-        "arguments": encoded_arguments,
-    }
-
-
-def function_call_items_by_call_id(provider_data: Any) -> dict[str, dict[str, Any]]:
+def output_items(provider_data: Any) -> list[dict[str, Any]]:
     if not isinstance(provider_data, dict):
-        return {}
-    raw_items = provider_data.get("function_call_items")
-    if not isinstance(raw_items, dict):
-        return {}
-    items: dict[str, dict[str, Any]] = {}
-    for call_id, item in raw_items.items():
-        if isinstance(call_id, str) and isinstance(item, dict):
-            items[call_id] = item
-    return items
+        return []
+    raw_items = provider_data.get("output_items")
+    if not isinstance(raw_items, list):
+        return []
+    return [item for item in raw_items if isinstance(item, dict)]
 
 
-def has_function_call_output_items(input_items: list[dict[str, Any]]) -> bool:
-    return any(
-        isinstance(item, dict) and item.get("type") == "function_call_output"
-        for item in input_items
-    )
+def _clone_item(item: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(item))
 
 
-def is_invalid_request_error(error_payload: dict[str, Any] | None) -> bool:
-    if not isinstance(error_payload, dict):
-        return False
-    if error_payload.get("type") == "invalid_request_error":
-        return True
-    error = error_payload.get("error")
-    return isinstance(error, dict) and error.get("type") == "invalid_request_error"
+def _sanitize_output_item(item: dict[str, Any]) -> dict[str, Any]:
+    cloned = _clone_item(item)
+    return _strip_backend_ids(cloned)
+
+
+def _strip_backend_ids(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_backend_ids(item) for key, item in value.items() if key != "id"
+        }
+    if isinstance(value, list):
+        return [_strip_backend_ids(item) for item in value]
+    return value
 
 
 def _serialize_chatgpt_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
