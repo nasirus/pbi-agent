@@ -1,7 +1,5 @@
 # TODO
 
-- [x] Add `useTaskEvents` coverage for invalidation and reconnect handling
-- [x] Add `BoardPage` flow tests for empty/error/run-stage handling
-- [x] Add `SessionPage` flow tests for submit, warnings, upload, and not-found states
-- [x] Add `SettingsPage` tests for loading, empty, active-profile, and stale-config handling
-- [x] Run frontend validation commands and append `MEMORY.md`
+- [x] Update GitHub Actions test workflow to install Bun and run `bun run test:web`
+- [x] Validate the workflow change locally against the web test suite
+- [x] Append `MEMORY.md` for the CI update
