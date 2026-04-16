@@ -11,6 +11,13 @@ SUPPORTED_OPENAI_AUTH_MODES = (AUTH_MODE_API_KEY, AUTH_MODE_CHATGPT_ACCOUNT)
 RUNTIME_AUTH_KIND_API_KEY = "api_key"
 RUNTIME_AUTH_KIND_OAUTH_SESSION = "oauth_session"
 
+AUTH_FLOW_METHOD_BROWSER = "browser"
+AUTH_FLOW_METHOD_DEVICE = "device"
+
+AUTH_FLOW_STATUS_PENDING = "pending"
+AUTH_FLOW_STATUS_COMPLETED = "completed"
+AUTH_FLOW_STATUS_FAILED = "failed"
+
 AUTH_SESSION_STATUS_MISSING = "missing"
 AUTH_SESSION_STATUS_CONNECTED = "connected"
 AUTH_SESSION_STATUS_EXPIRED = "expired"
@@ -96,8 +103,42 @@ class RequestAuthConfig:
     headers: dict[str, str]
 
 
+@dataclass(slots=True)
+class BrowserAuthChallenge:
+    authorization_url: str
+    redirect_uri: str
+    state: str
+    code_verifier: str
+
+
+@dataclass(slots=True)
+class DeviceAuthChallenge:
+    verification_url: str
+    user_code: str
+    device_auth_id: str
+    interval_seconds: int
+
+
+@dataclass(slots=True)
+class AuthFlowPollResult:
+    status: str
+    session: StoredAuthSession | None = None
+    retry_after_seconds: int | None = None
+
+
 AuthSessionStatus = (
     AUTH_SESSION_STATUS_MISSING,
     AUTH_SESSION_STATUS_CONNECTED,
     AUTH_SESSION_STATUS_EXPIRED,
+)
+
+SupportedAuthFlowMethods = (
+    AUTH_FLOW_METHOD_BROWSER,
+    AUTH_FLOW_METHOD_DEVICE,
+)
+
+AuthFlowStatuses = (
+    AUTH_FLOW_STATUS_PENDING,
+    AUTH_FLOW_STATUS_COMPLETED,
+    AUTH_FLOW_STATUS_FAILED,
 )

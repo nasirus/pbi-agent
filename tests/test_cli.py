@@ -13,11 +13,20 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pbi_agent import cli
+from pbi_agent.auth.store import build_auth_session
 from pbi_agent.config import load_internal_config
 from pbi_agent.session_store import SessionStore
 
 
 class DefaultWebCommandTests(unittest.TestCase):
+    _OAUTH_URL = (
+        "https://auth.openai.com/oauth/authorize?"
+        "response_type=code&client_id=app_EMoamEEZ73f0CkXaXp7hrann"
+        "&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"
+        "&scope=openid+profile+email+offline_access"
+        "&state=abc123&originator=opencode"
+    )
+
     def _settings(self, *, verbose: bool = False) -> Mock:
         return Mock(
             verbose=verbose,
@@ -319,11 +328,17 @@ class DefaultWebCommandTests(unittest.TestCase):
         with patch(
             "pbi_agent.cli.subprocess.Popen", return_value=process
         ) as mock_popen:
-            opened = cli._open_url_in_windows_browser("http://127.0.0.1:9001")
+            opened = cli._open_url_in_windows_browser(self._OAUTH_URL)
 
         self.assertTrue(opened)
         mock_popen.assert_called_once_with(
-            ["explorer.exe", "http://127.0.0.1:9001"],
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"Start-Process -FilePath '{self._OAUTH_URL}'",
+            ],
             stdout=cli.subprocess.DEVNULL,
             stderr=cli.subprocess.DEVNULL,
         )
@@ -336,13 +351,17 @@ class DefaultWebCommandTests(unittest.TestCase):
             "pbi_agent.cli.subprocess.Popen",
             side_effect=[OSError("missing"), process],
         ) as mock_popen:
-            opened = cli._open_url_in_windows_browser("http://127.0.0.1:9001")
+            opened = cli._open_url_in_windows_browser(self._OAUTH_URL)
 
         self.assertTrue(opened)
         self.assertEqual(mock_popen.call_count, 2)
         self.assertEqual(
             mock_popen.call_args_list[1].args[0],
-            ["cmd.exe", "/c", "start", "", "http://127.0.0.1:9001"],
+            [
+                "cmd.exe",
+                "/c",
+                f'start "" "{self._OAUTH_URL}"',
+            ],
         )
 
     def test_open_url_in_windows_browser_returns_false_when_all_commands_fail(
@@ -352,7 +371,7 @@ class DefaultWebCommandTests(unittest.TestCase):
             "pbi_agent.cli.subprocess.Popen",
             side_effect=[OSError("missing"), OSError("missing")],
         ):
-            opened = cli._open_url_in_windows_browser("http://127.0.0.1:9001")
+            opened = cli._open_url_in_windows_browser(self._OAUTH_URL)
 
         self.assertFalse(opened)
 
@@ -1083,6 +1102,114 @@ class DefaultWebCommandTests(unittest.TestCase):
 
         self.assertEqual(rc, 1)
         self.assertIn("not found", stderr.getvalue())
+
+    def test_main_config_providers_auth_login_runs_browser_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+
+            with patch.dict(
+                os.environ,
+                {"PBI_AGENT_INTERNAL_CONFIG_PATH": str(config_path)},
+                clear=False,
+            ):
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "providers",
+                            "create",
+                            "--name",
+                            "OpenAI ChatGPT",
+                            "--kind",
+                            "openai",
+                            "--auth-mode",
+                            "chatgpt_account",
+                        ]
+                    ),
+                    0,
+                )
+                session = build_auth_session(
+                    provider_id="openai-chatgpt",
+                    backend="openai_chatgpt",
+                    access_token="access-token",
+                    refresh_token="refresh-token",
+                    account_id="acct_browser",
+                    email="browser@example.com",
+                )
+                with patch(
+                    "pbi_agent.cli.run_provider_browser_auth_flow",
+                    return_value=Mock(session=session),
+                ) as mock_login:
+                    rc = cli.main(
+                        [
+                            "config",
+                            "providers",
+                            "auth-login",
+                            "openai-chatgpt",
+                            "--method",
+                            "browser",
+                        ]
+                    )
+
+        self.assertEqual(rc, 0)
+        mock_login.assert_called_once()
+        self.assertEqual(mock_login.call_args.kwargs["provider_kind"], "openai")
+        self.assertEqual(mock_login.call_args.kwargs["provider_id"], "openai-chatgpt")
+        self.assertEqual(mock_login.call_args.kwargs["auth_mode"], "chatgpt_account")
+
+    def test_main_config_providers_auth_login_runs_device_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+
+            with patch.dict(
+                os.environ,
+                {"PBI_AGENT_INTERNAL_CONFIG_PATH": str(config_path)},
+                clear=False,
+            ):
+                self.assertEqual(
+                    cli.main(
+                        [
+                            "config",
+                            "providers",
+                            "create",
+                            "--name",
+                            "OpenAI ChatGPT",
+                            "--kind",
+                            "openai",
+                            "--auth-mode",
+                            "chatgpt_account",
+                        ]
+                    ),
+                    0,
+                )
+                session = build_auth_session(
+                    provider_id="openai-chatgpt",
+                    backend="openai_chatgpt",
+                    access_token="access-token",
+                    refresh_token="refresh-token",
+                    account_id="acct_device",
+                    email="device@example.com",
+                )
+                with patch(
+                    "pbi_agent.cli.run_provider_device_auth_flow",
+                    return_value=Mock(session=session),
+                ) as mock_login:
+                    rc = cli.main(
+                        [
+                            "config",
+                            "providers",
+                            "auth-login",
+                            "openai-chatgpt",
+                            "--method",
+                            "device",
+                        ]
+                    )
+
+        self.assertEqual(rc, 0)
+        mock_login.assert_called_once()
+        self.assertEqual(mock_login.call_args.kwargs["provider_kind"], "openai")
+        self.assertEqual(mock_login.call_args.kwargs["provider_id"], "openai-chatgpt")
+        self.assertEqual(mock_login.call_args.kwargs["auth_mode"], "chatgpt_account")
 
 
 if __name__ == "__main__":

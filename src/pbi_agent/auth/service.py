@@ -5,7 +5,12 @@ from typing import Any
 from pbi_agent.auth.models import (
     AUTH_MODE_API_KEY,
     AUTH_MODE_CHATGPT_ACCOUNT,
+    AUTH_FLOW_METHOD_BROWSER,
+    AUTH_FLOW_METHOD_DEVICE,
+    AuthFlowPollResult,
     ApiKeyAuth,
+    BrowserAuthChallenge,
+    DeviceAuthChallenge,
     OAuthSessionAuth,
     ProviderAuthStatus,
     RequestAuthConfig,
@@ -33,6 +38,13 @@ def provider_auth_modes(provider_kind: str) -> tuple[str, ...]:
     if provider_kind == "openai":
         return (AUTH_MODE_API_KEY, AUTH_MODE_CHATGPT_ACCOUNT)
     return (AUTH_MODE_API_KEY,)
+
+
+def provider_auth_flow_methods(provider_kind: str, auth_mode: str) -> tuple[str, ...]:
+    if auth_mode == AUTH_MODE_API_KEY:
+        return ()
+    backend = _get_backend_for_provider(provider_kind, auth_mode)
+    return backend.supported_auth_flow_methods()
 
 
 def get_provider_auth_status(
@@ -88,6 +100,84 @@ def refresh_provider_auth_session(
 
 def delete_provider_auth_session(provider_id: str) -> bool:
     return delete_auth_session(provider_id)
+
+
+def start_provider_browser_auth(
+    *,
+    provider_kind: str,
+    provider_id: str,
+    auth_mode: str,
+    redirect_uri: str,
+) -> BrowserAuthChallenge:
+    backend = _require_flow_backend(
+        provider_kind=provider_kind,
+        auth_mode=auth_mode,
+        method=AUTH_FLOW_METHOD_BROWSER,
+    )
+    del provider_id
+    return backend.start_browser_auth(redirect_uri=redirect_uri)
+
+
+def complete_provider_browser_auth(
+    *,
+    provider_kind: str,
+    provider_id: str,
+    auth_mode: str,
+    browser_auth: BrowserAuthChallenge,
+    code: str,
+) -> StoredAuthSession:
+    backend = _require_flow_backend(
+        provider_kind=provider_kind,
+        auth_mode=auth_mode,
+        method=AUTH_FLOW_METHOD_BROWSER,
+    )
+    previous = load_auth_session(provider_id)
+    session = backend.exchange_browser_code(
+        provider_id=provider_id,
+        browser_auth=browser_auth,
+        code=code,
+        previous=previous,
+    )
+    save_auth_session(session)
+    return session
+
+
+def start_provider_device_auth(
+    *,
+    provider_kind: str,
+    provider_id: str,
+    auth_mode: str,
+) -> DeviceAuthChallenge:
+    backend = _require_flow_backend(
+        provider_kind=provider_kind,
+        auth_mode=auth_mode,
+        method=AUTH_FLOW_METHOD_DEVICE,
+    )
+    del provider_id
+    return backend.start_device_auth()
+
+
+def poll_provider_device_auth(
+    *,
+    provider_kind: str,
+    provider_id: str,
+    auth_mode: str,
+    device_auth: DeviceAuthChallenge,
+) -> AuthFlowPollResult:
+    backend = _require_flow_backend(
+        provider_kind=provider_kind,
+        auth_mode=auth_mode,
+        method=AUTH_FLOW_METHOD_DEVICE,
+    )
+    previous = load_auth_session(provider_id)
+    result = backend.poll_device_auth(
+        provider_id=provider_id,
+        device_auth=device_auth,
+        previous=previous,
+    )
+    if result.session is not None:
+        save_auth_session(result.session)
+    return result
 
 
 def resolve_runtime_auth(
@@ -182,3 +272,17 @@ def _get_backend(backend_id: str) -> AuthProviderBackend:
     if backend_id == OPENAI_CHATGPT_BACKEND_ID:
         return OpenAIChatGPTAuthBackend()
     raise ValueError(f"Unknown auth backend '{backend_id}'.")
+
+
+def _require_flow_backend(
+    *,
+    provider_kind: str,
+    auth_mode: str,
+    method: str,
+) -> AuthProviderBackend:
+    backend = _get_backend_for_provider(provider_kind, auth_mode)
+    if method not in backend.supported_auth_flow_methods():
+        raise ValueError(
+            f"Provider '{provider_kind}' does not support built-in '{method}' auth."
+        )
+    return backend

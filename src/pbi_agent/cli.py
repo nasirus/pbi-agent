@@ -15,7 +15,16 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pbi_agent.auth.models import AUTH_MODE_API_KEY, AUTH_MODE_CHATGPT_ACCOUNT
+from pbi_agent.auth.cli_flow import (
+    run_provider_browser_auth_flow,
+    run_provider_device_auth_flow,
+)
+from pbi_agent.auth.models import (
+    AUTH_FLOW_METHOD_BROWSER,
+    AUTH_FLOW_METHOD_DEVICE,
+    AUTH_MODE_API_KEY,
+    AUTH_MODE_CHATGPT_ACCOUNT,
+)
 from pbi_agent.auth.service import (
     delete_provider_auth_session,
     get_provider_auth_status,
@@ -418,6 +427,21 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=CleanHelpFormatter,
     )
     providers_auth_status.add_argument("provider_id", help="Provider ID.")
+
+    providers_auth_login = providers_actions.add_parser(
+        "auth-login",
+        prog="pbi-agent config providers auth-login",
+        description="Run a built-in browser or device login flow for a provider.",
+        help="Run provider auth login flow.",
+        formatter_class=CleanHelpFormatter,
+    )
+    providers_auth_login.add_argument("provider_id", help="Provider ID.")
+    providers_auth_login.add_argument(
+        "--method",
+        choices=[AUTH_FLOW_METHOD_BROWSER, AUTH_FLOW_METHOD_DEVICE],
+        default=AUTH_FLOW_METHOD_BROWSER,
+        help="Built-in auth flow method to run.",
+    )
 
     providers_auth_import = providers_actions.add_parser(
         "auth-import",
@@ -824,6 +848,38 @@ def _handle_config_providers_command(args: argparse.Namespace) -> int:
         _print_provider_auth_status(provider)
         return 0
 
+    if args.config_action == "auth-login":
+        provider = _require_provider_config(args.provider_id)
+        if args.method == AUTH_FLOW_METHOD_BROWSER:
+            result = run_provider_browser_auth_flow(
+                provider_kind=provider.kind,
+                provider_id=provider.id,
+                auth_mode=provider.auth_mode,
+                open_browser=_open_browser_url,
+                on_ready=_print_browser_auth_instructions,
+            )
+            print(
+                f"Connected auth session for '{provider.id}'"
+                + (f" ({result.session.email})" if result.session.email else "")
+                + "."
+            )
+            _print_provider_auth_status(provider)
+            return 0
+
+        result = run_provider_device_auth_flow(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+            on_start=_print_device_auth_instructions,
+        )
+        print(
+            f"Connected auth session for '{provider.id}'"
+            + (f" ({result.session.email})" if result.session.email else "")
+            + "."
+        )
+        _print_provider_auth_status(provider)
+        return 0
+
     if args.config_action == "auth-import":
         provider = _require_provider_config(args.provider_id)
         session = import_provider_auth_session(
@@ -1010,6 +1066,19 @@ def _print_provider_auth_status(provider: ProviderConfig) -> None:
         print(f"Plan: {status.plan_type}")
     if status.expires_at is not None:
         print(f"Expires at: {status.expires_at}")
+
+
+def _print_browser_auth_instructions(browser_auth) -> None:
+    print("Open this URL to complete provider authorization:")
+    print(browser_auth.authorization_url)
+    print(f"Waiting for callback on {browser_auth.redirect_uri} ...")
+
+
+def _print_device_auth_instructions(device_auth) -> None:
+    print("Open this URL and enter the one-time code to authorize the provider:")
+    print(device_auth.verification_url)
+    print(f"Code: {device_auth.user_code}")
+    print("Waiting for device authorization ...")
 
 
 def _handle_skills_flag(args: argparse.Namespace) -> int:
@@ -1386,8 +1455,14 @@ def _is_wsl_environment() -> bool:
 
 def _open_url_in_windows_browser(browser_url: str) -> bool:
     commands = (
-        ["explorer.exe", browser_url],
-        ["cmd.exe", "/c", "start", "", browser_url],
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            f"Start-Process -FilePath {_powershell_single_quote(browser_url)}",
+        ],
+        ["cmd.exe", "/c", f'start "" "{browser_url}"'],
     )
 
     for command in commands:
@@ -1406,6 +1481,11 @@ def _open_url_in_windows_browser(browser_url: str) -> bool:
             return True
 
     return False
+
+
+def _powershell_single_quote(value: str) -> str:
+    escaped = value.replace("'", "''")
+    return f"'{escaped}'"
 
 
 def _create_web_server(

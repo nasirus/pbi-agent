@@ -12,12 +12,26 @@ from typing import Any
 
 from pbi_agent.agent.error_formatting import format_user_facing_error
 from pbi_agent.agent.session import run_session_loop
-from pbi_agent.auth.models import AUTH_MODE_API_KEY
+from pbi_agent.auth.models import (
+    AUTH_FLOW_METHOD_BROWSER,
+    AUTH_FLOW_METHOD_DEVICE,
+    AUTH_FLOW_STATUS_COMPLETED,
+    AUTH_FLOW_STATUS_FAILED,
+    AUTH_FLOW_STATUS_PENDING,
+    AUTH_MODE_API_KEY,
+    BrowserAuthChallenge,
+    DeviceAuthChallenge,
+    StoredAuthSession,
+)
 from pbi_agent.auth.service import (
+    complete_provider_browser_auth,
     delete_provider_auth_session,
     get_provider_auth_status,
     import_provider_auth_session,
+    poll_provider_device_auth,
     refresh_provider_auth_session,
+    start_provider_browser_auth,
+    start_provider_device_auth,
 )
 from pbi_agent.config import (
     ConfigError,
@@ -385,6 +399,26 @@ class LiveSessionSnapshot:
             self.sub_agents = {}
 
 
+@dataclass(slots=True)
+class PendingProviderAuthFlow:
+    flow_id: str
+    provider_id: str
+    backend: str
+    method: str
+    status: str
+    created_at: str
+    updated_at: str
+    browser_auth: BrowserAuthChallenge | None = None
+    device_auth: DeviceAuthChallenge | None = None
+    authorization_url: str | None = None
+    callback_url: str | None = None
+    verification_url: str | None = None
+    user_code: str | None = None
+    interval_seconds: int | None = None
+    error_message: str | None = None
+    session: StoredAuthSession | None = None
+
+
 class WebSessionManager:
     def __init__(
         self,
@@ -403,6 +437,7 @@ class WebSessionManager:
         self._directory_key = str(self._workspace_root).lower()
         self._app_stream = EventStream()
         self._live_sessions: dict[str, LiveSessionState] = {}
+        self._provider_auth_flows: dict[str, PendingProviderAuthFlow] = {}
         self._running_task_ids: set[str] = set()
         self._lock = threading.Lock()
         with SessionStore() as store:
@@ -1274,14 +1309,7 @@ class WebSessionManager:
         return {
             "provider": self._provider_view(provider),
             "auth_status": self._auth_status_view(status),
-            "session": {
-                "provider_id": session.provider_id,
-                "backend": session.backend,
-                "expires_at": session.expires_at,
-                "account_id": session.account_id,
-                "email": session.email,
-                "plan_type": session.plan_type,
-            },
+            "session": self._auth_session_view(session),
         }
 
     def refresh_provider_auth(self, provider_id: str) -> dict[str, Any]:
@@ -1300,14 +1328,7 @@ class WebSessionManager:
         return {
             "provider": self._provider_view(provider),
             "auth_status": self._auth_status_view(status),
-            "session": {
-                "provider_id": session.provider_id,
-                "backend": session.backend,
-                "expires_at": session.expires_at,
-                "account_id": session.account_id,
-                "email": session.email,
-                "plan_type": session.plan_type,
-            },
+            "session": self._auth_session_view(session),
         }
 
     def logout_provider_auth(self, provider_id: str) -> dict[str, Any]:
@@ -1323,6 +1344,181 @@ class WebSessionManager:
             "provider": self._provider_view(provider),
             "auth_status": self._auth_status_view(status),
             "removed": removed,
+        }
+
+    def start_provider_auth_flow(
+        self,
+        provider_id: str,
+        *,
+        flow_id: str,
+        method: str,
+        redirect_uri: str | None = None,
+    ) -> dict[str, Any]:
+        config = load_internal_config()
+        provider = self._require_provider(config, provider_id)
+        status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        created_at = _now_iso()
+        if method == AUTH_FLOW_METHOD_BROWSER:
+            if not redirect_uri:
+                raise ValueError("Browser auth flow requires a redirect URI.")
+            browser_auth = start_provider_browser_auth(
+                provider_kind=provider.kind,
+                provider_id=provider.id,
+                auth_mode=provider.auth_mode,
+                redirect_uri=redirect_uri,
+            )
+            flow = PendingProviderAuthFlow(
+                flow_id=flow_id,
+                provider_id=provider.id,
+                backend=status.backend or "",
+                method=method,
+                status=AUTH_FLOW_STATUS_PENDING,
+                created_at=created_at,
+                updated_at=created_at,
+                browser_auth=browser_auth,
+                authorization_url=browser_auth.authorization_url,
+                callback_url=browser_auth.redirect_uri,
+            )
+        elif method == AUTH_FLOW_METHOD_DEVICE:
+            device_auth = start_provider_device_auth(
+                provider_kind=provider.kind,
+                provider_id=provider.id,
+                auth_mode=provider.auth_mode,
+            )
+            flow = PendingProviderAuthFlow(
+                flow_id=flow_id,
+                provider_id=provider.id,
+                backend=status.backend or "",
+                method=method,
+                status=AUTH_FLOW_STATUS_PENDING,
+                created_at=created_at,
+                updated_at=created_at,
+                device_auth=device_auth,
+                verification_url=device_auth.verification_url,
+                user_code=device_auth.user_code,
+                interval_seconds=device_auth.interval_seconds,
+            )
+        else:
+            raise ValueError(f"Unknown auth flow method '{method}'.")
+
+        with self._lock:
+            self._provider_auth_flows[flow.flow_id] = flow
+        return {
+            "provider": self._provider_view(provider),
+            "auth_status": self._auth_status_view(status),
+            "flow": self._provider_auth_flow_view(flow),
+        }
+
+    def get_provider_auth_flow(self, provider_id: str, flow_id: str) -> dict[str, Any]:
+        config = load_internal_config()
+        provider = self._require_provider(config, provider_id)
+        flow = self._require_provider_auth_flow(provider.id, flow_id)
+        status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        return {
+            "provider": self._provider_view(provider),
+            "auth_status": self._auth_status_view(status),
+            "flow": self._provider_auth_flow_view(flow),
+            "session": self._auth_session_view(flow.session),
+        }
+
+    def poll_provider_auth_flow(self, provider_id: str, flow_id: str) -> dict[str, Any]:
+        config = load_internal_config()
+        provider = self._require_provider(config, provider_id)
+        flow = self._require_provider_auth_flow(provider.id, flow_id)
+        if flow.method != AUTH_FLOW_METHOD_DEVICE:
+            raise ValueError("Only device auth flows can be polled.")
+        if flow.device_auth is None:
+            raise ValueError("Device auth flow is missing its device challenge.")
+        if flow.status == AUTH_FLOW_STATUS_PENDING:
+            try:
+                result = poll_provider_device_auth(
+                    provider_kind=provider.kind,
+                    provider_id=provider.id,
+                    auth_mode=provider.auth_mode,
+                    device_auth=flow.device_auth,
+                )
+            except Exception as exc:
+                self._mark_provider_auth_flow_failed(flow, str(exc))
+            else:
+                flow.updated_at = _now_iso()
+                if result.session is not None:
+                    flow.status = AUTH_FLOW_STATUS_COMPLETED
+                    flow.session = result.session
+                elif result.retry_after_seconds is not None:
+                    flow.interval_seconds = result.retry_after_seconds
+        status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        return {
+            "provider": self._provider_view(provider),
+            "auth_status": self._auth_status_view(status),
+            "flow": self._provider_auth_flow_view(flow),
+            "session": self._auth_session_view(flow.session),
+        }
+
+    def complete_provider_browser_auth_flow(
+        self,
+        provider_id: str,
+        flow_id: str,
+        *,
+        code: str | None,
+        state: str | None,
+        error: str | None,
+        error_description: str | None,
+    ) -> dict[str, Any]:
+        config = load_internal_config()
+        provider = self._require_provider(config, provider_id)
+        flow = self._require_provider_auth_flow(provider.id, flow_id)
+        if flow.method != AUTH_FLOW_METHOD_BROWSER:
+            raise ValueError("Only browser auth flows can accept callbacks.")
+        if flow.browser_auth is None:
+            raise ValueError("Browser auth flow is missing its authorization state.")
+        if flow.status == AUTH_FLOW_STATUS_PENDING:
+            if error:
+                self._mark_provider_auth_flow_failed(flow, error_description or error)
+            elif not code:
+                self._mark_provider_auth_flow_failed(
+                    flow, "Missing authorization code in callback."
+                )
+            elif state != flow.browser_auth.state:
+                self._mark_provider_auth_flow_failed(
+                    flow, "Invalid authorization state in callback."
+                )
+            else:
+                try:
+                    session = complete_provider_browser_auth(
+                        provider_kind=provider.kind,
+                        provider_id=provider.id,
+                        auth_mode=provider.auth_mode,
+                        browser_auth=flow.browser_auth,
+                        code=code,
+                    )
+                except Exception as exc:
+                    self._mark_provider_auth_flow_failed(flow, str(exc))
+                else:
+                    flow.status = AUTH_FLOW_STATUS_COMPLETED
+                    flow.updated_at = _now_iso()
+                    flow.session = session
+        status = get_provider_auth_status(
+            provider_kind=provider.kind,
+            provider_id=provider.id,
+            auth_mode=provider.auth_mode,
+        )
+        return {
+            "provider": self._provider_view(provider),
+            "auth_status": self._auth_status_view(status),
+            "flow": self._provider_auth_flow_view(flow),
+            "session": self._auth_session_view(flow.session),
         }
 
     def delete_provider(
@@ -1489,6 +1685,8 @@ class WebSessionManager:
             session.display.request_shutdown()
         for session in sessions:
             session.worker.join(timeout=1.5)
+        with self._lock:
+            self._provider_auth_flows.clear()
 
     def _run_session_worker(self, live_session_id: str) -> None:
         live_session = self._live_sessions[live_session_id]
@@ -2071,6 +2269,53 @@ class WebSessionManager:
             "plan_type": status.plan_type,
             "expires_at": status.expires_at,
         }
+
+    def _auth_session_view(
+        self, session: StoredAuthSession | None
+    ) -> dict[str, Any] | None:
+        if session is None:
+            return None
+        return {
+            "provider_id": session.provider_id,
+            "backend": session.backend,
+            "expires_at": session.expires_at,
+            "account_id": session.account_id,
+            "email": session.email,
+            "plan_type": session.plan_type,
+        }
+
+    def _provider_auth_flow_view(self, flow: PendingProviderAuthFlow) -> dict[str, Any]:
+        return {
+            "flow_id": flow.flow_id,
+            "provider_id": flow.provider_id,
+            "backend": flow.backend,
+            "method": flow.method,
+            "status": flow.status,
+            "authorization_url": flow.authorization_url,
+            "callback_url": flow.callback_url,
+            "verification_url": flow.verification_url,
+            "user_code": flow.user_code,
+            "interval_seconds": flow.interval_seconds,
+            "error_message": flow.error_message,
+            "created_at": flow.created_at,
+            "updated_at": flow.updated_at,
+        }
+
+    def _require_provider_auth_flow(
+        self, provider_id: str, flow_id: str
+    ) -> PendingProviderAuthFlow:
+        with self._lock:
+            flow = self._provider_auth_flows.get(flow_id)
+        if flow is None or flow.provider_id != provider_id:
+            raise ConfigError(f"Unknown auth flow ID '{flow_id}'.")
+        return flow
+
+    def _mark_provider_auth_flow_failed(
+        self, flow: PendingProviderAuthFlow, message: str
+    ) -> None:
+        flow.status = AUTH_FLOW_STATUS_FAILED
+        flow.error_message = message
+        flow.updated_at = _now_iso()
 
     def _model_profile_view(
         self,

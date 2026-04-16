@@ -7,13 +7,16 @@ history is managed server-side via ``previous_response_id``.
 from __future__ import annotations
 
 import json
+import platform
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 from pbi_agent import __version__
 from pbi_agent.auth.models import OAuthSessionAuth
+from pbi_agent.auth.providers.openai_chatgpt import OPENAI_CHATGPT_RESPONSES_URL
 from pbi_agent.auth.service import build_runtime_request_auth, refresh_runtime_auth
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_runtime import (
@@ -32,7 +35,7 @@ from pbi_agent.models.messages import (
 from pbi_agent.providers.base import Provider
 from pbi_agent.session_store import MessageRecord
 from pbi_agent.tools.catalog import ToolCatalog
-from pbi_agent.tools.types import ParentContextSnapshot, ToolContext
+from pbi_agent.tools.types import ParentContextSnapshot, ToolContext, ToolResult
 from pbi_agent.display.protocol import DisplayProtocol
 
 if TYPE_CHECKING:
@@ -40,6 +43,7 @@ if TYPE_CHECKING:
 
 _REQUEST_TIMEOUT_SECS = 3600.0
 _RATE_LIMIT_MAX_RETRIES = 10
+_CHATGPT_TURN_STATE_HEADER = "x-codex-turn-state"
 _HTTP_ERROR_TYPES = {
     429: "rate_limit_error",
     500: "server_error",
@@ -50,6 +54,95 @@ _HTTP_ERROR_MESSAGES = {
     500: "The server had an error while processing your request.",
     503: "The engine is currently overloaded, please try again later.",
 }
+
+
+@dataclass(frozen=True)
+class _ResponsesRequestOptions:
+    include_max_output_tokens: bool = True
+    store: bool = True
+    include_prompt_cache_retention: bool = True
+    include_context_management: bool = True
+    stream: bool = False
+    tool_choice: str | None = None
+    include: list[str] | None = None
+    use_session_prompt_cache_key: bool = False
+
+
+def _chatgpt_user_agent() -> str:
+    return (
+        f"opencode/{__version__} "
+        f"({platform.system().lower()} {platform.release()}; {platform.machine().lower()})"
+    )
+
+
+def _serialize_chatgpt_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    serialized: list[dict[str, Any]] = []
+    for tool in tools:
+        if tool.get("type") == "function":
+            parameters = tool.get("parameters")
+            serialized.append(
+                {
+                    **tool,
+                    "parameters": (
+                        _to_chatgpt_strict_schema(parameters)
+                        if isinstance(parameters, dict)
+                        else parameters
+                    ),
+                    "strict": True,
+                }
+            )
+            continue
+        serialized.append(dict(tool))
+    return serialized
+
+
+def _to_chatgpt_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    transformed: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "properties" and isinstance(value, dict):
+            transformed[key] = {
+                prop_name: (
+                    _to_chatgpt_strict_schema(prop_schema)
+                    if isinstance(prop_schema, dict)
+                    else prop_schema
+                )
+                for prop_name, prop_schema in value.items()
+            }
+            continue
+        if key in {"items", "additionalProperties"} and isinstance(value, dict):
+            transformed[key] = _to_chatgpt_strict_schema(value)
+            continue
+        if key in {"anyOf", "allOf", "oneOf"} and isinstance(value, list):
+            transformed[key] = [
+                _to_chatgpt_strict_schema(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+            continue
+        transformed[key] = value
+
+    properties = transformed.get("properties")
+    if not isinstance(properties, dict):
+        return transformed
+
+    original_required = transformed.get("required")
+    required = (
+        [str(item) for item in original_required if isinstance(item, str)]
+        if isinstance(original_required, list)
+        else []
+    )
+
+    for prop_name, prop_schema in list(properties.items()):
+        if prop_name in required or not isinstance(prop_schema, dict):
+            continue
+        properties[prop_name] = {
+            "anyOf": [
+                prop_schema,
+                {"type": "null"},
+            ]
+        }
+
+    transformed["required"] = list(properties.keys())
+    return transformed
 
 
 class OpenAIProvider(Provider):
@@ -71,6 +164,8 @@ class OpenAIProvider(Provider):
         self._instructions = system_prompt or get_system_prompt()
         self._previous_response_id: str | None = None
         self._branch_response_id: str | None = None
+        self._turn_state: str | None = None
+        self._chatgpt_turn_replay_items: list[dict[str, Any]] = []
         self._restored_input_items: list[dict[str, Any]] = []
 
     @property
@@ -96,15 +191,21 @@ class OpenAIProvider(Provider):
     def reset_conversation(self) -> None:
         self._previous_response_id = None
         self._branch_response_id = None
+        self._turn_state = None
+        self._chatgpt_turn_replay_items.clear()
         self._restored_input_items.clear()
 
     def set_system_prompt(self, system_prompt: str) -> None:
         self._instructions = system_prompt
 
     def refresh_tools(self) -> None:
-        self._tools = self._tool_catalog.get_openai_tool_definitions(
+        base_tools = self._tool_catalog.get_openai_tool_definitions(
             excluded_names=self._excluded_tools
         )
+        if self._settings.responses_url == OPENAI_CHATGPT_RESPONSES_URL:
+            self._tools = _serialize_chatgpt_tools(base_tools)
+        else:
+            self._tools = base_tools
         if self._settings.web_search:
             self._tools.append({"type": "web_search"})
 
@@ -122,6 +223,7 @@ class OpenAIProvider(Provider):
         user_input: UserTurnInput | None = None,
         tool_result_items: list[dict[str, Any]] | None = None,
         instructions: str | None = None,
+        session_id: str | None = None,
         display: DisplayProtocol,
         session_usage: TokenUsage,
         turn_usage: TokenUsage,
@@ -132,6 +234,9 @@ class OpenAIProvider(Provider):
 
         if user_input is not None:
             input_items = [_build_user_input_item(user_input)]
+            self._turn_state = None
+            if self._settings.responses_url == OPENAI_CHATGPT_RESPONSES_URL:
+                self._chatgpt_turn_replay_items = [dict(item) for item in input_items]
         elif tool_result_items is not None:
             input_items = tool_result_items
         else:
@@ -140,13 +245,21 @@ class OpenAIProvider(Provider):
         result = self._http_request(
             input_items=input_items,
             instructions=instructions or self._instructions,
+            session_id=session_id,
             display=display,
             tracer=tracer,
         )
         self._previous_response_id = result.response_id
+        if (
+            self._settings.responses_url == OPENAI_CHATGPT_RESPONSES_URL
+            and tool_result_items is not None
+        ):
+            self._chatgpt_turn_replay_items.extend(dict(item) for item in input_items)
         if not result.has_tool_calls:
             # Only completed assistant responses are safe to branch from.
             self._branch_response_id = result.response_id
+            self._turn_state = None
+            self._chatgpt_turn_replay_items.clear()
         session_usage.add(result.usage)
         turn_usage.add(result.usage)
         display.session_usage(session_usage)
@@ -235,21 +348,28 @@ class OpenAIProvider(Provider):
         if displayable_calls:
             display.tool_group_end()
 
-        return to_function_call_output_items(batch.results), batch.had_errors
+        return (
+            self._tool_result_items_for_response(response, batch.results),
+            batch.had_errors,
+        )
 
     def _http_request(
         self,
         *,
         input_items: list[dict[str, Any]],
         instructions: str,
+        session_id: str | None,
         display: DisplayProtocol,
         tracer: "RunTracer | None" = None,
     ) -> CompletedResponse:
         display.wait_start(_waiting_message_for_input_items(input_items))
+        include_previous_response_id = True
 
         request_body = self._build_request_body(
             input_items=input_items,
             instructions=instructions,
+            session_id=session_id,
+            include_previous_response_id=include_previous_response_id,
         )
         request_data = json.dumps(request_body).encode("utf-8")
 
@@ -259,6 +379,7 @@ class OpenAIProvider(Provider):
         last_error: Exception | None = None
         last_error_message: str | None = None
         retried_missing_previous_response = False
+        retried_chatgpt_tool_follow_up_without_previous_response = False
         retried_unauthorized_refresh = False
 
         for attempt in range(rate_limit_max_retries + 1):
@@ -271,12 +392,10 @@ class OpenAIProvider(Provider):
                 request_url=self._settings.responses_url,
                 auth=self._settings.auth,
             )
-            headers = {
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "User-Agent": f"pbi-agent/{__version__}",
-                **request_auth.headers,
-            }
+            headers = self._request_headers(
+                request_auth=request_auth,
+                session_id=session_id,
+            )
             try:
                 req = urllib.request.Request(
                     request_auth.request_url,
@@ -285,7 +404,11 @@ class OpenAIProvider(Provider):
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_SECS) as resp:
-                    response_json = json.loads(resp.read().decode("utf-8"))
+                    self._capture_turn_state(resp)
+                    response_json = _decode_responses_body(
+                        resp.read().decode("utf-8"),
+                        streamed=bool(request_body.get("stream")),
+                    )
 
                 _raise_if_response_failed(response_json)
                 result = self._parse_response(response_json)
@@ -417,9 +540,29 @@ class OpenAIProvider(Provider):
                     request_body = self._build_request_body(
                         input_items=input_items,
                         instructions=instructions,
+                        session_id=session_id,
+                        include_previous_response_id=include_previous_response_id,
                     )
                     request_data = json.dumps(request_body).encode("utf-8")
                     retried_missing_previous_response = True
+                    continue
+                if (
+                    not retried_chatgpt_tool_follow_up_without_previous_response
+                    and include_previous_response_id
+                    and self._settings.responses_url == OPENAI_CHATGPT_RESPONSES_URL
+                    and self._previous_response_id
+                    and _has_function_call_output_items(input_items)
+                    and _is_invalid_request_error(error_payload)
+                ):
+                    include_previous_response_id = False
+                    request_body = self._build_request_body(
+                        input_items=input_items,
+                        instructions=instructions,
+                        session_id=session_id,
+                        include_previous_response_id=False,
+                    )
+                    request_data = json.dumps(request_body).encode("utf-8")
+                    retried_chatgpt_tool_follow_up_without_previous_response = True
                     continue
                 display.wait_stop()
                 raise RuntimeError(
@@ -455,43 +598,139 @@ class OpenAIProvider(Provider):
             ) from last_error
         raise RuntimeError("OpenAI request failed after retries.")
 
+    def _capture_turn_state(self, response: Any) -> None:
+        if self._settings.responses_url != OPENAI_CHATGPT_RESPONSES_URL:
+            return
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return
+        turn_state = headers.get(_CHATGPT_TURN_STATE_HEADER)
+        if isinstance(turn_state, str) and turn_state:
+            self._turn_state = turn_state
+
     def _build_request_body(
         self,
         *,
         input_items: list[dict[str, Any]],
         instructions: str | None,
+        session_id: str | None = None,
+        include_previous_response_id: bool = True,
     ) -> dict[str, Any]:
+        request_options = self._responses_request_options()
+        input_payload = list(input_items)
+        if (
+            self._settings.responses_url == OPENAI_CHATGPT_RESPONSES_URL
+            and not include_previous_response_id
+            and _has_function_call_output_items(input_items)
+            and self._chatgpt_turn_replay_items
+        ):
+            input_payload = [
+                *(dict(item) for item in self._chatgpt_turn_replay_items),
+                *input_payload,
+            ]
         body: dict[str, Any] = {
             "model": self._settings.model,
-            "max_output_tokens": self._settings.max_tokens,
             "input": (
-                [*self._restored_input_items, *input_items]
+                [*self._restored_input_items, *input_payload]
                 if self._restored_input_items and not self._previous_response_id
-                else list(input_items)
+                else input_payload
             ),
             "tools": self._tools,
             "parallel_tool_calls": True,
-            "store": True,
-            "stream": False,
-            "prompt_cache_retention": "24h",
-            "context_management": [
-                {
-                    "type": "compaction",
-                    "compact_threshold": self._settings.compact_threshold,
-                }
-            ],
+            "store": request_options.store,
+            "stream": request_options.stream,
             "reasoning": {
                 "effort": self._settings.reasoning_effort,
                 "summary": "auto",
             },
         }
+        if request_options.tool_choice is not None:
+            body["tool_choice"] = request_options.tool_choice
+        if request_options.include is not None:
+            body["include"] = list(request_options.include)
+        if request_options.use_session_prompt_cache_key and session_id:
+            body["prompt_cache_key"] = session_id
+        if request_options.include_max_output_tokens:
+            body["max_output_tokens"] = self._settings.max_tokens
+        if request_options.include_prompt_cache_retention:
+            body["prompt_cache_retention"] = "24h"
+        if request_options.include_context_management:
+            body["context_management"] = [
+                {
+                    "type": "compaction",
+                    "compact_threshold": self._settings.compact_threshold,
+                }
+            ]
         if instructions:
             body["instructions"] = instructions
-        if self._previous_response_id:
+        if include_previous_response_id and self._previous_response_id:
             body["previous_response_id"] = self._previous_response_id
         if self._settings.service_tier:
             body["service_tier"] = self._settings.service_tier
         return body
+
+    def _responses_request_options(self) -> _ResponsesRequestOptions:
+        if self._settings.responses_url == OPENAI_CHATGPT_RESPONSES_URL:
+            return _ResponsesRequestOptions(
+                include_max_output_tokens=False,
+                store=False,
+                include_prompt_cache_retention=False,
+                include_context_management=False,
+                stream=True,
+                tool_choice="auto",
+                include=[],
+                use_session_prompt_cache_key=True,
+            )
+        return _ResponsesRequestOptions()
+
+    def _tool_result_items_for_response(
+        self,
+        response: CompletedResponse,
+        results: list[ToolResult],
+    ) -> list[dict[str, Any]]:
+        output_items = to_function_call_output_items(results)
+        if self._settings.responses_url != OPENAI_CHATGPT_RESPONSES_URL:
+            return output_items
+
+        calls_by_id = {call.call_id: call for call in response.function_calls}
+        raw_items_by_id = _function_call_items_by_call_id(response.provider_data)
+        items: list[dict[str, Any]] = []
+        for output_item in output_items:
+            call_id = output_item.get("call_id")
+            if not isinstance(call_id, str):
+                items.append(output_item)
+                continue
+            raw_item = raw_items_by_id.get(call_id)
+            if raw_item is not None:
+                items.append(dict(raw_item))
+            else:
+                call = calls_by_id.get(call_id)
+                if call is not None:
+                    items.append(_function_call_input_item(call))
+            items.append(output_item)
+        return items
+
+    def _request_headers(
+        self,
+        *,
+        request_auth: Any,
+        session_id: str | None,
+    ) -> dict[str, str]:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": f"pbi-agent/{__version__}",
+            **request_auth.headers,
+        }
+        if self._settings.responses_url == OPENAI_CHATGPT_RESPONSES_URL:
+            headers["Accept"] = "text/event-stream"
+            headers["originator"] = "opencode"
+            headers["User-Agent"] = _chatgpt_user_agent()
+            if session_id:
+                headers["session_id"] = session_id
+            if self._turn_state:
+                headers[_CHATGPT_TURN_STATE_HEADER] = self._turn_state
+        return headers
 
     def _parse_response(self, response_json: dict[str, Any]) -> CompletedResponse:
         text_parts: list[str] = []
@@ -502,6 +741,7 @@ class OpenAIProvider(Provider):
         web_search_sources: list[WebSearchSource] = []
         had_web_search_call = False
         display_items: list[dict[str, Any]] = []
+        function_call_items: dict[str, dict[str, Any]] = {}
 
         output_items = response_json.get("output", [])
         if not isinstance(output_items, list):
@@ -550,6 +790,9 @@ class OpenAIProvider(Provider):
                     display_items.append({"type": "message", "text": message_text})
 
             elif item_type == "function_call":
+                call_id = item.get("call_id")
+                if isinstance(call_id, str) and call_id:
+                    function_call_items[call_id] = dict(item)
                 function_calls.append(_parse_function_call(item))
 
             elif item_type == "web_search_call":
@@ -625,6 +868,7 @@ class OpenAIProvider(Provider):
             provider_data={
                 "reasoning": response_json.get("reasoning"),
                 "display_items": display_items,
+                "function_call_items": function_call_items,
             },
             web_search_sources=web_search_sources,
             had_web_search_call=had_web_search_call,
@@ -647,6 +891,241 @@ def _build_user_input_item(user_input: UserTurnInput) -> dict[str, Any]:
             }
         )
     return {"role": "user", "content": content}
+
+
+def _decode_responses_body(raw_body: str, *, streamed: bool) -> dict[str, Any]:
+    normalized = raw_body.strip()
+    if not streamed or normalized.startswith("{"):
+        return json.loads(normalized)
+    return _parse_sse_response(normalized)
+
+
+def _parse_sse_response(raw_body: str) -> dict[str, Any]:
+    event_name: str | None = None
+    data_lines: list[str] = []
+    last_response: dict[str, Any] | None = None
+    last_error: dict[str, Any] | None = None
+    response_meta: dict[str, Any] = {}
+    output_items: dict[int, dict[str, Any]] = {}
+    item_indexes: dict[str, int] = {}
+    current_text_item_id: str | None = None
+
+    def flush_event() -> None:
+        nonlocal event_name, data_lines, last_response, last_error, current_text_item_id
+        if not data_lines:
+            event_name = None
+            return
+        payload_text = "\n".join(data_lines).strip()
+        data_lines = []
+        if not payload_text:
+            event_name = None
+            return
+        payload = json.loads(payload_text)
+        event_type = event_name or payload.get("type")
+        if event_type == "response.created":
+            response = payload.get("response")
+            if isinstance(response, dict):
+                response_meta.update(response)
+        elif event_type == "response.output_item.added":
+            output_index = payload.get("output_index")
+            item = payload.get("item")
+            if isinstance(output_index, int) and isinstance(item, dict):
+                normalized_item = _normalize_sse_output_item(item)
+                output_items[output_index] = normalized_item
+                item_id = normalized_item.get("id")
+                if isinstance(item_id, str):
+                    item_indexes[item_id] = output_index
+                    if normalized_item.get("type") == "message":
+                        current_text_item_id = item_id
+        elif event_type == "response.output_item.done":
+            output_index = payload.get("output_index")
+            item = payload.get("item")
+            if isinstance(output_index, int) and isinstance(item, dict):
+                normalized_item = _normalize_sse_output_item(item)
+                existing_item = output_items.get(output_index)
+                if existing_item is not None:
+                    output_items[output_index] = _merge_sse_output_item(
+                        existing_item, normalized_item
+                    )
+                else:
+                    output_items[output_index] = normalized_item
+                item_id = output_items[output_index].get("id")
+                if isinstance(item_id, str):
+                    item_indexes[item_id] = output_index
+        elif event_type == "response.output_text.delta":
+            item_id = payload.get("item_id")
+            delta = payload.get("delta")
+            if isinstance(item_id, str) and isinstance(delta, str):
+                current_text_item_id = item_id
+                _append_sse_message_delta(output_items, item_indexes, item_id, delta)
+        elif event_type == "response.function_call_arguments.delta":
+            item_id = payload.get("item_id")
+            delta = payload.get("delta")
+            if isinstance(item_id, str) and isinstance(delta, str):
+                _append_sse_function_arguments_delta(
+                    output_items, item_indexes, item_id, delta
+                )
+        elif event_type == "response.reasoning_summary_text.delta":
+            item_id = payload.get("item_id")
+            delta = payload.get("delta")
+            summary_index = payload.get("summary_index", 0)
+            if (
+                isinstance(item_id, str)
+                and isinstance(delta, str)
+                and isinstance(summary_index, int)
+            ):
+                _append_sse_reasoning_summary_delta(
+                    output_items,
+                    item_indexes,
+                    item_id,
+                    summary_index,
+                    delta,
+                )
+        if event_type in {"response.completed", "response.incomplete"}:
+            response = payload.get("response")
+            if isinstance(response, dict):
+                last_response = response
+        elif event_type == "response.failed":
+            last_error = payload
+        event_name = None
+
+    for raw_line in raw_body.splitlines():
+        line = raw_line.rstrip("\r")
+        if not line:
+            flush_event()
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_name = line[6:].strip()
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+
+    flush_event()
+
+    if last_response is not None:
+        merged_response = dict(response_meta)
+        merged_response.update(last_response)
+        ordered_output = [
+            output_items[index]
+            for index in sorted(output_items)
+            if isinstance(output_items[index], dict)
+        ]
+        if ordered_output and not merged_response.get("output"):
+            merged_response["output"] = ordered_output
+        return merged_response
+    if last_error is not None:
+        return last_error
+    raise ValueError("Stream ended without a response.completed event")
+
+
+def _normalize_sse_output_item(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(item)
+    item_type = normalized.get("type")
+    if item_type == "message":
+        normalized.setdefault("role", "assistant")
+        content = normalized.get("content")
+        if not isinstance(content, list):
+            normalized["content"] = []
+    elif item_type == "reasoning":
+        summary = normalized.get("summary")
+        if not isinstance(summary, list):
+            normalized["summary"] = []
+    return normalized
+
+
+def _merge_sse_output_item(
+    existing: dict[str, Any], new_item: dict[str, Any]
+) -> dict[str, Any]:
+    merged = dict(existing)
+    for key, value in new_item.items():
+        if key == "content" and isinstance(value, list) and not value:
+            continue
+        if key == "summary" and isinstance(value, list) and not value:
+            continue
+        merged[key] = value
+    return merged
+
+
+def _append_sse_message_delta(
+    output_items: dict[int, dict[str, Any]],
+    item_indexes: dict[str, int],
+    item_id: str,
+    delta: str,
+) -> None:
+    item = _get_or_create_sse_item(
+        output_items, item_indexes, item_id, item_type="message"
+    )
+    content = item.setdefault("content", [])
+    if not content:
+        content.append({"type": "output_text", "text": delta})
+        return
+    first_part = content[0]
+    if isinstance(first_part, dict) and first_part.get("type") == "output_text":
+        first_part["text"] = f"{first_part.get('text', '')}{delta}"
+
+
+def _append_sse_function_arguments_delta(
+    output_items: dict[int, dict[str, Any]],
+    item_indexes: dict[str, int],
+    item_id: str,
+    delta: str,
+) -> None:
+    item = _get_or_create_sse_item(
+        output_items,
+        item_indexes,
+        item_id,
+        item_type="function_call",
+    )
+    item["arguments"] = f"{item.get('arguments', '')}{delta}"
+
+
+def _append_sse_reasoning_summary_delta(
+    output_items: dict[int, dict[str, Any]],
+    item_indexes: dict[str, int],
+    item_id: str,
+    summary_index: int,
+    delta: str,
+) -> None:
+    item = _get_or_create_sse_item(
+        output_items,
+        item_indexes,
+        item_id,
+        item_type="reasoning",
+    )
+    summary = item.setdefault("summary", [])
+    while len(summary) <= summary_index:
+        summary.append({"type": "summary_text", "text": ""})
+    summary_item = summary[summary_index]
+    if isinstance(summary_item, dict):
+        summary_item["type"] = "summary_text"
+        summary_item["text"] = f"{summary_item.get('text', '')}{delta}"
+
+
+def _get_or_create_sse_item(
+    output_items: dict[int, dict[str, Any]],
+    item_indexes: dict[str, int],
+    item_id: str,
+    *,
+    item_type: str,
+) -> dict[str, Any]:
+    output_index = item_indexes.get(item_id)
+    if output_index is None:
+        output_index = max(output_items.keys(), default=-1) + 1
+        item_indexes[item_id] = output_index
+    item = output_items.get(output_index)
+    if item is None:
+        item = {"id": item_id, "type": item_type}
+        if item_type == "message":
+            item["role"] = "assistant"
+            item["content"] = []
+        elif item_type == "reasoning":
+            item["summary"] = []
+        elif item_type == "function_call":
+            item["arguments"] = ""
+        output_items[output_index] = item
+    return item
 
 
 def _extract_reasoning_summary_texts(raw_summary: Any) -> list[str]:
@@ -681,6 +1160,51 @@ def _parse_function_call(item: dict[str, Any]) -> ToolCall:
         name=str(item.get("name", "")),
         arguments=arguments,
     )
+
+
+def _function_call_input_item(call: ToolCall) -> dict[str, Any]:
+    arguments = call.arguments
+    if isinstance(arguments, str):
+        encoded_arguments = arguments
+    elif arguments is None:
+        encoded_arguments = "{}"
+    else:
+        encoded_arguments = json.dumps(arguments)
+    return {
+        "type": "function_call",
+        "call_id": call.call_id,
+        "name": call.name,
+        "arguments": encoded_arguments,
+    }
+
+
+def _function_call_items_by_call_id(provider_data: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(provider_data, dict):
+        return {}
+    raw_items = provider_data.get("function_call_items")
+    if not isinstance(raw_items, dict):
+        return {}
+    items: dict[str, dict[str, Any]] = {}
+    for call_id, item in raw_items.items():
+        if isinstance(call_id, str) and isinstance(item, dict):
+            items[call_id] = item
+    return items
+
+
+def _has_function_call_output_items(input_items: list[dict[str, Any]]) -> bool:
+    return any(
+        isinstance(item, dict) and item.get("type") == "function_call_output"
+        for item in input_items
+    )
+
+
+def _is_invalid_request_error(error_payload: dict[str, Any] | None) -> bool:
+    if not isinstance(error_payload, dict):
+        return False
+    if error_payload.get("type") == "invalid_request_error":
+        return True
+    error = error_payload.get("error")
+    return isinstance(error, dict) and error.get("type") == "invalid_request_error"
 
 
 def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:

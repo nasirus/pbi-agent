@@ -115,6 +115,33 @@ class ProviderAuthLogoutResponse(BaseModel):
     removed: bool
 
 
+class ProviderAuthFlowStartRequest(BaseModel):
+    method: Literal["browser", "device"]
+
+
+class ProviderAuthFlowViewModel(BaseModel):
+    flow_id: str
+    provider_id: str
+    backend: str
+    method: Literal["browser", "device"]
+    status: Literal["pending", "completed", "failed"]
+    authorization_url: str | None = None
+    callback_url: str | None = None
+    verification_url: str | None = None
+    user_code: str | None = None
+    interval_seconds: int | None = None
+    error_message: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class ProviderAuthFlowResponse(BaseModel):
+    provider: ProviderViewModel
+    auth_status: ProviderAuthStatusModel
+    flow: ProviderAuthFlowViewModel
+    session: ProviderAuthSessionModel | None = None
+
+
 class ModelProfileProviderModel(BaseModel):
     id: str
     name: str

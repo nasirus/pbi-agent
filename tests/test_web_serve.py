@@ -13,6 +13,12 @@ from fastapi.testclient import TestClient
 from rich.console import Console
 
 from pbi_agent.agent.session import NEW_SESSION_SENTINEL
+from pbi_agent.auth.models import (
+    AuthFlowPollResult,
+    BrowserAuthChallenge,
+    DeviceAuthChallenge,
+)
+from pbi_agent.auth.store import build_auth_session, save_auth_session
 from pbi_agent.branding import PBI_AGENT_NAME, PBI_AGENT_TAGLINE
 from pbi_agent.cli import build_parser
 from pbi_agent.config import (
@@ -1868,6 +1874,171 @@ def test_provider_auth_endpoints_round_trip(monkeypatch, tmp_path: Path) -> None
         logout_payload = logout_response.json()
         assert logout_payload["removed"] is True
         assert logout_payload["auth_status"]["session_status"] == "missing"
+
+
+def test_provider_auth_browser_flow_endpoints_round_trip(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PBI_AGENT_AUTH_STORE_PATH", str(tmp_path / "auth.json"))
+    app = create_app(_settings(), runtime_args=_runtime_args("web"))
+
+    browser_auth_holder: dict[str, BrowserAuthChallenge] = {}
+
+    def fake_start_browser_auth(**kwargs) -> BrowserAuthChallenge:
+        browser_auth = BrowserAuthChallenge(
+            authorization_url="https://auth.openai.com/oauth/authorize?state=state-123",
+            redirect_uri=kwargs["redirect_uri"],
+            state="state-123",
+            code_verifier="verifier-123",
+        )
+        browser_auth_holder["auth"] = browser_auth
+        return browser_auth
+
+    def fake_complete_browser_auth(**kwargs):
+        session = build_auth_session(
+            provider_id=kwargs["provider_id"],
+            backend="openai_chatgpt",
+            access_token=_jwt(
+                {
+                    "exp": 4102444800,
+                    "chatgpt_account_id": "acct_browser",
+                    "email": "browser@example.com",
+                }
+            ),
+            refresh_token="refresh-browser",
+            account_id="acct_browser",
+            email="browser@example.com",
+        )
+        save_auth_session(session)
+        return session
+
+    with (
+        patch(
+            "pbi_agent.web.session_manager.start_provider_browser_auth",
+            side_effect=fake_start_browser_auth,
+        ),
+        patch(
+            "pbi_agent.web.session_manager.complete_provider_browser_auth",
+            side_effect=fake_complete_browser_auth,
+        ),
+        TestClient(app) as client,
+    ):
+        revision = client.get("/api/config/bootstrap").json()["config_revision"]
+        create_provider_response = client.post(
+            "/api/config/providers",
+            headers={"If-Match": revision},
+            json={
+                "name": "OpenAI ChatGPT",
+                "kind": "openai",
+                "auth_mode": "chatgpt_account",
+            },
+        )
+        assert create_provider_response.status_code == 200
+
+        start_response = client.post(
+            "/api/provider-auth/openai-chatgpt/flows",
+            json={"method": "browser"},
+        )
+        assert start_response.status_code == 200
+        start_payload = start_response.json()
+        flow_id = start_payload["flow"]["flow_id"]
+        assert start_payload["flow"]["status"] == "pending"
+        assert start_payload["flow"]["authorization_url"].startswith(
+            "https://auth.openai.com/oauth/authorize"
+        )
+        assert flow_id in browser_auth_holder["auth"].redirect_uri
+
+        callback_response = client.get(
+            f"/api/provider-auth/openai-chatgpt/flows/{flow_id}/callback",
+            params={"code": "auth-code-123", "state": "state-123"},
+        )
+        assert callback_response.status_code == 200
+        assert "Authorization complete" in callback_response.text
+
+        flow_response = client.get(f"/api/provider-auth/openai-chatgpt/flows/{flow_id}")
+        assert flow_response.status_code == 200
+        flow_payload = flow_response.json()
+        assert flow_payload["flow"]["status"] == "completed"
+        assert flow_payload["auth_status"]["session_status"] == "connected"
+        assert flow_payload["session"]["email"] == "browser@example.com"
+
+
+def test_provider_auth_device_flow_endpoints_round_trip(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PBI_AGENT_AUTH_STORE_PATH", str(tmp_path / "auth.json"))
+    app = create_app(_settings(), runtime_args=_runtime_args("web"))
+
+    def fake_start_device_auth(**kwargs) -> DeviceAuthChallenge:
+        del kwargs
+        return DeviceAuthChallenge(
+            verification_url="https://auth.openai.com/codex/device",
+            user_code="ABCD-EFGH",
+            device_auth_id="device-auth-123",
+            interval_seconds=5,
+        )
+
+    def fake_poll_device_auth(**kwargs) -> AuthFlowPollResult:
+        session = build_auth_session(
+            provider_id=kwargs["provider_id"],
+            backend="openai_chatgpt",
+            access_token=_jwt(
+                {
+                    "exp": 4102444800,
+                    "chatgpt_account_id": "acct_device",
+                    "email": "device@example.com",
+                }
+            ),
+            refresh_token="refresh-device",
+            account_id="acct_device",
+            email="device@example.com",
+        )
+        save_auth_session(session)
+        return AuthFlowPollResult(status="completed", session=session)
+
+    with (
+        patch(
+            "pbi_agent.web.session_manager.start_provider_device_auth",
+            side_effect=fake_start_device_auth,
+        ),
+        patch(
+            "pbi_agent.web.session_manager.poll_provider_device_auth",
+            side_effect=fake_poll_device_auth,
+        ),
+        TestClient(app) as client,
+    ):
+        revision = client.get("/api/config/bootstrap").json()["config_revision"]
+        create_provider_response = client.post(
+            "/api/config/providers",
+            headers={"If-Match": revision},
+            json={
+                "name": "OpenAI ChatGPT",
+                "kind": "openai",
+                "auth_mode": "chatgpt_account",
+            },
+        )
+        assert create_provider_response.status_code == 200
+
+        start_response = client.post(
+            "/api/provider-auth/openai-chatgpt/flows",
+            json={"method": "device"},
+        )
+        assert start_response.status_code == 200
+        start_payload = start_response.json()
+        flow_id = start_payload["flow"]["flow_id"]
+        assert start_payload["flow"]["status"] == "pending"
+        assert start_payload["flow"]["user_code"] == "ABCD-EFGH"
+
+        poll_response = client.post(
+            f"/api/provider-auth/openai-chatgpt/flows/{flow_id}/poll"
+        )
+        assert poll_response.status_code == 200
+        poll_payload = poll_response.json()
+        assert poll_payload["flow"]["status"] == "completed"
+        assert poll_payload["auth_status"]["session_status"] == "connected"
+        assert poll_payload["session"]["email"] == "device@example.com"
 
 
 def test_sessions_endpoint_lists_saved_sessions(tmp_path, monkeypatch) -> None:
