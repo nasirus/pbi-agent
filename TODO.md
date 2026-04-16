@@ -1,6 +1,6 @@
 # TODO
 
-- [x] Inspect the CLI web-start wait path and existing coverage
-- [x] Make browser-open waiting more diagnostic and resilient
-- [x] Update CLI tests for the new timeout and retry behavior
-- [x] Run targeted validation and append session memory
+- [x] Inspect existing memory history and current task notes
+- [x] Remove low-value and obsolete `MEMORY.md` entries
+- [x] Consolidate repetitive implementation history into durable summaries
+- [x] Reset `TODO.md` to this task session
