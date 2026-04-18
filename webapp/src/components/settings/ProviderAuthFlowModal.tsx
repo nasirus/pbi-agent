@@ -24,7 +24,6 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
   const [flowResponse, setFlowResponse] =
     useState<ProviderAuthFlowResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
@@ -54,15 +53,12 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
   );
 
   const handleFlowUpdate = useCallback(
-    async (nextResponse: ProviderAuthFlowResponse): Promise<void> => {
+    (nextResponse: ProviderAuthFlowResponse): void => {
       setFlowResponse(nextResponse);
       if (nextResponse.flow.status === "completed") {
-        setIsRefreshing(true);
-        try {
-          await onCompleted();
-        } finally {
-          setIsRefreshing(false);
-        }
+        void onCompleted().catch((err: Error) => {
+          setError(err.message);
+        });
       }
     },
     [onCompleted],
@@ -84,7 +80,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
         if (cancelled) {
           return;
         }
-        await handleFlowUpdate(nextResponse);
+        handleFlowUpdate(nextResponse);
         if (cancelled) {
           return;
         }
@@ -144,7 +140,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
             type="button"
             className="modal-card__close"
             onClick={onClose}
-            disabled={isStarting || isRefreshing}
+            disabled={isStarting}
           >
             &times;
           </button>
@@ -168,7 +164,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
                   type="button"
                   className={`secret-mode-tab${method === value ? " active" : ""}`}
                   onClick={() => setMethod(value)}
-                  disabled={isStarting || isRefreshing}
+                  disabled={isStarting}
                 >
                   {label}
                 </button>
@@ -217,7 +213,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
                 )}
               </div>
 
-              {flow.method === "browser" && flow.authorization_url && (
+              {flow.method === "browser" && flow.authorization_url && flow.status === "pending" && (
                 <div className="provider-auth-flow-block">
                   <div className="provider-auth-flow-label">Authorization URL</div>
                   <a
@@ -234,7 +230,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
                 </div>
               )}
 
-              {flow.method === "device" && (
+              {flow.method === "device" && flow.status === "pending" && (
                 <div className="provider-auth-flow-block">
                   <div className="provider-auth-flow-label">Verification</div>
                   {flow.verification_url && (
@@ -303,7 +299,6 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
                         );
                       }
                     }}
-                    disabled={isRefreshing}
                   >
                     Check status
                   </button>
@@ -315,7 +310,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
                     onClick={() => {
                       void handleStart(method);
                     }}
-                    disabled={isStarting || isRefreshing}
+                    disabled={isStarting}
                   >
                     {isStarting ? "Restarting…" : "Restart flow"}
                   </button>
@@ -324,7 +319,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
                   type="button"
                   className="btn btn--primary btn--sm"
                   onClick={onClose}
-                  disabled={isRefreshing}
+                  disabled={isStarting}
                 >
                   {flow.status === "completed" ? "Done" : "Close"}
                 </button>

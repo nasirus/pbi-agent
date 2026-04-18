@@ -376,6 +376,34 @@ describe("SettingsPage", () => {
     expect(fetchConfigBootstrap).toHaveBeenCalledTimes(2);
   });
 
+  it("allows closing the auth modal while completion refresh is still in flight", async () => {
+    const user = userEvent.setup();
+    let resolveRefresh!: (value: ConfigBootstrapPayload) => void;
+    const pendingRefresh = new Promise<ConfigBootstrapPayload>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    vi.mocked(fetchConfigBootstrap)
+      .mockResolvedValueOnce(makeConfigBootstrap())
+      .mockReturnValueOnce(pendingRefresh)
+      .mockResolvedValue(makeConfigBootstrap());
+
+    renderWithProviders(<SettingsPage />);
+
+    expect(await screen.findByText("OpenAI ChatGPT")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Connect" })[0]);
+    await user.click(screen.getByRole("button", { name: "Start browser sign-in" }));
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+
+    expect(await screen.findByText(/Connected as user@example.com/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Done" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Connect ChatGPT account")).not.toBeInTheDocument(),
+    );
+
+    resolveRefresh(makeConfigBootstrap());
+  });
+
   it("refreshes and disconnects provider auth from the provider card", async () => {
     const user = userEvent.setup();
     vi.mocked(fetchConfigBootstrap).mockResolvedValue(
