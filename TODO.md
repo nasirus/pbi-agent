@@ -1,5 +1,5 @@
 # TODO
 
-- [x] Inspect saved OpenAI ChatGPT provider/session state
-- [x] Issue a manual authenticated ChatGPT models request and inspect the raw payload
-- [x] Cross-check Codex behavior, patch if needed, and validate
+- [x] Inspect generic-provider runtime fields and current discovery/manual-entry behavior
+- [x] Implement generic provider /models discovery plus fallback handling and tests
+- [x] Run focused validation, update task notes, and summarize

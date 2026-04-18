@@ -16,11 +16,11 @@ from pbi_agent.providers.anthropic_provider import ANTHROPIC_VERSION
 from pbi_agent.providers.chatgpt_codex_backend import chatgpt_user_agent
 
 _DISCOVERY_TIMEOUT_SECS = 30.0
-_SUPPORTED_DISCOVERY_PROVIDERS = frozenset({"openai", "xai", "google", "anthropic"})
+_SUPPORTED_DISCOVERY_PROVIDERS = frozenset(
+    {"openai", "xai", "google", "anthropic", "generic"}
+)
 _OPENAI_CHATGPT_MIN_CLIENT_VERSION = "0.99.0"
-_MANUAL_ENTRY_ONLY_REASONS = {
-    "generic": "Manual model entry is required for generic OpenAI-compatible providers.",
-}
+_MANUAL_ENTRY_ONLY_REASONS: dict[str, str] = {}
 
 
 @dataclass(slots=True)
@@ -79,6 +79,8 @@ def discover_provider_models(settings: Settings) -> ProviderModelDiscoveryResult
             models = _discover_xai_models(settings)
         elif provider_kind == "google":
             models = _discover_google_models(settings)
+        elif provider_kind == "generic":
+            models = _discover_generic_models(settings)
         else:
             models = _discover_anthropic_models(settings)
     except urllib.error.HTTPError as exc:
@@ -200,6 +202,28 @@ def _discover_xai_models(settings: Settings) -> list[DiscoveredProviderModel]:
             output_modalities=_string_list(item.get("output_modalities")),
             aliases=_string_list(item.get("aliases")),
             supports_reasoning_effort=_xai_supports_reasoning_effort(model_id),
+        )
+        for item in payload
+        if isinstance(item, dict)
+        if (model_id := _string_value(item.get("id")))
+    ]
+
+
+def _discover_generic_models(settings: Settings) -> list[DiscoveredProviderModel]:
+    response = _get_json(settings, _generic_models_url(settings.generic_api_url))
+    payload = response.get("data")
+    if not isinstance(payload, list):
+        raise ConfigError("Provider models endpoint returned an unexpected payload.")
+    return [
+        DiscoveredProviderModel(
+            id=model_id,
+            display_name=_string_value(item.get("display_name")) or model_id,
+            created=_created_value(item.get("created")),
+            owned_by=_string_value(item.get("owned_by")),
+            input_modalities=_string_list(item.get("input_modalities")),
+            output_modalities=_string_list(item.get("output_modalities")),
+            aliases=_string_list(item.get("aliases")),
+            supports_reasoning_effort=_openai_supports_reasoning_effort(model_id),
         )
         for item in payload
         if isinstance(item, dict)
@@ -387,6 +411,18 @@ def _openai_chatgpt_models_url() -> str:
         _replace_path_suffix(OPENAI_CHATGPT_RESPONSES_URL, "models"),
         {"client_version": _openai_chatgpt_client_version()},
     )
+
+
+def _generic_models_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if path_parts[-2:] == ["chat", "completions"]:
+        path_parts = [*path_parts[:-2], "models"]
+    elif path_parts:
+        path_parts[-1] = "models"
+    else:
+        path_parts = ["models"]
+    return parsed._replace(path="/" + "/".join(path_parts), query="").geturl()
 
 
 def _replace_path_suffix(url: str, replacement: str) -> str:

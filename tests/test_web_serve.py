@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 import time
 from types import SimpleNamespace
@@ -2564,12 +2564,36 @@ def test_provider_model_discovery_endpoint_returns_auth_required_error(
     assert "Missing authentication" in payload["error"]["message"]
 
 
-def test_provider_model_discovery_endpoint_returns_manual_entry_for_generic_provider(
+def test_provider_model_discovery_endpoint_discovers_generic_provider_models(
     monkeypatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GENERIC_API_KEY", "generic-key")
     app = create_app(_settings(), runtime_args=_runtime_args("web"))
+
+    requests_seen: list[urllib.request.Request] = []
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float = 0.0):
+        del timeout
+        requests_seen.append(request)
+        return _FakeHTTPResponse(
+            {
+                "data": [
+                    {
+                        "id": "openrouter/auto",
+                        "created": 1_713_000_000,
+                        "owned_by": "openrouter",
+                    },
+                    {
+                        "id": "anthropic/claude-sonnet-4",
+                        "created": 1_713_000_100,
+                        "owned_by": "anthropic",
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
     with TestClient(app) as client:
         revision = client.get("/api/config/bootstrap").json()["config_revision"]
@@ -2590,10 +2614,60 @@ def test_provider_model_discovery_endpoint_returns_manual_entry_for_generic_prov
     assert response.status_code == 200
     payload = response.json()
     assert payload["provider_kind"] == "generic"
-    assert payload["discovery_supported"] is False
+    assert payload["discovery_supported"] is True
+    assert payload["manual_entry_required"] is False
+    assert [item["id"] for item in payload["models"]] == [
+        "anthropic/claude-sonnet-4",
+        "openrouter/auto",
+    ]
+    assert payload["error"] is None
+    assert requests_seen[0].full_url == "https://gateway.example.test/v1/models"
+    assert requests_seen[0].headers["Authorization"] == "Bearer generic-key"
+
+
+def test_provider_model_discovery_endpoint_falls_back_for_generic_provider_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GENERIC_API_KEY", "generic-key")
+    app = create_app(_settings(), runtime_args=_runtime_args("web"))
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float = 0.0):
+        del timeout, request
+        raise urllib.error.HTTPError(
+            url="https://gateway.example.test/v1/models",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=BytesIO(b'{"error":{"message":"No models endpoint"}}'),
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    with TestClient(app) as client:
+        revision = client.get("/api/config/bootstrap").json()["config_revision"]
+        create_provider_response = client.post(
+            "/api/config/providers",
+            headers={"If-Match": revision},
+            json={
+                "name": "Gateway",
+                "kind": "generic",
+                "api_key_env": "GENERIC_API_KEY",
+                "generic_api_url": "https://gateway.example.test/v1/chat/completions",
+            },
+        )
+        assert create_provider_response.status_code == 200
+
+        response = client.get("/api/config/providers/gateway/models")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider_kind"] == "generic"
+    assert payload["discovery_supported"] is True
     assert payload["manual_entry_required"] is True
     assert payload["models"] == []
-    assert payload["error"]["code"] == "manual_entry_required"
+    assert payload["error"]["code"] == "http_error"
+    assert payload["error"]["message"] == "No models endpoint"
 
 
 def test_provider_model_discovery_normalizes_google_payload(
