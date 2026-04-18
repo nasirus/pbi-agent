@@ -491,8 +491,8 @@ def provider_ui_metadata(provider_kind: str) -> dict[str, Any]:
     }
     kind_label = {
         "openai": "OpenAI API",
-        "chatgpt": "ChatGPT",
-        "github_copilot": "GitHub Copilot",
+        "chatgpt": "ChatGPT (Subscription)",
+        "github_copilot": "GitHub Copilot (Subscription)",
         "xai": "xAI",
         "google": "Google",
         "anthropic": "Anthropic",

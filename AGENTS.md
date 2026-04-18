@@ -41,7 +41,7 @@ uv tool install --reinstall .
 - Always add new `MEMORY.md` entries at the end of the file in append mode. Never insert a new memory entry in the middle of existing history.
 - Use `TODO.md` for the current task session only.
 - Create or reset `TODO.md` before starting substantive work.
-- Track step progress there with checkboxes by default.
+- Use compact TODO markers: `[ ]` pending, `[>]` in progress, `[X]` done, `[!]` blocked, `[-]` dropped.
 - Update `TODO.md` as you work. Mark steps complete when they finish, and revise the list when scope changes.
 - If `TODO.md` contains an old completed or unrelated list, replace it before making new changes.
 

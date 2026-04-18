@@ -269,6 +269,10 @@ type ModalState =
 const STALE_MESSAGE =
   "Settings were changed while you were editing. Please review and resubmit.";
 
+function shouldPromptProviderAuth(provider: ProviderView): boolean {
+  return provider.auth_mode !== "api_key";
+}
+
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const [modal, setModal] = useState<ModalState>({ type: "none" });
@@ -315,12 +319,20 @@ export function SettingsPage() {
     existingId?: string,
   ): Promise<void> {
     try {
+      const response = existingId
+        ? await updateProvider(existingId, payload, getRevision())
+        : await createProvider(payload, getRevision());
       if (existingId) {
-        await updateProvider(existingId, payload, getRevision());
-      } else {
-        await createProvider(payload, getRevision());
+        await invalidateBoth();
+        setModal({ type: "none" });
+        return;
       }
+
       await invalidateBoth();
+      if (shouldPromptProviderAuth(response.provider)) {
+        setModal({ type: "provider-auth", provider: response.provider });
+        return;
+      }
       setModal({ type: "none" });
     } catch (err) {
       wrapStale(err);
@@ -436,7 +448,7 @@ export function SettingsPage() {
             <strong>First-time setup:</strong> To start using the app, complete these
             steps:
             <ol>
-              <li>Add a provider with your API credentials</li>
+              <li>Add a provider and finish any sign-in step</li>
               <li>Create a model profile that uses that provider</li>
             </ol>
           </div>

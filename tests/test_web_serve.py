@@ -257,7 +257,7 @@ def test_config_bootstrap_and_crud_endpoints_round_trip(
             },
         }
         assert refreshed_payload["options"]["provider_metadata"]["chatgpt"] == {
-            "label": "ChatGPT",
+            "label": "ChatGPT (Subscription)",
             "description": "Uses your ChatGPT subscription account.",
             "default_auth_mode": "chatgpt_account",
             "auth_modes": ["chatgpt_account"],

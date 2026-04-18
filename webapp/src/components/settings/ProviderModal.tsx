@@ -270,8 +270,8 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
             </div>
           ) : (
             <div className="settings-inline-note provider-auth-inline-note">
-              Save this provider, then use the Connect action from the provider card
-              to authorize it with your {accountAuthLabel ?? "account"}.
+              Save this provider to continue directly into sign-in for your{" "}
+              {accountAuthLabel ?? "account"}.
             </div>
           )}
 
