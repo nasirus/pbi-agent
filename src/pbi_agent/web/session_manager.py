@@ -12,6 +12,12 @@ from typing import Any
 
 from pbi_agent.agent.error_formatting import format_user_facing_error
 from pbi_agent.agent.session import run_session_loop
+from pbi_agent.auth.browser_callback import (
+    BrowserAuthCallbackListener,
+    BrowserAuthCallbackOutcome,
+    BrowserAuthCallbackParams,
+    create_browser_auth_callback_listener,
+)
 from pbi_agent.auth.models import (
     AUTH_FLOW_METHOD_BROWSER,
     AUTH_FLOW_METHOD_DEVICE,
@@ -409,6 +415,7 @@ class PendingProviderAuthFlow:
     created_at: str
     updated_at: str
     browser_auth: BrowserAuthChallenge | None = None
+    browser_callback_listener: BrowserAuthCallbackListener | None = None
     device_auth: DeviceAuthChallenge | None = None
     authorization_url: str | None = None
     callback_url: str | None = None
@@ -1352,7 +1359,6 @@ class WebSessionManager:
         *,
         flow_id: str,
         method: str,
-        redirect_uri: str | None = None,
     ) -> dict[str, Any]:
         config = load_internal_config()
         provider = self._require_provider(config, provider_id)
@@ -1363,26 +1369,39 @@ class WebSessionManager:
         )
         created_at = _now_iso()
         if method == AUTH_FLOW_METHOD_BROWSER:
-            if not redirect_uri:
-                raise ValueError("Browser auth flow requires a redirect URI.")
-            browser_auth = start_provider_browser_auth(
-                provider_kind=provider.kind,
-                provider_id=provider.id,
-                auth_mode=provider.auth_mode,
-                redirect_uri=redirect_uri,
-            )
-            flow = PendingProviderAuthFlow(
-                flow_id=flow_id,
-                provider_id=provider.id,
-                backend=status.backend or "",
-                method=method,
-                status=AUTH_FLOW_STATUS_PENDING,
-                created_at=created_at,
-                updated_at=created_at,
-                browser_auth=browser_auth,
-                authorization_url=browser_auth.authorization_url,
-                callback_url=browser_auth.redirect_uri,
-            )
+            listener: BrowserAuthCallbackListener | None = None
+            try:
+                listener = create_browser_auth_callback_listener(
+                    callback_handler=lambda params: self._handle_provider_auth_browser_callback(
+                        provider_id=provider.id,
+                        flow_id=flow_id,
+                        params=params,
+                    )
+                )
+                browser_auth = start_provider_browser_auth(
+                    provider_kind=provider.kind,
+                    provider_id=provider.id,
+                    auth_mode=provider.auth_mode,
+                    redirect_uri=listener.callback_url,
+                )
+                flow = PendingProviderAuthFlow(
+                    flow_id=flow_id,
+                    provider_id=provider.id,
+                    backend=status.backend or "",
+                    method=method,
+                    status=AUTH_FLOW_STATUS_PENDING,
+                    created_at=created_at,
+                    updated_at=created_at,
+                    browser_auth=browser_auth,
+                    browser_callback_listener=listener,
+                    authorization_url=browser_auth.authorization_url,
+                    callback_url=browser_auth.redirect_uri,
+                )
+                listener.start()
+            except Exception:
+                if listener is not None:
+                    listener.shutdown()
+                raise
         elif method == AUTH_FLOW_METHOD_DEVICE:
             device_auth = start_provider_device_auth(
                 provider_kind=provider.kind,
@@ -1686,7 +1705,10 @@ class WebSessionManager:
         for session in sessions:
             session.worker.join(timeout=1.5)
         with self._lock:
+            provider_auth_flows = list(self._provider_auth_flows.values())
             self._provider_auth_flows.clear()
+        for flow in provider_auth_flows:
+            self._shutdown_provider_auth_flow_browser_listener(flow)
 
     def _run_session_worker(self, live_session_id: str) -> None:
         live_session = self._live_sessions[live_session_id]
@@ -2316,6 +2338,39 @@ class WebSessionManager:
         flow.status = AUTH_FLOW_STATUS_FAILED
         flow.error_message = message
         flow.updated_at = _now_iso()
+
+    def _handle_provider_auth_browser_callback(
+        self,
+        *,
+        provider_id: str,
+        flow_id: str,
+        params: BrowserAuthCallbackParams,
+    ) -> BrowserAuthCallbackOutcome:
+        payload = self.complete_provider_browser_auth_flow(
+            provider_id,
+            flow_id,
+            code=params.code,
+            state=params.state,
+            error=params.error,
+            error_description=params.error_description,
+        )
+        flow = self._require_provider_auth_flow(provider_id, flow_id)
+        self._shutdown_provider_auth_flow_browser_listener(flow)
+        if payload["flow"]["status"] == AUTH_FLOW_STATUS_COMPLETED:
+            return BrowserAuthCallbackOutcome(completed=True)
+        return BrowserAuthCallbackOutcome(
+            completed=False,
+            error_message=payload["flow"].get("error_message") or "Authorization failed.",
+        )
+
+    def _shutdown_provider_auth_flow_browser_listener(
+        self, flow: PendingProviderAuthFlow
+    ) -> None:
+        listener = flow.browser_callback_listener
+        if listener is None:
+            return
+        flow.browser_callback_listener = None
+        listener.shutdown()
 
     def _model_profile_view(
         self,

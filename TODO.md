@@ -1,7 +1,9 @@
 # TODO
 
-- [x] Evaluate provider-auth manual status-check review feedback
-- [x] Fix modal completion refresh behavior if review is valid
-- [x] Add/update tests covering manual completed status checks
-- [x] Run frontend validation commands
-- [x] Append follow-up summary to `MEMORY.md`
+- [x] Trace CLI vs webapp ChatGPT browser auth redirect handling
+- [x] Fix web browser auth callback flow to match supported redirect shape
+- [x] Update backend tests for the new callback behavior
+- [x] Run targeted backend and frontend validation
+- [x] Append the implementation summary to `MEMORY.md`
+- [x] Normalize loopback redirect host to `localhost` for browser auth
+- [x] Replace web browser auth callback with a dedicated localhost listener
