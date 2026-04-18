@@ -34,6 +34,8 @@ function authModeLabel(authMode: string): string {
       return "API key";
     case "chatgpt_account":
       return "ChatGPT account";
+    case "copilot_account":
+      return "GitHub Copilot account";
     default:
       return authMode;
   }

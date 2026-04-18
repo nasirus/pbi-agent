@@ -6,6 +6,7 @@ from typing import Any
 
 AUTH_MODE_API_KEY = "api_key"
 AUTH_MODE_CHATGPT_ACCOUNT = "chatgpt_account"
+AUTH_MODE_COPILOT_ACCOUNT = "copilot_account"
 SUPPORTED_OPENAI_AUTH_MODES = (AUTH_MODE_API_KEY, AUTH_MODE_CHATGPT_ACCOUNT)
 
 RUNTIME_AUTH_KIND_API_KEY = "api_key"
@@ -117,6 +118,7 @@ class DeviceAuthChallenge:
     user_code: str
     device_auth_id: str
     interval_seconds: int
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

@@ -24,6 +24,7 @@ def create_provider(
     The ``settings.provider`` field selects the backend:
 
     - ``"openai"`` (default) → OpenAI Responses HTTP provider
+    - ``"github_copilot"``   → GitHub Copilot Responses HTTP provider
     - ``"xai"``              → xAI Responses HTTP provider
     - ``"google"``           → Google Gemini Interactions HTTP provider
     - ``"anthropic"``        → Anthropic Messages HTTP provider
@@ -37,6 +38,16 @@ def create_provider(
         from pbi_agent.providers.openai_provider import OpenAIProvider
 
         return OpenAIProvider(
+            settings,
+            system_prompt=system_prompt,
+            excluded_tools=effective_excluded_tools,
+            tool_catalog=tool_catalog,
+        )
+
+    if name == "github_copilot":
+        from pbi_agent.providers.github_copilot_provider import GitHubCopilotProvider
+
+        return GitHubCopilotProvider(
             settings,
             system_prompt=system_prompt,
             excluded_tools=effective_excluded_tools,
@@ -84,7 +95,8 @@ def create_provider(
         )
 
     raise ValueError(
-        f"Unknown provider {name!r}. Supported: openai, xai, google, anthropic, generic."
+        "Unknown provider "
+        f"{name!r}. Supported: openai, github_copilot, xai, google, anthropic, generic."
     )
 
 

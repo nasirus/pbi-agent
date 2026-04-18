@@ -19,8 +19,23 @@ function formatDateTime(timestamp: number | null): string | null {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
+function authProductLabel(provider: ProviderView): string {
+  if (provider.auth_mode === "copilot_account") {
+    return "GitHub Copilot account";
+  }
+  return "ChatGPT account";
+}
+
+function supportedMethods(provider: ProviderView): Array<"browser" | "device"> {
+  if (provider.auth_mode === "copilot_account") {
+    return ["device"];
+  }
+  return ["browser", "device"];
+}
+
 export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props) {
-  const [method, setMethod] = useState<"browser" | "device">("browser");
+  const methods = supportedMethods(provider);
+  const [method, setMethod] = useState<"browser" | "device">(methods[0]);
   const [flowResponse, setFlowResponse] =
     useState<ProviderAuthFlowResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -135,7 +150,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card" onClick={(event) => event.stopPropagation()}>
         <div className="modal-card__header">
-          <h2 className="modal-card__title">Connect ChatGPT account</h2>
+          <h2 className="modal-card__title">Connect {authProductLabel(provider)}</h2>
           <button
             type="button"
             className="modal-card__close"
@@ -148,29 +163,31 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
 
         <div className="task-form provider-auth-flow-modal">
           <div className="settings-inline-note provider-auth-inline-note">
-            Authorize <strong>{provider.name}</strong> with your ChatGPT subscription
-            account. Browser auth is the default; device code works as a fallback.
+            Authorize <strong>{provider.name}</strong> with your{" "}
+            {provider.auth_mode === "copilot_account"
+              ? "GitHub Copilot subscription account"
+              : "ChatGPT subscription account"}
+            .
           </div>
 
-          <div className="task-form__field">
-            <label className="task-form__label">Method</label>
-            <div className="secret-mode-tabs provider-auth-mode-tabs">
-              {([
-                ["browser", "Browser"],
-                ["device", "Device code"],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`secret-mode-tab${method === value ? " active" : ""}`}
-                  onClick={() => setMethod(value)}
-                  disabled={isStarting}
-                >
-                  {label}
-                </button>
-              ))}
+          {methods.length > 1 && (
+            <div className="task-form__field">
+              <label className="task-form__label">Method</label>
+              <div className="secret-mode-tabs provider-auth-mode-tabs">
+                {methods.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`secret-mode-tab${method === value ? " active" : ""}`}
+                    onClick={() => setMethod(value)}
+                    disabled={isStarting}
+                  >
+                    {value === "browser" ? "Browser" : "Device code"}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {!flow && (
             <div className="provider-auth-actions-row">
@@ -222,7 +239,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
                     rel="noreferrer"
                     className="provider-auth-flow-link"
                   >
-                    Open ChatGPT authorization
+                    Open authorization
                   </a>
                   <div className="task-form__hint">
                     Complete the sign-in in the opened tab, then return here.
@@ -275,7 +292,8 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
 
               {flow.status === "completed" && (
                 <div className="settings-inline-note provider-auth-inline-note">
-                  Connected{session?.email ? ` as ${session.email}` : ""}
+                  Connected
+                  {session?.email ? ` as ${session.email}` : ""}
                   {session?.plan_type ? ` (${session.plan_type})` : ""}.
                   {sessionExpires ? ` Expires ${sessionExpires}.` : ""}
                 </div>
@@ -287,17 +305,14 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
                     type="button"
                     className="btn btn--ghost btn--sm"
                     onClick={() => {
-                      if (flow.method === "browser") {
-                        void fetchProviderAuthFlow(provider.id, flow.flow_id).then(
-                          (nextResponse) => handleFlowUpdate(nextResponse),
-                          (err: Error) => setError(err.message),
-                        );
-                      } else {
-                        void pollProviderAuthFlow(provider.id, flow.flow_id).then(
-                          (nextResponse) => handleFlowUpdate(nextResponse),
-                          (err: Error) => setError(err.message),
-                        );
-                      }
+                      const next =
+                        flow.method === "browser"
+                          ? fetchProviderAuthFlow(provider.id, flow.flow_id)
+                          : pollProviderAuthFlow(provider.id, flow.flow_id);
+                      void next.then(
+                        (response) => handleFlowUpdate(response),
+                        (err: Error) => setError(err.message),
+                      );
                     }}
                   >
                     Check status

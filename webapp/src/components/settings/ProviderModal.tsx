@@ -161,7 +161,13 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
   const authModeLabels: Record<string, string> = {
     api_key: "API key",
     chatgpt_account: "ChatGPT account",
+    copilot_account: "GitHub Copilot account",
   };
+
+  const accountAuthLabel =
+    form.auth_mode === "copilot_account"
+      ? "your GitHub Copilot subscription account"
+      : "your ChatGPT subscription account";
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -266,7 +272,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
           ) : (
             <div className="settings-inline-note provider-auth-inline-note">
               Save this provider, then use the Connect action from the provider card
-              to authorize it with your ChatGPT subscription account.
+              to authorize it with {accountAuthLabel}.
             </div>
           )}
 

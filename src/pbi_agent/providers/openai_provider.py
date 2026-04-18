@@ -293,6 +293,7 @@ class OpenAIProvider(Provider):
             headers = self._request_headers(
                 request_auth=request_auth,
                 session_id=session_id,
+                input_items=input_items,
             )
             try:
                 req = urllib.request.Request(
@@ -303,7 +304,7 @@ class OpenAIProvider(Provider):
                 )
                 with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_SECS) as resp:
                     self._chatgpt_backend.capture_response_headers(resp)
-                    response_json = _decode_responses_body(
+                    response_json = self._decode_response_body(
                         resp.read().decode("utf-8"),
                         streamed=bool(request_body.get("stream")),
                     )
@@ -357,6 +358,7 @@ class OpenAIProvider(Provider):
                     exc.code == 401
                     and not retried_unauthorized_refresh
                     and isinstance(self._settings.auth, OAuthSessionAuth)
+                    and self._settings.auth.refresh_token
                 ):
                     self._settings.auth = refresh_runtime_auth(
                         provider_kind=self._settings.provider,
@@ -554,7 +556,9 @@ class OpenAIProvider(Provider):
         *,
         request_auth: Any,
         session_id: str | None,
+        input_items: list[dict[str, Any]],
     ) -> dict[str, str]:
+        del input_items
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -563,6 +567,14 @@ class OpenAIProvider(Provider):
         }
         self._chatgpt_backend.apply_headers(headers, session_id=session_id)
         return headers
+
+    def _decode_response_body(
+        self,
+        raw_body: str,
+        *,
+        streamed: bool,
+    ) -> dict[str, Any]:
+        return _decode_responses_body(raw_body, streamed=streamed)
 
     def _parse_response(self, response_json: dict[str, Any]) -> CompletedResponse:
         text_parts: list[str] = []
