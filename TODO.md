@@ -1,7 +1,6 @@
 # TODO
 
-- [x] Implement GitHub Copilot auth backend and generalize auth service/runtime refresh plumbing
-- [x] Add GitHub Copilot provider kind, defaults, and provider factory/runtime support
-- [x] Implement GitHub Copilot Responses transport behavior and targeted parser handling
-- [x] Update CLI/web provider auth surfaces for the new provider
-- [x] Add targeted regression coverage, run validation, and append MEMORY.md
+- [x] Add provider auth-mode presentation metadata to config bootstrap and API schemas
+- [x] Refactor settings provider/auth modals to use metadata-driven labels and supported methods
+- [x] Update backend/frontend regression coverage for normalized auth UI behavior
+- [x] Run targeted validation and append MEMORY.md

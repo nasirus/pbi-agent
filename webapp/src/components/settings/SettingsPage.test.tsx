@@ -154,13 +154,28 @@ function makeConfigBootstrap(
     ],
     commands: [],
     options: {
-      provider_kinds: ["openai"],
+      provider_kinds: ["openai", "github_copilot"],
       reasoning_efforts: ["high", "medium"],
       openai_service_tiers: [],
       provider_metadata: {
         openai: {
+          label: "OpenAI",
+          description:
+            "Use Authentication below to choose between an OpenAI API key and a ChatGPT subscription account.",
           default_auth_mode: "api_key",
           auth_modes: ["api_key", "chatgpt_account"],
+          auth_mode_metadata: {
+            api_key: {
+              label: "API key",
+              account_label: null,
+              supported_methods: [],
+            },
+            chatgpt_account: {
+              label: "ChatGPT account",
+              account_label: "ChatGPT subscription account",
+              supported_methods: ["browser", "device"],
+            },
+          },
           default_model: "gpt-5.4",
           default_sub_agent_model: null,
           default_responses_url: null,
@@ -168,6 +183,28 @@ function makeConfigBootstrap(
           supports_responses_url: true,
           supports_generic_api_url: false,
           supports_service_tier: true,
+          supports_native_web_search: true,
+          supports_image_inputs: true,
+        },
+        github_copilot: {
+          label: "GitHub Copilot",
+          description: "Uses your GitHub Copilot subscription account.",
+          default_auth_mode: "copilot_account",
+          auth_modes: ["copilot_account"],
+          auth_mode_metadata: {
+            copilot_account: {
+              label: "GitHub Copilot account",
+              account_label: "GitHub Copilot subscription account",
+              supported_methods: ["device"],
+            },
+          },
+          default_model: "gpt-5",
+          default_sub_agent_model: "gpt-5-mini",
+          default_responses_url: "https://api.githubcopilot.com/responses",
+          default_generic_api_url: null,
+          supports_responses_url: true,
+          supports_generic_api_url: false,
+          supports_service_tier: false,
           supports_native_web_search: true,
           supports_image_inputs: true,
         },
@@ -335,6 +372,131 @@ describe("SettingsPage", () => {
       expect(queryClient.isFetching({ queryKey: ["config-bootstrap"] })).toBe(0),
     );
     expect(await screen.findByText(/Connected as user@example.com/)).toBeInTheDocument();
+  });
+
+  it("uses provider metadata to render a device-only Copilot auth flow", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchConfigBootstrap).mockResolvedValue(
+      makeConfigBootstrap({
+        providers: [
+          {
+            id: "copilot-main",
+            name: "Copilot Main",
+            kind: "github_copilot",
+            auth_mode: "copilot_account",
+            responses_url: "https://api.githubcopilot.com/responses",
+            generic_api_url: null,
+            secret_source: "none",
+            secret_env_var: null,
+            has_secret: false,
+            auth_status: {
+              auth_mode: "copilot_account",
+              backend: "github_copilot",
+              session_status: "missing",
+              has_session: false,
+              can_refresh: false,
+              account_id: null,
+              email: null,
+              plan_type: null,
+              expires_at: null,
+            },
+          },
+        ],
+      }),
+    );
+    vi.mocked(startProviderAuthFlow).mockResolvedValue({
+      provider: makeConfigBootstrap({
+        providers: [
+          {
+            id: "copilot-main",
+            name: "Copilot Main",
+            kind: "github_copilot",
+            auth_mode: "copilot_account",
+            responses_url: "https://api.githubcopilot.com/responses",
+            generic_api_url: null,
+            secret_source: "none",
+            secret_env_var: null,
+            has_secret: false,
+            auth_status: {
+              auth_mode: "copilot_account",
+              backend: "github_copilot",
+              session_status: "missing",
+              has_session: false,
+              can_refresh: false,
+              account_id: null,
+              email: null,
+              plan_type: null,
+              expires_at: null,
+            },
+          },
+        ],
+      }).providers[0],
+      auth_status: {
+        auth_mode: "copilot_account",
+        backend: "github_copilot",
+        session_status: "missing",
+        has_session: false,
+        can_refresh: false,
+        account_id: null,
+        email: null,
+        plan_type: null,
+        expires_at: null,
+      },
+      flow: {
+        flow_id: "copilot-flow-1",
+        provider_id: "copilot-main",
+        backend: "github_copilot",
+        method: "device",
+        status: "pending",
+        authorization_url: null,
+        callback_url: null,
+        verification_url: "https://github.com/login/device",
+        user_code: "ABCD-EFGH",
+        interval_seconds: 5,
+        error_message: null,
+        created_at: "2026-04-18T00:00:00Z",
+        updated_at: "2026-04-18T00:00:00Z",
+      },
+      session: null,
+    });
+
+    renderWithProviders(<SettingsPage />);
+
+    expect(await screen.findByText("Copilot Main")).toBeInTheDocument();
+    expect(screen.getByText("GitHub Copilot account")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(
+      await screen.findByText("Connect GitHub Copilot account"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText((content, element) => {
+        return (
+          element?.textContent ===
+          "Authorize Copilot Main with your GitHub Copilot subscription account."
+        );
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Method")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Generate device code" }));
+    expect(startProviderAuthFlow).toHaveBeenCalledWith("copilot-main", "device");
+  });
+
+  it("uses provider kind labels and descriptions in the provider form", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(<SettingsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "+ Add Provider" }));
+
+    expect(screen.getByRole("option", { name: "OpenAI" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "GitHub Copilot" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Use Authentication below to choose between an OpenAI API key and a ChatGPT subscription account.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("refreshes settings after a manual auth status check completes the flow", async () => {

@@ -4,10 +4,15 @@ import {
   pollProviderAuthFlow,
   startProviderAuthFlow,
 } from "../../api";
-import type { ProviderAuthFlowResponse, ProviderView } from "../../types";
+import type {
+  ConfigOptions,
+  ProviderAuthFlowResponse,
+  ProviderView,
+} from "../../types";
 
 interface Props {
   provider: ProviderView;
+  options: ConfigOptions;
   onClose: () => void;
   onCompleted: () => Promise<void>;
 }
@@ -19,23 +24,18 @@ function formatDateTime(timestamp: number | null): string | null {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-function authProductLabel(provider: ProviderView): string {
-  if (provider.auth_mode === "copilot_account") {
-    return "GitHub Copilot account";
-  }
-  return "ChatGPT account";
-}
-
-function supportedMethods(provider: ProviderView): Array<"browser" | "device"> {
-  if (provider.auth_mode === "copilot_account") {
-    return ["device"];
-  }
-  return ["browser", "device"];
-}
-
-export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props) {
-  const methods = supportedMethods(provider);
-  const [method, setMethod] = useState<"browser" | "device">(methods[0]);
+export function ProviderAuthFlowModal({
+  provider,
+  options,
+  onClose,
+  onCompleted,
+}: Props) {
+  const authModeMetadata =
+    options.provider_metadata[provider.kind]?.auth_mode_metadata[provider.auth_mode];
+  const methods = authModeMetadata?.supported_methods ?? [];
+  const authModeLabel = authModeMetadata?.label ?? provider.auth_mode;
+  const accountLabel = authModeMetadata?.account_label ?? authModeLabel;
+  const [method, setMethod] = useState<"browser" | "device">(methods[0] ?? "device");
   const [flowResponse, setFlowResponse] =
     useState<ProviderAuthFlowResponse | null>(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -150,7 +150,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card" onClick={(event) => event.stopPropagation()}>
         <div className="modal-card__header">
-          <h2 className="modal-card__title">Connect {authProductLabel(provider)}</h2>
+          <h2 className="modal-card__title">Connect {authModeLabel}</h2>
           <button
             type="button"
             className="modal-card__close"
@@ -163,11 +163,7 @@ export function ProviderAuthFlowModal({ provider, onClose, onCompleted }: Props)
 
         <div className="task-form provider-auth-flow-modal">
           <div className="settings-inline-note provider-auth-inline-note">
-            Authorize <strong>{provider.name}</strong> with your{" "}
-            {provider.auth_mode === "copilot_account"
-              ? "GitHub Copilot subscription account"
-              : "ChatGPT subscription account"}
-            .
+            Authorize <strong>{provider.name}</strong> with your {accountLabel}.
           </div>
 
           {methods.length > 1 && (

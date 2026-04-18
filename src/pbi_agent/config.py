@@ -22,6 +22,11 @@ from pbi_agent.auth.models import (
 from pbi_agent.auth.providers.github_copilot import GITHUB_COPILOT_RESPONSES_URL
 from pbi_agent.auth.providers.openai_chatgpt import OPENAI_CHATGPT_RESPONSES_URL
 from pbi_agent.auth.service import provider_auth_modes, resolve_runtime_auth
+from pbi_agent.auth.service import (
+    provider_auth_account_label,
+    provider_auth_flow_methods,
+    provider_auth_mode_label,
+)
 
 DEFAULT_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_XAI_RESPONSES_URL = "https://api.x.ai/v1/responses"
@@ -460,9 +465,34 @@ def provider_has_secret(provider: ProviderConfig) -> bool:
 
 
 def provider_ui_metadata(provider_kind: str) -> dict[str, Any]:
+    auth_mode_metadata = {
+        auth_mode: {
+            "label": provider_auth_mode_label(auth_mode),
+            "account_label": provider_auth_account_label(auth_mode),
+            "supported_methods": list(
+                provider_auth_flow_methods(provider_kind, auth_mode)
+            ),
+        }
+        for auth_mode in provider_auth_modes(provider_kind)
+    }
+    kind_label = {
+        "openai": "OpenAI",
+        "github_copilot": "GitHub Copilot",
+        "xai": "xAI",
+        "google": "Google",
+        "anthropic": "Anthropic",
+        "generic": "OpenAI-compatible",
+    }.get(provider_kind, provider_kind)
+    kind_description = {
+        "openai": "Use Authentication below to choose between an OpenAI API key and a ChatGPT subscription account.",
+        "github_copilot": "Uses your GitHub Copilot subscription account.",
+    }.get(provider_kind)
     return {
+        "label": kind_label,
+        "description": kind_description,
         "default_auth_mode": _default_auth_mode(provider_kind),
         "auth_modes": list(provider_auth_modes(provider_kind)),
+        "auth_mode_metadata": auth_mode_metadata,
         "default_model": _default_model(provider_kind),
         "default_sub_agent_model": _default_sub_agent_model(provider_kind),
         "default_responses_url": (

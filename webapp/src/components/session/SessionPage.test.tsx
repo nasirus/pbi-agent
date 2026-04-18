@@ -197,8 +197,23 @@ function makeConfigBootstrap(
       openai_service_tiers: [],
       provider_metadata: {
         openai: {
+          label: "OpenAI",
+          description:
+            "Use Authentication below to choose between an OpenAI API key and a ChatGPT subscription account.",
           default_auth_mode: "api_key",
           auth_modes: ["api_key", "chatgpt_account"],
+          auth_mode_metadata: {
+            api_key: {
+              label: "API key",
+              account_label: null,
+              supported_methods: [],
+            },
+            chatgpt_account: {
+              label: "ChatGPT account",
+              account_label: "ChatGPT subscription account",
+              supported_methods: ["browser", "device"],
+            },
+          },
           default_model: "gpt-5.4",
           default_sub_agent_model: null,
           default_responses_url: null,

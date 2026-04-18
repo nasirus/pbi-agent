@@ -237,8 +237,31 @@ def test_config_bootstrap_and_crud_endpoints_round_trip(
             refreshed_payload["providers"][0]["auth_status"]["auth_mode"] == "api_key"
         )
         assert refreshed_payload["options"]["provider_metadata"]["openai"][
+            "label"
+        ] == "OpenAI"
+        assert refreshed_payload["options"]["provider_metadata"]["openai"][
+            "description"
+        ] == (
+            "Use Authentication below to choose between an OpenAI API key and a "
+            "ChatGPT subscription account."
+        )
+        assert refreshed_payload["options"]["provider_metadata"]["openai"][
             "auth_modes"
         ] == ["api_key", "chatgpt_account"]
+        assert refreshed_payload["options"]["provider_metadata"]["openai"][
+            "auth_mode_metadata"
+        ] == {
+            "api_key": {
+                "label": "API key",
+                "account_label": None,
+                "supported_methods": [],
+            },
+            "chatgpt_account": {
+                "label": "ChatGPT account",
+                "account_label": "ChatGPT subscription account",
+                "supported_methods": ["browser", "device"],
+            },
+        }
         analysis_profile = next(
             item
             for item in refreshed_payload["model_profiles"]
@@ -2029,7 +2052,10 @@ def test_provider_auth_browser_flow_endpoints_round_trip(
         assert start_payload["flow"]["authorization_url"].startswith(
             "https://auth.openai.com/oauth/authorize"
         )
-        assert browser_auth_holder["auth"].redirect_uri == "http://localhost:1455/auth/callback"
+        assert (
+            browser_auth_holder["auth"].redirect_uri
+            == "http://localhost:1455/auth/callback"
+        )
         assert listener_holder["listener"].started is True
         assert timer_holder["timer"].started is True
 

@@ -158,16 +158,9 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
     { value: "none", label: "None" },
   ];
 
-  const authModeLabels: Record<string, string> = {
-    api_key: "API key",
-    chatgpt_account: "ChatGPT account",
-    copilot_account: "GitHub Copilot account",
-  };
-
-  const accountAuthLabel =
-    form.auth_mode === "copilot_account"
-      ? "your GitHub Copilot subscription account"
-      : "your ChatGPT subscription account";
+  const authModeMetadata = kindMeta?.auth_mode_metadata ?? {};
+  const selectedAuthModeMetadata = authModeMetadata[form.auth_mode];
+  const accountAuthLabel = selectedAuthModeMetadata?.account_label;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -231,10 +224,13 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
             >
               {options.provider_kinds.map((k) => (
                 <option key={k} value={k}>
-                  {k}
+                  {options.provider_metadata[k]?.label ?? k}
                 </option>
               ))}
             </select>
+            {kindMeta?.description && (
+              <span className="task-form__hint">{kindMeta.description}</span>
+            )}
           </div>
 
           <div className="task-form__field">
@@ -247,7 +243,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
                   className={`secret-mode-tab${form.auth_mode === authMode ? " active" : ""}`}
                   onClick={() => set({ auth_mode: authMode })}
                 >
-                  {authModeLabels[authMode] ?? authMode}
+                  {authModeMetadata[authMode]?.label ?? authMode}
                 </button>
               ))}
             </div>
@@ -272,7 +268,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
           ) : (
             <div className="settings-inline-note provider-auth-inline-note">
               Save this provider, then use the Connect action from the provider card
-              to authorize it with {accountAuthLabel}.
+              to authorize it with your {accountAuthLabel ?? "account"}.
             </div>
           )}
 

@@ -49,6 +49,22 @@ def provider_auth_modes(provider_kind: str) -> tuple[str, ...]:
     return (AUTH_MODE_API_KEY,)
 
 
+def provider_auth_mode_label(auth_mode: str) -> str:
+    if auth_mode == AUTH_MODE_CHATGPT_ACCOUNT:
+        return "ChatGPT account"
+    if auth_mode == AUTH_MODE_COPILOT_ACCOUNT:
+        return "GitHub Copilot account"
+    return "API key"
+
+
+def provider_auth_account_label(auth_mode: str) -> str | None:
+    if auth_mode == AUTH_MODE_CHATGPT_ACCOUNT:
+        return "ChatGPT subscription account"
+    if auth_mode == AUTH_MODE_COPILOT_ACCOUNT:
+        return "GitHub Copilot subscription account"
+    return None
+
+
 def provider_auth_flow_methods(provider_kind: str, auth_mode: str) -> tuple[str, ...]:
     if auth_mode == AUTH_MODE_API_KEY:
         return ()
