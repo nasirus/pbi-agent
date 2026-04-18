@@ -68,3 +68,25 @@ Startup loads environment variables from a local `.env` file automatically throu
 ::: details First-time bootstrap
 If you do not already have a PBIP workspace, create one in the current directory with `uv run pbi-agent init --dest .`. The `init` command does not require provider credentials because it only copies the bundled report template.
 :::
+
+## Alternative: Connect a ChatGPT Subscription
+
+For OpenAI, you can save a provider that uses a ChatGPT account session instead of an API key.
+
+```bash
+uv run pbi-agent config providers create \
+  --name "OpenAI ChatGPT" \
+  --kind openai \
+  --auth-mode chatgpt_account
+
+uv run pbi-agent config profiles create \
+  --name chatgpt \
+  --provider-id openai-chatgpt \
+  --model gpt-5.4
+
+uv run pbi-agent config providers auth-login openai-chatgpt
+uv run pbi-agent config profiles select chatgpt
+uv run pbi-agent
+```
+
+`auth-login` opens the browser flow by default. Use `--method device` for the device-code fallback. The full saved-provider workflow, including the equivalent Settings-page flow in the web UI, is documented in [Providers](/guide/providers#openai-via-chatgpt-subscription).

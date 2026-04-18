@@ -1,7 +1,5 @@
 # TODO
 
-- [x] Inspect the current auth-modal completion behavior and screenshot
-- [ ] Update the modal so completed flows stop showing in-progress auth instructions
-- [ ] Add a frontend regression test for the completed browser-auth state
-- [ ] Run frontend validation
-- [ ] Append the change summary to `MEMORY.md`
+- [x] Inspect the current display architecture and confirm the `AGENTS.md` `ui/` section is stale
+- [x] Update `AGENTS.md` to remove or replace the invalid UI-layer description
+- [x] Append this documentation cleanup to `MEMORY.md`

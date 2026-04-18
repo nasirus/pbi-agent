@@ -75,9 +75,22 @@ Stored providers hold connection-only settings: provider kind, API key, and endp
 | Command | Purpose |
 | --- | --- |
 | `pbi-agent config providers list` | List saved providers. |
-| `pbi-agent config providers create --name NAME [--id ID] --kind PROVIDER [--api-key KEY] [--responses-url URL] [--generic-api-url URL]` | Create a provider. |
-| `pbi-agent config providers update ID [--name NAME] [--kind PROVIDER] [--api-key KEY] [--responses-url URL] [--generic-api-url URL]` | Update a provider by ID. |
+| `pbi-agent config providers create --name NAME [--id ID] --kind PROVIDER [--auth-mode api_key|chatgpt_account] [--api-key KEY] [--responses-url URL] [--generic-api-url URL]` | Create a provider. |
+| `pbi-agent config providers update ID [--name NAME] [--kind PROVIDER] [--auth-mode api_key|chatgpt_account] [--api-key KEY] [--responses-url URL] [--generic-api-url URL]` | Update a provider by ID. |
 | `pbi-agent config providers delete ID` | Delete a provider by ID. Deletion fails while any saved model profile still references it. |
+| `pbi-agent config providers auth-status ID` | Show stored account-auth status for a provider. |
+| `pbi-agent config providers auth-login ID [--method browser|device]` | Run the built-in browser or device login flow for a provider. |
+| `pbi-agent config providers auth-refresh ID` | Refresh a stored account session for a provider. |
+| `pbi-agent config providers auth-logout ID` | Delete the stored account session for a provider. |
+| `pbi-agent config providers auth-import ID --access-token ...` | Import an account session manually. |
+
+::: details Provider auth notes
+
+- `chatgpt_account` is currently the only non-API-key auth mode, and it is only supported for the OpenAI provider.
+- The built-in `auth-login` flow stores a local account session under the saved provider ID, so it is intended for saved provider/profile workflows rather than one-off `--provider openai` runs.
+- `auth-login` defaults to the browser flow. Use `--method device` if you need a device-code fallback.
+
+:::
 
 ### `pbi-agent config profiles`
 

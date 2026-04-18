@@ -112,6 +112,56 @@ export OPENAI_API_KEY="sk-..."
 uv run pbi-agent --provider openai web
 ```
 
+### OpenAI via ChatGPT Subscription
+
+`pbi-agent` can also connect the OpenAI provider through a saved ChatGPT account session instead of an API key. This flow is tied to a saved Provider ID, so use saved provider/profile config rather than an ad hoc `--provider openai` invocation.
+
+::: tip
+OpenAI documents ChatGPT subscriptions and API billing as separate systems. A ChatGPT plan does not move API billing into `platform.openai.com`, but this app can reuse a ChatGPT subscription session for the OpenAI provider through the built-in account-auth flow. See [Using Codex with your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt) and [Billing settings in ChatGPT vs Platform](https://help.openai.com/en/articles/9039756).
+:::
+
+#### CLI Workflow
+
+Create a saved OpenAI provider with ChatGPT-account auth, create a model profile that points at it, complete the sign-in flow, then select that profile for runtime use:
+
+```bash
+uv run pbi-agent config providers create \
+  --name "OpenAI ChatGPT" \
+  --kind openai \
+  --auth-mode chatgpt_account
+
+uv run pbi-agent config profiles create \
+  --name chatgpt \
+  --provider-id openai-chatgpt \
+  --model gpt-5.4 \
+  --sub-agent-model gpt-5.4-mini
+
+uv run pbi-agent config providers auth-login openai-chatgpt
+uv run pbi-agent config providers auth-status openai-chatgpt
+
+uv run pbi-agent config profiles select chatgpt
+uv run pbi-agent web
+```
+
+Notes:
+
+- `auth-login` uses the browser flow by default.
+- Use `uv run pbi-agent config providers auth-login openai-chatgpt --method device` when you need a device-code fallback.
+- Use `auth-refresh` to refresh a stored session and `auth-logout` to delete the local session.
+- Runtime commands use the ChatGPT-backed provider when you select the saved profile or provider. If you only pass `--provider openai` without selecting that saved config, normal API-key resolution still applies.
+
+#### Web UI Workflow
+
+The browser UI exposes the same flow from **Settings**:
+
+1. Add or edit an OpenAI provider.
+2. Set **Authentication** to **ChatGPT account** and save it.
+3. On the provider card, click **Connect**.
+4. Complete the browser sign-in, or switch to **Device code** in the modal if needed.
+5. Create or update a model profile that uses that provider, then make it active.
+
+The provider card shows the stored account email, plan label when available, expiry, and `Connect` / `Refresh` / `Disconnect` actions for the saved ChatGPT session.
+
 ## xAI
 
 | Setting | Value |

@@ -120,9 +120,6 @@ Abstract `Provider` base class with implementations for each LLM. All use synchr
 ### Tools (`tools/`)
 Registered in `tools/registry.py`. All tools receive `ToolContext` (workspace, display, settings). Key tools: `apply_patch` (V4A diffs), `shell` (workspace-confined), `python_exec` (local Python with pandas/pypdf/python-docx), `skill_knowledge` (retrieves Power BI Markdown docs from `skills/`), `sub_agent`, `read_file`, `search_files`, `list_files`, `read_web_url`, `init_report`.
 
-### UI Layer (`ui/`)
-Built on Textual. `DisplayProtocol` abstracts UI so implementations can be swapped (web TUI via `app.py`, console via `console_display.py`, test spy via `conftest.py::DisplaySpy`).
-
 ### Settings Resolution (`config.py`)
 Precedence: CLI flags > `PBI_AGENT_*` env vars > provider-specific env vars (e.g., `OPENAI_API_KEY`) > internal config (`~/.pbi-agent/config.json`, per-provider) > defaults. Supports `.env` files via `python-dotenv`.
 
