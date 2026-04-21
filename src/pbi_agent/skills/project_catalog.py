@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from pbi_agent.frontmatter import FrontmatterParseError, parse_simple_frontmatter
+
 from rich.console import Console
 from rich.table import Table
 
@@ -121,21 +123,10 @@ def _extract_frontmatter(content: str) -> str:
 
 
 def _parse_frontmatter(frontmatter: str) -> dict[str, str]:
-    metadata: dict[str, str] = {}
-    for line in frontmatter.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        colon_idx = stripped.find(":")
-        if colon_idx < 0:
-            raise SkillManifestError(
-                f"frontmatter line is not a key-value pair: {stripped!r}."
-            )
-        key = stripped[:colon_idx].strip()
-        value = stripped[colon_idx + 1 :].strip()
-        if not key:
-            raise SkillManifestError("frontmatter contains an empty key.")
-        metadata[key] = value
-    if not metadata:
-        raise SkillManifestError("frontmatter is empty.")
-    return metadata
+    try:
+        return parse_simple_frontmatter(
+            frontmatter,
+            block_scalar_keys=frozenset({"description"}),
+        )
+    except FrontmatterParseError as exc:
+        raise SkillManifestError(str(exc)) from exc

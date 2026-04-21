@@ -645,3 +645,64 @@ def test_install_project_skill_rejects_unsupported_manifest_structure(
     ):
         install_project_skill("owner/repo", workspace=tmp_path)
     assert "not a key-value pair" in capsys.readouterr().err
+
+
+def test_install_project_skill_accepts_folded_description_block_scalar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_bytes = _make_zip_archive(
+        {
+            "repo-main/skills/compress/SKILL.md": (
+                "---\n"
+                "name: compress\n"
+                "description: >\n"
+                "  Compress natural language memory files into a shorter form.\n"
+                "  Preserve code blocks, links, and commands.\n"
+                "---\n\n"
+                "# Compress\n"
+            ),
+            "repo-main/skills/compress/scripts/__init__.py": "",
+        }
+    )
+    _install_fake_github(monkeypatch, archive_bytes=archive_bytes)
+
+    result = install_project_skill(
+        "owner/repo",
+        workspace=tmp_path,
+        skill_name="compress",
+    )
+
+    assert result.name == "compress"
+    installed = tmp_path / ".agents" / "skills" / "compress" / "SKILL.md"
+    assert installed.is_file()
+    assert "description: >" in installed.read_text(encoding="utf-8")
+
+
+def test_install_project_skill_rejects_block_scalar_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    archive_bytes = _make_zip_archive(
+        {
+            "repo-main/skills/compress/SKILL.md": (
+                "---\n"
+                "name: >\n"
+                "  compress\n"
+                "  helper\n"
+                "description: Compress memory files.\n"
+                "---\n\n"
+                "# Compress\n"
+            ),
+        }
+    )
+    _install_fake_github(monkeypatch, archive_bytes=archive_bytes)
+
+    with pytest.raises(
+        ProjectSkillInstallError,
+        match="No valid skills found. Skills require a SKILL.md with name and description.",
+    ):
+        install_project_skill("owner/repo", workspace=tmp_path)
+
+    assert "unsupported block scalar for key 'name'" in capsys.readouterr().err

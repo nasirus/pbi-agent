@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+from pbi_agent.frontmatter import FrontmatterParseError, parse_simple_frontmatter
+
 _DISCOVERY_ROOT = Path(".agents/skills")
 
 
@@ -109,26 +111,11 @@ def _extract_frontmatter(content: str, skill_path: Path) -> str | None:
 
 
 def _parse_frontmatter(frontmatter: str, skill_path: Path) -> dict[str, str] | None:
-    """Parse simple ``key: value`` frontmatter without external dependencies."""
-    result: dict[str, str] = {}
-    for line in frontmatter.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        colon_idx = stripped.find(":")
-        if colon_idx < 0:
-            _warn(
-                f"Skipping skill at {skill_path}: "
-                f"frontmatter line is not a key-value pair: {stripped!r}."
-            )
-            return None
-        key = stripped[:colon_idx].strip()
-        value = stripped[colon_idx + 1 :].strip()
-        if not key:
-            _warn(f"Skipping skill at {skill_path}: frontmatter contains an empty key.")
-            return None
-        result[key] = value
-    if not result:
-        _warn(f"Skipping skill at {skill_path}: frontmatter is empty.")
+    try:
+        return parse_simple_frontmatter(
+            frontmatter,
+            block_scalar_keys=frozenset({"description"}),
+        )
+    except FrontmatterParseError as exc:
+        _warn(f"Skipping skill at {skill_path}: {exc}")
         return None
-    return result

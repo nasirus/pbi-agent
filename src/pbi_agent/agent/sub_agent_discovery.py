@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+from pbi_agent.frontmatter import FrontmatterParseError, parse_simple_frontmatter
+
 from rich.console import Console
 from rich.table import Table
 
@@ -176,94 +178,11 @@ def _extract_frontmatter(content: str, agent_path: Path) -> str | None:
 
 
 def _parse_frontmatter(frontmatter: str, agent_path: Path) -> dict[str, str] | None:
-    """Parse a limited frontmatter subset.
-
-    Supported syntax:
-    - ``key: value`` scalar pairs
-    - blank lines and ``#`` comments
-    - ``|`` and ``>`` block scalars with indented content
-    - only ``name`` and ``description`` frontmatter keys are supported
-
-    This is intentionally not a general YAML parser. Unsupported YAML constructs
-    such as lists, nested mappings, anchors, and extra keys are rejected.
-    """
-    result: dict[str, str] = {}
-    lines = frontmatter.splitlines()
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            index += 1
-            continue
-
-        indent = len(line) - len(line.lstrip(" "))
-        colon_idx = stripped.find(":")
-        if colon_idx < 0:
-            _warn(
-                f"Skipping sub-agent at {agent_path}: "
-                f"frontmatter line is not a key-value pair: {stripped!r}."
-            )
-            return None
-
-        key = stripped[:colon_idx].strip()
-        value = stripped[colon_idx + 1 :].strip()
-        if not key:
-            _warn(
-                f"Skipping sub-agent at {agent_path}: frontmatter contains an empty key."
-            )
-            return None
-
-        if not value:
-            next_index = index + 1
-            while next_index < len(lines):
-                next_line = lines[next_index]
-                next_stripped = next_line.strip()
-                if not next_stripped or next_stripped.startswith("#"):
-                    next_index += 1
-                    continue
-                next_indent = len(next_line) - len(next_line.lstrip(" "))
-                if next_indent > indent:
-                    _warn(
-                        f"Skipping sub-agent at {agent_path}: unsupported YAML "
-                        f"structure for key {key!r}; only scalar values and block "
-                        "scalars are supported."
-                    )
-                    return None
-                break
-
-        if value in {"|", ">"}:
-            block_lines: list[str] = []
-            index += 1
-            while index < len(lines):
-                next_line = lines[index]
-                next_stripped = next_line.strip()
-                next_indent = len(next_line) - len(next_line.lstrip(" "))
-                if next_stripped and next_indent <= indent:
-                    break
-                if not next_stripped:
-                    block_lines.append("")
-                else:
-                    block_lines.append(next_line[indent + 1 :])
-                index += 1
-            if value == "|":
-                result[key] = "\n".join(block_lines)
-            else:
-                result[key] = " ".join(
-                    part.strip() for part in block_lines if part.strip()
-                )
-            continue
-
-        result[key] = _parse_scalar(value)
-        index += 1
-
-    if not result:
-        _warn(f"Skipping sub-agent at {agent_path}: frontmatter is empty.")
+    try:
+        return parse_simple_frontmatter(
+            frontmatter,
+            block_scalar_keys=frozenset({"description"}),
+        )
+    except FrontmatterParseError as exc:
+        _warn(f"Skipping sub-agent at {agent_path}: {exc}")
         return None
-    return result
-
-
-def _parse_scalar(value: str) -> str:
-    if len(value) >= 2 and value[:1] == value[-1:] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value

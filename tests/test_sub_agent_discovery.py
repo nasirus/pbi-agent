@@ -116,6 +116,27 @@ def test_description_supports_colons_and_block_scalars(tmp_path: Path) -> None:
     ]
 
 
+def test_block_scalar_name_is_skipped(tmp_path: Path, capsys) -> None:
+    _write_sub_agent(
+        tmp_path,
+        "researcher.md",
+        (
+            "---\n"
+            "name: >\n"
+            "  research\n"
+            "  helper\n"
+            "description: Valid description.\n"
+            "---\n\n"
+            "Research prompt.\n"
+        ),
+    )
+
+    agents = discover_project_sub_agents(tmp_path)
+
+    assert agents == []
+    assert "unsupported block scalar for key 'name'" in capsys.readouterr().err
+
+
 def test_description_supports_simple_quoted_scalars(tmp_path: Path) -> None:
     _write_sub_agent(
         tmp_path,
