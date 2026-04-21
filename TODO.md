@@ -1,4 +1,6 @@
-[X] Review `AGENTS.md` task-memory rules and inspect current `MEMORY.md` / `TODO.md`
-[X] Compact historical memory into durable notes and preserve current-day detailed events
-[X] Rewrite `MEMORY.md` into the required three-section format
-[X] Reset `TODO.md` for this session and record completion
+[X] Inspect default catalog docs mentions
+[X] Update CLI reference with official repo URLs
+[X] Update customization guide with official repo URLs
+[X] Check README for matching wording
+[X] Run docs validation
+[X] Append task memory
