@@ -229,11 +229,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable verbose logs.",
     )
     diagnostics_group.add_argument(
-        "--skills",
-        action="store_true",
-        help="List discovered project skills from .agents/skills and exit.",
-    )
-    diagnostics_group.add_argument(
         "--mcp",
         action="store_true",
         help="List discovered project MCP servers from .agents and exit.",
@@ -346,6 +341,56 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Overwrite existing files if they already exist.",
+    )
+
+    skills_parser = add_command_parser(
+        "skills", "List or install project-scoped skills."
+    )
+    skills_subparsers = skills_parser.add_subparsers(
+        dest="skills_action",
+        required=True,
+        metavar="<action>",
+    )
+    skills_subparsers.add_parser(
+        "list",
+        prog="pbi-agent skills list",
+        description="List installed project skills from .agents/skills.",
+        help="List installed project skills.",
+        formatter_class=CleanHelpFormatter,
+    )
+    skills_add_parser = skills_subparsers.add_parser(
+        "add",
+        prog="pbi-agent skills add",
+        description=(
+            "Install a project skill bundle from the official catalog, a local "
+            "directory, or a GitHub repository."
+        ),
+        help="Install a project skill bundle.",
+        formatter_class=CleanHelpFormatter,
+    )
+    skills_add_parser.add_argument(
+        "source",
+        nargs="?",
+        default=None,
+        help=(
+            "Optional source. Omit to use the official pbi-agent/skills catalog. "
+            "Supports local paths, owner/repo, repository URLs, and tree URLs."
+        ),
+    )
+    skills_add_parser.add_argument(
+        "--skill",
+        default=None,
+        help="Select one skill from a multi-skill repository.",
+    )
+    skills_add_parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List remote candidate skills without installing anything.",
+    )
+    skills_add_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing local project skill install.",
     )
 
     config_parser = add_command_parser(
@@ -717,12 +762,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- commands that don't need settings ----
 
-    if args.skills:
-        return _handle_skills_flag(args)
     if args.mcp:
         return _handle_mcp_flag(args)
     if args.agents:
         return _handle_agents_flag(args)
+
+    if args.command == "skills":
+        return _handle_skills_command(args)
 
     if args.command == "init":
         return _handle_init_command(args)
@@ -1125,26 +1171,52 @@ def _print_device_auth_instructions(device_auth) -> None:
     print("Waiting for device authorization ...")
 
 
-def _handle_skills_flag(args: argparse.Namespace) -> int:
-    from pbi_agent.agent.skill_discovery import discover_project_skills
-    from rich.console import Console
-    from rich.table import Table
+def _handle_skills_command(args: argparse.Namespace) -> int:
+    if args.skills_action == "list":
+        return _handle_skills_list_command(args)
+    if args.skills_action == "add":
+        return _handle_skills_add_command(args)
+    print(f"Error: unknown skills action {args.skills_action!r}", file=sys.stderr)
+    return 2
 
-    target_dir = _workspace_directory_for_args(args)
-    skills = discover_project_skills(workspace=target_dir)
-    console = Console()
 
-    if not skills:
-        console.print("[dim]No project skills discovered under[/dim] .agents/skills/")
-        return 0
+def _handle_skills_list_command(args: argparse.Namespace) -> int:
+    from pbi_agent.skills.project_catalog import render_installed_project_skills
 
-    table = Table(title="Project Skills", title_style="bold cyan")
-    table.add_column("Name", style="green")
-    table.add_column("Description")
-    table.add_column("Location", style="dim")
-    for skill in skills:
-        table.add_row(skill.name, skill.description, str(skill.location))
-    console.print(table)
+    return render_installed_project_skills(workspace=Path.cwd().resolve())
+
+
+def _handle_skills_add_command(args: argparse.Namespace) -> int:
+    from pbi_agent.skills.project_installer import (
+        DEFAULT_SKILLS_SOURCE,
+        ProjectSkillInstallError,
+        install_project_skill,
+        list_remote_project_skills,
+        render_remote_skill_listing,
+    )
+
+    effective_source = args.source or DEFAULT_SKILLS_SOURCE
+
+    try:
+        if args.source is None and args.skill is None:
+            listing = list_remote_project_skills(effective_source)
+            return render_remote_skill_listing(listing)
+
+        if args.list:
+            listing = list_remote_project_skills(effective_source)
+            return render_remote_skill_listing(listing)
+
+        result = install_project_skill(
+            effective_source,
+            skill_name=args.skill,
+            force=args.force,
+            workspace=Path.cwd().resolve(),
+        )
+    except ProjectSkillInstallError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Installed skill '{result.name}' to {result.install_path}")
     return 0
 
 

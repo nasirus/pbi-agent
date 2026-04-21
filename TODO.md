@@ -1,6 +1,4 @@
-# TODO
-
-- [x] Fetch `master` and surface PR #157 merge conflicts locally
-- [x] Resolve conflicts without dropping the Copilot branch work
-- [x] Run focused validation on the merged result
-- [x] Append the merge notes to `MEMORY.md`
+[X] Review `AGENTS.md` task-memory rules and inspect current `MEMORY.md` / `TODO.md`
+[X] Compact historical memory into durable notes and preserve current-day detailed events
+[X] Rewrite `MEMORY.md` into the required three-section format
+[X] Reset `TODO.md` for this session and record completion

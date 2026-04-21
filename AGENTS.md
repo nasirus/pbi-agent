@@ -36,9 +36,16 @@ uv tool install --reinstall .
 
 ## Task Memory
 
-- Use `MEMORY.md` for long-term agent memory and session continuity. At the start of substantive work, consult it when available for relevant prior context.
-- After each implementation, append a brief entry to `MEMORY.md` describing what changed, why it changed, validation performed, and any context useful for the next session.
-- Always add new `MEMORY.md` entries at the end of the file in append mode. Never insert a new memory entry in the middle of existing history.
+- Use a single `MEMORY.md` file for both durable memory and recent task history.
+- Keep `MEMORY.md` in three sections only: `Metadata`, `Long-Term Memory`, and `Detailed Task Events`.
+- At the start of substantive work, read `Metadata`, `Long-Term Memory`, and any current-day detailed entries relevant to the task.
+- Keep `Long-Term Memory` compact and edited in place. Store only durable facts: stable repo conventions, important decisions, reusable validation patterns, active follow-ups, and artifacts that matter beyond one task.
+- Keep `Detailed Task Events` append-only within the active day. Group entries under one `## YYYY-MM-DD` heading per day.
+- After each implementation, append one short task entry to the current day with only: what changed, validation, and next context if needed.
+- On the first substantive task of a new day, compact the previous day's detailed entries before appending new ones.
+- During compaction, promote durable facts into `Long-Term Memory`, carry unresolved items into an open-thread bullet if still relevant, and remove or collapse prior-day detail that is no longer needed.
+- Avoid duplicating long-term bullets. Merge with existing bullets when the fact already exists.
+- Keep the file token-efficient: prefer short bullets, avoid command noise, and do not preserve obsolete troubleshooting detail once compacted.
 - Use `TODO.md` for the current task session only.
 - Create or reset `TODO.md` before starting substantive work.
 - Use compact TODO markers: `[ ]` pending, `[>]` in progress, `[X]` done, `[!]` blocked, `[-]` dropped.
