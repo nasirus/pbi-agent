@@ -167,12 +167,41 @@ class DefaultWebCommandTests(unittest.TestCase):
 
         self.assertEqual(args.sub_agent_model, "gpt-5-mini")
 
-    def test_parser_accepts_skills_flag(self) -> None:
+    def test_parser_accepts_skills_list_command(self) -> None:
         parser = cli.build_parser()
 
-        args = parser.parse_args(["--skills", "web"])
+        args = parser.parse_args(["skills", "list"])
 
-        self.assertTrue(args.skills)
+        self.assertEqual(args.command, "skills")
+        self.assertEqual(args.skills_action, "list")
+
+    def test_parser_accepts_skills_add_command(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(
+            [
+                "skills",
+                "add",
+                "owner/repo",
+                "--skill",
+                "repo-skill",
+                "--list",
+                "--force",
+            ]
+        )
+
+        self.assertEqual(args.command, "skills")
+        self.assertEqual(args.skills_action, "add")
+        self.assertEqual(args.source, "owner/repo")
+        self.assertEqual(args.skill, "repo-skill")
+        self.assertTrue(args.list)
+        self.assertTrue(args.force)
+
+    def test_parser_rejects_removed_skills_flag(self) -> None:
+        with self.assertRaises(SystemExit) as exc_info:
+            cli.build_parser().parse_args(["--skills"])
+
+        self.assertEqual(exc_info.exception.code, 2)
 
     def test_parser_accepts_mcp_flag(self) -> None:
         parser = cli.build_parser()
@@ -638,7 +667,7 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("Project directory does not exist", stderr.getvalue())
 
-    def test_main_skills_flag_lists_project_skills_without_settings(self) -> None:
+    def test_main_skills_list_lists_project_skills_without_settings(self) -> None:
         stdout = io.StringIO()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -657,7 +686,7 @@ class DefaultWebCommandTests(unittest.TestCase):
             try:
                 os.chdir(root_dir)
                 with patch("sys.stdout", stdout):
-                    rc = cli.main(["--skills"])
+                    rc = cli.main(["skills", "list"])
             finally:
                 os.chdir(original_cwd)
 
@@ -665,6 +694,22 @@ class DefaultWebCommandTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Project Skills", output)
         self.assertIn("repo-skill", output)
+
+    def test_main_skills_add_routes_without_settings(self) -> None:
+        with (
+            patch(
+                "pbi_agent.cli._handle_skills_command", return_value=41
+            ) as mock_handle,
+            patch("pbi_agent.cli.resolve_runtime") as mock_resolve_runtime,
+            patch("pbi_agent.cli.resolve_web_runtime") as mock_resolve_web_runtime,
+        ):
+            rc = cli.main(["skills", "add", "owner/repo"])
+
+        self.assertEqual(rc, 41)
+        self.assertEqual(mock_handle.call_args.args[0].command, "skills")
+        self.assertEqual(mock_handle.call_args.args[0].skills_action, "add")
+        mock_resolve_runtime.assert_not_called()
+        mock_resolve_web_runtime.assert_not_called()
 
     def test_main_mcp_flag_lists_project_servers_without_settings(self) -> None:
         stdout = io.StringIO()

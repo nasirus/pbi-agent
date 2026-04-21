@@ -1,6 +1,4 @@
-# TODO
-
-- [x] Fetch `master` and surface PR #157 merge conflicts locally
-- [x] Resolve conflicts without dropping the Copilot branch work
-- [x] Run focused validation on the merged result
-- [x] Append the merge notes to `MEMORY.md`
+[X] Inspect current `skills add` CLI and installer flow
+[X] Identify default-source behavior change for issue #163
+[X] Map required tests and docs updates
+[>] Write implementation plan
