@@ -77,7 +77,7 @@ Lists the currently installed project-local skills discovered under `.agents/ski
 
 Installs a skill bundle from the official catalog, a local directory, or a GitHub repository.
 
-- Omitting `source` uses the official `pbi-agent/skills` catalog.
+- Omitting `source` uses the official `pbi-agent/skills` catalog from `https://github.com/pbi-agent/skills`.
 - `pbi-agent skills add` lists the official catalog and exits.
 - `pbi-agent skills add --list` also lists candidate skills from the selected source.
 - `pbi-agent skills add --skill NAME` installs one named skill from the selected source.
@@ -89,6 +89,41 @@ Installs a skill bundle from the official catalog, a local directory, or a GitHu
 | `--skill NAME` | none | Select one skill from a multi-skill source, or install one skill from the default catalog. |
 | `--list` | `false` | List candidate skills from the selected source without installing anything. |
 | `--force` | `false` | Replace an existing local install under `.agents/skills/<skill-name>`. |
+
+## `pbi-agent commands`
+
+List installed project commands or install reusable command presets into `.agents/commands/`.
+
+```bash
+pbi-agent commands list
+pbi-agent commands add
+pbi-agent commands add --command execute
+pbi-agent commands add ./commands/local
+pbi-agent commands add owner/private-repo --command repo-review
+```
+
+### `pbi-agent commands list`
+
+Lists the currently installed project-local command files discovered under `.agents/commands/`.
+
+### `pbi-agent commands add [source]`
+
+Installs a command preset from the official catalog, a local path, or a GitHub repository.
+
+- Omitting `source` uses the official `pbi-agent/commands` catalog from `https://github.com/pbi-agent/commands`.
+- `pbi-agent commands add` lists the official catalog and exits.
+- `pbi-agent commands add --list` also lists candidate commands from the selected source.
+- `pbi-agent commands add --command NAME` installs one named command from the selected source.
+- Explicit multi-command sources still require `--command NAME` for installation.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `source` | `pbi-agent/commands` when omitted | Local path, GitHub `owner/repo`, GitHub repository URL, or GitHub tree URL. |
+| `--command NAME` | none | Select one command from a multi-command source, or install one command from the default catalog. |
+| `--list` | `false` | List candidate commands from the selected source without installing anything. |
+| `--force` | `false` | Replace an existing local install under `.agents/commands/<command-name>.md`. |
+
+Public command catalogs are discovered from `commands/*.md` by default. If a repository keeps command files under `.agents/commands/`, target that directory explicitly with a local path or GitHub tree URL.
 
 ## `pbi-agent config`
 

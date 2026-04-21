@@ -393,6 +393,58 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace an existing local project skill install.",
     )
 
+    commands_parser = add_command_parser(
+        "commands", "List or install project-scoped commands."
+    )
+    commands_subparsers = commands_parser.add_subparsers(
+        dest="commands_action",
+        required=True,
+        metavar="<action>",
+    )
+    commands_subparsers.add_parser(
+        "list",
+        prog="pbi-agent commands list",
+        description="List installed project commands from .agents/commands.",
+        help="List installed project commands.",
+        formatter_class=CleanHelpFormatter,
+    )
+    commands_add_parser = commands_subparsers.add_parser(
+        "add",
+        prog="pbi-agent commands add",
+        description=(
+            "Install a project command from the official catalog, a local path, "
+            "or a GitHub repository."
+        ),
+        help="Install a project command.",
+        formatter_class=CleanHelpFormatter,
+    )
+    commands_add_parser.add_argument(
+        "source",
+        nargs="?",
+        default=None,
+        help=(
+            "Optional source. Omit to use the official pbi-agent/commands "
+            "catalog. Supports local paths, owner/repo, repository URLs, and "
+            "tree URLs."
+        ),
+    )
+    commands_add_parser.add_argument(
+        "--command",
+        dest="command_name",
+        default=None,
+        help="Select one command from a multi-command source.",
+    )
+    commands_add_parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List remote candidate commands without installing anything.",
+    )
+    commands_add_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing local project command install.",
+    )
+
     config_parser = add_command_parser(
         "config", "Manage saved providers and model profiles."
     )
@@ -769,6 +821,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "skills":
         return _handle_skills_command(args)
+
+    if args.command == "commands":
+        return _handle_commands_command(args)
 
     if args.command == "init":
         return _handle_init_command(args)
@@ -1217,6 +1272,55 @@ def _handle_skills_add_command(args: argparse.Namespace) -> int:
         return 2
 
     print(f"Installed skill '{result.name}' to {result.install_path}")
+    return 0
+
+
+def _handle_commands_command(args: argparse.Namespace) -> int:
+    if args.commands_action == "list":
+        return _handle_commands_list_command(args)
+    if args.commands_action == "add":
+        return _handle_commands_add_command(args)
+    print(f"Error: unknown commands action {args.commands_action!r}", file=sys.stderr)
+    return 2
+
+
+def _handle_commands_list_command(args: argparse.Namespace) -> int:
+    from pbi_agent.commands.project_catalog import render_installed_project_commands
+
+    return render_installed_project_commands(workspace=Path.cwd().resolve())
+
+
+def _handle_commands_add_command(args: argparse.Namespace) -> int:
+    from pbi_agent.commands.project_installer import (
+        DEFAULT_COMMANDS_SOURCE,
+        ProjectCommandInstallError,
+        install_project_command,
+        list_remote_project_commands,
+        render_remote_command_listing,
+    )
+
+    effective_source = args.source or DEFAULT_COMMANDS_SOURCE
+
+    try:
+        if args.source is None and args.command_name is None:
+            listing = list_remote_project_commands(effective_source)
+            return render_remote_command_listing(listing)
+
+        if args.list:
+            listing = list_remote_project_commands(effective_source)
+            return render_remote_command_listing(listing)
+
+        result = install_project_command(
+            effective_source,
+            command_name=args.command_name,
+            force=args.force,
+            workspace=Path.cwd().resolve(),
+        )
+    except ProjectCommandInstallError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Installed command '{result.slash_alias}' to {result.install_path}")
     return 0
 
 

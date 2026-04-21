@@ -238,6 +238,48 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertEqual(args.skills_action, "add")
         self.assertEqual(args.source, "./skills/local")
 
+    def test_parser_accepts_commands_list_command(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["commands", "list"])
+
+        self.assertEqual(args.command, "commands")
+        self.assertEqual(args.commands_action, "list")
+
+    def test_parser_accepts_commands_add_command(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(
+            [
+                "commands",
+                "add",
+                "owner/repo",
+                "--command",
+                "execute",
+                "--list",
+                "--force",
+            ]
+        )
+
+        self.assertEqual(args.command, "commands")
+        self.assertEqual(args.commands_action, "add")
+        self.assertEqual(args.source, "owner/repo")
+        self.assertEqual(args.command_name, "execute")
+        self.assertTrue(args.list)
+        self.assertTrue(args.force)
+
+    def test_parser_accepts_commands_add_without_source(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["commands", "add"])
+
+        self.assertEqual(args.command, "commands")
+        self.assertEqual(args.commands_action, "add")
+        self.assertIsNone(args.source)
+        self.assertIsNone(args.command_name)
+        self.assertFalse(args.list)
+        self.assertFalse(args.force)
+
     def test_parser_rejects_removed_skills_flag(self) -> None:
         with self.assertRaises(SystemExit) as exc_info:
             cli.build_parser().parse_args(["--skills"])
@@ -819,6 +861,120 @@ class DefaultWebCommandTests(unittest.TestCase):
 
         self.assertEqual(rc, 9)
         mock_list.assert_called_once_with("./skills/local")
+        mock_render.assert_called_once_with(listing)
+
+    def test_main_commands_list_lists_project_commands_without_settings(self) -> None:
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            root_dir = Path(tmpdir).resolve()
+            commands_dir = root_dir / ".agents" / "commands"
+            commands_dir.mkdir(parents=True)
+            (commands_dir / "execute.md").write_text(
+                "# Execute\n\nRun the task end-to-end.\n",
+                encoding="utf-8",
+            )
+
+            try:
+                os.chdir(root_dir)
+                with patch("sys.stdout", stdout):
+                    rc = cli.main(["commands", "list"])
+            finally:
+                os.chdir(original_cwd)
+
+        self.assertEqual(rc, 0)
+        output = stdout.getvalue()
+        self.assertIn("Project Commands", output)
+        self.assertIn("/execute", output)
+
+    def test_main_commands_add_routes_without_settings(self) -> None:
+        with (
+            patch(
+                "pbi_agent.cli._handle_commands_command", return_value=37
+            ) as mock_handle,
+            patch("pbi_agent.cli.resolve_runtime") as mock_resolve_runtime,
+            patch("pbi_agent.cli.resolve_web_runtime") as mock_resolve_web_runtime,
+        ):
+            rc = cli.main(["commands", "add", "owner/repo"])
+
+        self.assertEqual(rc, 37)
+        self.assertEqual(mock_handle.call_args.args[0].command, "commands")
+        self.assertEqual(mock_handle.call_args.args[0].commands_action, "add")
+        mock_resolve_runtime.assert_not_called()
+        mock_resolve_web_runtime.assert_not_called()
+
+    def test_handle_commands_add_without_source_lists_default_catalog(self) -> None:
+        args = cli.build_parser().parse_args(["commands", "add"])
+        listing = object()
+
+        with (
+            patch(
+                "pbi_agent.commands.project_installer.list_remote_project_commands",
+                return_value=listing,
+            ) as mock_list,
+            patch(
+                "pbi_agent.commands.project_installer.render_remote_command_listing",
+                return_value=13,
+            ) as mock_render,
+            patch(
+                "pbi_agent.commands.project_installer.install_project_command"
+            ) as mock_install,
+        ):
+            rc = cli._handle_commands_add_command(args)
+
+        self.assertEqual(rc, 13)
+        mock_list.assert_called_once_with("pbi-agent/commands")
+        mock_render.assert_called_once_with(listing)
+        mock_install.assert_not_called()
+
+    def test_handle_commands_add_with_command_and_no_source_installs_default_catalog(
+        self,
+    ) -> None:
+        args = cli.build_parser().parse_args(
+            ["commands", "add", "--command", "execute"]
+        )
+        result = Mock(name="result")
+        result.slash_alias = "/execute"
+        result.install_path = Path("/tmp/workspace/.agents/commands/execute.md")
+
+        with (
+            patch(
+                "pbi_agent.commands.project_installer.install_project_command",
+                return_value=result,
+            ) as mock_install,
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            rc = cli._handle_commands_add_command(args)
+
+        self.assertEqual(rc, 0)
+        mock_install.assert_called_once()
+        self.assertEqual(mock_install.call_args.args[0], "pbi-agent/commands")
+        self.assertEqual(mock_install.call_args.kwargs["command_name"], "execute")
+        self.assertIn("Installed command '/execute'", stdout.getvalue())
+
+    def test_handle_commands_add_with_explicit_source_and_list_keeps_source(
+        self,
+    ) -> None:
+        args = cli.build_parser().parse_args(
+            ["commands", "add", "./commands/local", "--list"]
+        )
+        listing = object()
+
+        with (
+            patch(
+                "pbi_agent.commands.project_installer.list_remote_project_commands",
+                return_value=listing,
+            ) as mock_list,
+            patch(
+                "pbi_agent.commands.project_installer.render_remote_command_listing",
+                return_value=11,
+            ) as mock_render,
+        ):
+            rc = cli._handle_commands_add_command(args)
+
+        self.assertEqual(rc, 11)
+        mock_list.assert_called_once_with("./commands/local")
         mock_render.assert_called_once_with(listing)
 
     def test_main_mcp_flag_lists_project_servers_without_settings(self) -> None:

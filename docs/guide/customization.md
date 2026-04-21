@@ -90,7 +90,7 @@ pbi-agent skills add ./skills/local-skill
 pbi-agent skills add owner/private-repo --skill repo-review
 ```
 
-Omitting `source` uses the official `pbi-agent/skills` catalog and lists the available entries. Explicit multi-skill sources still require `--skill <name>` when installing.
+Omitting `source` uses the official `pbi-agent/skills` catalog from `https://github.com/pbi-agent/skills` and lists the available entries. Explicit multi-skill sources still require `--skill <name>` when installing.
 
 Supported roots:
 
@@ -108,6 +108,33 @@ description: Use this skill when the task matches this repository-specific workf
 At runtime, discovered skills are appended to the active system prompt as an `<available_skills>` catalog with the absolute `SKILL.md` path. The model is expected to load a relevant skill itself with `read_file` before proceeding, then use `read_file`, `list_files`, and `search_files` to inspect referenced project-local resources as needed.
 
 This v1 implementation is project-only. User-level skill directories are intentionally not scanned, and any files referenced by a project skill must remain inside the workspace so the existing file tools can access them safely.
+
+## Project command files
+
+`pbi-agent` also supports project-local command presets. These are single-turn prompt instructions loaded from Markdown files under `.agents/commands/`, with each filename becoming a slash command such as `/review`.
+
+You can manage project-local installs directly from the CLI:
+
+```bash
+pbi-agent commands add
+pbi-agent commands add --command execute
+pbi-agent commands add ./commands/local
+pbi-agent commands add owner/private-repo --command repo-review
+```
+
+Omitting `source` uses the official `pbi-agent/commands` catalog from `https://github.com/pbi-agent/commands` and lists the available entries. Explicit multi-command sources still require `--command <name>` when installing.
+
+Supported local install root:
+
+- `.agents/commands/<command-name>.md`
+
+Remote public catalogs are discovered from:
+
+- `commands/*.md`
+
+If a source repository keeps command files under `.agents/commands/`, target that directory explicitly with a local path or GitHub tree URL.
+
+At runtime, project commands are discovered from `.agents/commands/*.md`. The normalized filename becomes the slash alias, and the file contents are injected as active turn instructions when the user starts a message with that alias. Reserved built-in local commands such as `/skills`, `/mcp`, and `/agents` still take precedence.
 
 ## Project sub-agent files
 
