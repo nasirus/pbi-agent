@@ -16,6 +16,7 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
 
+from pbi_agent import __version__
 from pbi_agent.auth.cli_flow import (
     run_provider_browser_auth_flow,
     run_provider_device_auth_flow,
@@ -106,6 +107,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=CleanHelpFormatter,
         allow_abbrev=False,
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show the current version and exit.",
     )
     provider_group = parser.add_argument_group("Provider and API")
     provider_group.add_argument(
@@ -793,7 +801,7 @@ def _default_command_insertion_index(
     while index < len(argv):
         token = argv[index]
 
-        if token in command_names or token in {"-h", "--help"}:
+        if token in command_names or token in {"-h", "--help", "-v", "--version"}:
             return None
         if token == "--":
             return index

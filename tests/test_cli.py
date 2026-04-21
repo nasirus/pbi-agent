@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from pbi_agent import __version__
 from pbi_agent import cli
 from pbi_agent.auth.store import build_auth_session
 from pbi_agent.config import load_internal_config
@@ -82,6 +83,36 @@ class DefaultWebCommandTests(unittest.TestCase):
         parser = cli.build_parser()
 
         self.assertEqual(cli._argv_with_default_command(parser, ["--help"]), ["--help"])
+
+    def test_argv_with_default_command_keeps_root_version_long_flag(self) -> None:
+        parser = cli.build_parser()
+
+        self.assertEqual(
+            cli._argv_with_default_command(parser, ["--version"]), ["--version"]
+        )
+
+    def test_argv_with_default_command_keeps_root_version_short_flag(self) -> None:
+        parser = cli.build_parser()
+
+        self.assertEqual(cli._argv_with_default_command(parser, ["-v"]), ["-v"])
+
+    def test_parser_version_long_flag_prints_resolved_version(self) -> None:
+        stdout = io.StringIO()
+
+        with patch("sys.stdout", stdout), self.assertRaises(SystemExit) as exc_info:
+            cli.build_parser().parse_args(["--version"])
+
+        self.assertEqual(exc_info.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"pbi-agent {__version__}")
+
+    def test_parser_version_short_flag_prints_resolved_version(self) -> None:
+        stdout = io.StringIO()
+
+        with patch("sys.stdout", stdout), self.assertRaises(SystemExit) as exc_info:
+            cli.build_parser().parse_args(["-v"])
+
+        self.assertEqual(exc_info.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"pbi-agent {__version__}")
 
     def test_root_help_keeps_long_options_and_descriptions_on_single_rows(self) -> None:
         with patch(

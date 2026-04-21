@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import threading
 import uuid
 from dataclasses import dataclass, replace
@@ -115,6 +116,9 @@ APP_EVENT_STREAM_ID = "app"
 _MAX_EVENT_HISTORY = 1000
 _NON_RUNNABLE_BOARD_STAGE_IDS = frozenset({KANBAN_STAGE_BACKLOG, KANBAN_STAGE_DONE})
 _PROVIDER_AUTH_BROWSER_FLOW_TIMEOUT_SECS = 5 * 60
+_STRUCTURED_TASK_HEADER_PATTERN = re.compile(
+    r"^#{1,6}\s+|^[-*]\s+|^\d+\.\s+", re.MULTILINE
+)
 
 
 def _now_iso() -> str:
@@ -1044,11 +1048,15 @@ class WebSessionManager:
         if profile_id is not None:
             self._resolve_runtime(profile_id)
         stage_id = stage or self._default_board_stage_id()
+        normalized_title, normalized_prompt = self._normalize_task_content(
+            title=title,
+            prompt=prompt,
+        )
         with SessionStore() as store:
             record = store.create_kanban_task(
                 directory=self._directory_key,
-                title=title,
-                prompt=prompt,
+                title=normalized_title,
+                prompt=normalized_prompt,
                 stage=stage_id,
                 project_dir=project_dir,
                 session_id=session_id,
@@ -1079,6 +1087,13 @@ class WebSessionManager:
             current = store.get_kanban_task(task_id)
             if current is None or current.directory != self._directory_key:
                 raise KeyError(task_id)
+            normalized_title = current.title if title is None else title
+            normalized_prompt = current.prompt if prompt is None else prompt
+            if title is not None or prompt is not None:
+                normalized_title, normalized_prompt = self._normalize_task_content(
+                    title=normalized_title,
+                    prompt=normalized_prompt,
+                )
             if stage is not None or position is not None:
                 current = store.move_kanban_task(
                     task_id,
@@ -1088,8 +1103,12 @@ class WebSessionManager:
                 assert current is not None
             updated = store.update_kanban_task(
                 task_id,
-                title=title,
-                prompt=prompt,
+                title=normalized_title
+                if title is not None or prompt is not None
+                else title,
+                prompt=normalized_prompt
+                if title is not None or prompt is not None
+                else prompt,
                 project_dir=project_dir,
                 session_id=session_id,
                 clear_session_id=session_id_present and session_id is None,
@@ -2059,6 +2078,20 @@ class WebSessionManager:
     def _is_non_runnable_stage(self, stage_id: str) -> bool:
         return stage_id in _NON_RUNNABLE_BOARD_STAGE_IDS
 
+    def _first_runnable_board_stage_id(
+        self,
+        *,
+        store: SessionStore | None = None,
+    ) -> str | None:
+        if store is None:
+            with SessionStore() as owned_store:
+                return self._first_runnable_board_stage_id(store=owned_store)
+        stages = store.list_kanban_stage_configs(self._directory_key)
+        for stage in stages:
+            if not self._is_non_runnable_stage(stage.stage_id):
+                return stage.stage_id
+        return None
+
     def _should_auto_start_stage(self, stage_id: str) -> bool:
         if self._is_non_runnable_stage(stage_id):
             return False
@@ -2083,6 +2116,8 @@ class WebSessionManager:
         self,
         prompt: str,
         stage_record: KanbanStageConfigRecord | None,
+        *,
+        store: SessionStore | None = None,
     ) -> str:
         stripped_prompt = prompt.strip()
         if (
@@ -2095,7 +2130,57 @@ class WebSessionManager:
         command = self._command_map().get(stage_record.command_id)
         if command is None:
             return prompt
+        first_runnable_stage_id = self._first_runnable_board_stage_id(store=store)
+        if stage_record.stage_id != first_runnable_stage_id:
+            return command.slash_alias
         return f"{command.slash_alias} {prompt}"
+
+    def _normalize_task_content(
+        self,
+        *,
+        title: str | None,
+        prompt: str | None,
+    ) -> tuple[str | None, str | None]:
+        normalized_title = title.strip() if isinstance(title, str) else title
+        normalized_prompt = prompt.strip() if isinstance(prompt, str) else prompt
+        if normalized_prompt is None:
+            return normalized_title, None
+        if self._prompt_looks_structured(normalized_prompt):
+            derived_title = normalized_title or self._derive_task_title(
+                normalized_prompt
+            )
+            if normalized_title and prompt is not None:
+                return derived_title, self._replace_structured_task_title(
+                    normalized_prompt,
+                    derived_title,
+                )
+            return derived_title, normalized_prompt
+        derived_title = normalized_title or self._derive_task_title(normalized_prompt)
+        return derived_title, self._format_task_prompt(derived_title, normalized_prompt)
+
+    def _prompt_looks_structured(self, prompt: str) -> bool:
+        if not prompt:
+            return False
+        if prompt.startswith("# ") or "\n## " in prompt:
+            return True
+        return bool(_STRUCTURED_TASK_HEADER_PATTERN.search(prompt))
+
+    def _derive_task_title(self, prompt: str) -> str:
+        lines = [line.strip(" -*\t") for line in prompt.splitlines() if line.strip()]
+        if not lines:
+            return "Untitled task"
+        return shorten(lines[0], 80)
+
+    def _format_task_prompt(self, title: str, prompt: str) -> str:
+        return f"# Task\n{title}\n\n## Goal\n{prompt}"
+
+    def _replace_structured_task_title(self, prompt: str, title: str) -> str:
+        if prompt.startswith("# Task\n"):
+            _header, separator, remainder = prompt.partition("\n\n")
+            if separator:
+                return f"# Task\n{title}{separator}{remainder}"
+            return f"# Task\n{title}"
+        return prompt
 
     def _maybe_auto_start_task(self, record: KanbanTaskRecord) -> dict[str, Any] | None:
         if not self._should_auto_start_stage(record.stage):

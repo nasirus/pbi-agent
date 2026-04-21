@@ -584,6 +584,41 @@ def test_task_creation_is_visible_on_app_event_stream() -> None:
     assert event["payload"]["task"]["title"] == "Task A"
 
 
+def test_task_creation_structures_plain_prompt_content() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/tasks",
+            json={
+                "title": "Investigate PBIP",
+                "prompt": "Review the model and list the broken visuals.",
+            },
+        )
+
+    assert response.status_code == 200
+    task = response.json()["task"]
+    assert task["title"] == "Investigate PBIP"
+    assert task["prompt"] == (
+        "# Task\nInvestigate PBIP\n\n## Goal\n"
+        "Review the model and list the broken visuals."
+    )
+
+
+def test_task_creation_preserves_existing_structured_prompt() -> None:
+    app = create_app(_settings())
+    structured_prompt = "# Task\nInvestigate PBIP\n\n## Goal\nReview the model."
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/tasks",
+            json={"title": "Investigate PBIP", "prompt": structured_prompt},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["task"]["prompt"] == structured_prompt
+
+
 def test_task_creation_rejects_blank_title() -> None:
     app = create_app(_settings())
 
@@ -808,7 +843,119 @@ def test_run_task_from_backlog_moves_to_next_stage_before_execution(
     assert task_payload["run_status"] == "completed"
     assert task_payload["session_id"] == "session-123"
     assert mock_run.call_args is not None
-    assert mock_run.call_args.args[0] == "/plan Investigate"
+    assert mock_run.call_args.args[0] == (
+        "/plan # Task\nTask A\n\n## Goal\nInvestigate"
+    )
+
+
+def test_run_task_only_prepends_command_for_first_runnable_stage(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _write_default_commands(tmp_path)
+    app = create_app(_settings())
+
+    with patch(
+        "pbi_agent.web.session_manager.run_single_turn_in_directory",
+        return_value=SimpleNamespace(
+            tool_errors=[],
+            text="Reviewed.",
+            session_id="session-456",
+        ),
+    ) as mock_run:
+        with TestClient(app) as client:
+            client.put(
+                "/api/board/stages",
+                json={
+                    "board_stages": [
+                        {"id": "backlog", "name": "Backlog"},
+                        {"id": "plan", "name": "Plan", "command_id": "plan"},
+                        {"id": "review", "name": "Review", "command_id": "review"},
+                    ]
+                },
+            )
+            create_response = client.post(
+                "/api/tasks",
+                json={"title": "Task A", "prompt": "Investigate", "stage": "review"},
+            )
+            assert create_response.status_code == 200
+            task_id = create_response.json()["task"]["task_id"]
+
+            run_response = client.post(f"/api/tasks/{task_id}/run")
+            assert run_response.status_code == 200
+
+            deadline = time.monotonic() + 2
+            while True:
+                task_response = client.get("/api/tasks")
+                task_payload = task_response.json()["tasks"][0]
+                if (
+                    task_payload["stage"] == "done"
+                    and task_payload["run_status"] == "completed"
+                ):
+                    break
+                if time.monotonic() > deadline:
+                    raise AssertionError("review task run did not finish in time")
+                time.sleep(0.01)
+
+    assert mock_run.call_args is not None
+    assert mock_run.call_args.args[0] == "/review"
+
+
+def test_task_update_title_refreshes_structured_prompt_heading() -> None:
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/api/tasks",
+            json={"title": "Task A", "prompt": "Investigate"},
+        )
+        assert create_response.status_code == 200
+        task_id = create_response.json()["task"]["task_id"]
+
+        update_response = client.patch(
+            f"/api/tasks/{task_id}",
+            json={"title": "Task B"},
+        )
+
+    assert update_response.status_code == 200
+    task = update_response.json()["task"]
+    assert task["title"] == "Task B"
+    assert task["prompt"] == "# Task\nTask B\n\n## Goal\nInvestigate"
+
+
+def test_task_stage_move_keeps_structured_prompt_canonical(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _write_default_commands(tmp_path)
+    app = create_app(_settings())
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/board/stages",
+            json={
+                "board_stages": [
+                    {"id": "backlog", "name": "Backlog"},
+                    {"id": "plan", "name": "Plan", "command_id": "plan"},
+                    {"id": "review", "name": "Review", "command_id": "review"},
+                ]
+            },
+        )
+        assert response.status_code == 200
+
+        create_response = client.post(
+            "/api/tasks",
+            json={"title": "Task A", "prompt": "Investigate", "stage": "plan"},
+        )
+        assert create_response.status_code == 200
+        task = create_response.json()["task"]
+        task_id = task["task_id"]
+        original_prompt = task["prompt"]
+
+        move_response = client.patch(f"/api/tasks/{task_id}", json={"stage": "review"})
+
+    assert move_response.status_code == 200
+    assert move_response.json()["task"]["prompt"] == original_prompt
 
 
 def test_auto_start_stage_runs_once_before_done(monkeypatch, tmp_path) -> None:
