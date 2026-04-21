@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import threading
 
 import pytest
 
@@ -424,6 +425,90 @@ def test_web_manager_lease_blocks_concurrent_owner(tmp_path) -> None:
             owner_id="owner-b",
             stale_after_seconds=30,
         )
+
+
+def test_web_manager_lease_atomic_across_concurrent_startup(tmp_path) -> None:
+    db = tmp_path / "sessions.db"
+    barrier = threading.Barrier(2)
+    results: list[bool] = []
+    errors: list[Exception] = []
+    result_lock = threading.Lock()
+
+    def attempt(owner_id: str) -> None:
+        try:
+            with SessionStore(db_path=db) as store:
+                barrier.wait(timeout=2)
+                acquired = store.acquire_web_manager_lease(
+                    "/w",
+                    owner_id=owner_id,
+                    stale_after_seconds=30,
+                )
+            with result_lock:
+                results.append(acquired)
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            with result_lock:
+                errors.append(exc)
+
+    first = threading.Thread(target=attempt, args=("owner-a",))
+    second = threading.Thread(target=attempt, args=("owner-b",))
+    first.start()
+    second.start()
+    first.join(timeout=3)
+    second.join(timeout=3)
+
+    assert not errors
+    assert sorted(results) == [False, True]
+
+
+def test_web_manager_lease_atomic_for_stale_takeover(tmp_path) -> None:
+    db = tmp_path / "sessions.db"
+    with SessionStore(db_path=db) as store:
+        assert store.acquire_web_manager_lease(
+            "/w",
+            owner_id="stale-owner",
+            stale_after_seconds=30,
+        )
+        with store._lock:
+            store._conn.execute(
+                "UPDATE web_manager_leases SET heartbeat_at = ?, updated_at = ? "
+                "WHERE directory = ?",
+                (
+                    "2000-01-01T00:00:00+00:00",
+                    "2000-01-01T00:00:00+00:00",
+                    "/w",
+                ),
+            )
+            store._conn.commit()
+
+    barrier = threading.Barrier(2)
+    results: list[bool] = []
+    errors: list[Exception] = []
+    result_lock = threading.Lock()
+
+    def attempt(owner_id: str) -> None:
+        try:
+            with SessionStore(db_path=db) as store:
+                barrier.wait(timeout=2)
+                acquired = store.acquire_web_manager_lease(
+                    "/w",
+                    owner_id=owner_id,
+                    stale_after_seconds=30,
+                )
+            with result_lock:
+                results.append(acquired)
+        except Exception as exc:  # pragma: no cover - assertion reports details
+            with result_lock:
+                errors.append(exc)
+
+    first = threading.Thread(target=attempt, args=("owner-a",))
+    second = threading.Thread(target=attempt, args=("owner-b",))
+    first.start()
+    second.start()
+    first.join(timeout=3)
+    second.join(timeout=3)
+
+    assert not errors
+    assert sorted(results) == [False, True]
 
 
 def test_move_kanban_task_reorders_within_stage(tmp_path) -> None:

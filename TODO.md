@@ -1,5 +1,6 @@
-[X] Diagnose false `failed` state during active kanban task execution
-[X] Add workspace manager lease to prevent concurrent manager startup from clobbering running tasks
-[X] Move running-task recovery to managed app startup and keep lease alive until task workers finish
-[X] Add regression tests for lease behavior and live-task second-manager startup
-[X] Run focused validation
+[X] Inspect OpenAI and ChatGPT subscription request ordering paths
+[X] Revert the unsafe OpenAI Responses first-turn patch
+[X] Keep ChatGPT subscription ordering behavior intact
+[X] Add or update focused regression coverage
+[X] Run targeted validation
+[X] Append task note to MEMORY.md

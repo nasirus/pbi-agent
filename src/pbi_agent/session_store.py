@@ -537,6 +537,7 @@ class SessionStore:
         )
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
+        self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._ensure_schema()
@@ -610,47 +611,60 @@ class SessionStore:
         normalized_directory = _normalize_directory_key(directory)
         now = _now_iso()
         with self._lock:
-            row = self._conn.execute(
-                "SELECT owner_id, heartbeat_at FROM web_manager_leases "
-                "WHERE directory = ?",
-                (normalized_directory,),
-            ).fetchone()
-            if row is None:
-                self._conn.execute(
-                    "INSERT INTO web_manager_leases "
-                    "(directory, owner_id, heartbeat_at, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (normalized_directory, owner_id, now, now, now),
-                )
-                self._conn.commit()
-                return True
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT owner_id, heartbeat_at FROM web_manager_leases "
+                    "WHERE directory = ?",
+                    (normalized_directory,),
+                ).fetchone()
+                if row is None:
+                    self._conn.execute(
+                        "INSERT INTO web_manager_leases "
+                        "(directory, owner_id, heartbeat_at, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (normalized_directory, owner_id, now, now, now),
+                    )
+                    self._conn.commit()
+                    return True
 
-            current_owner = str(row["owner_id"])
-            if current_owner == owner_id:
+                current_owner = str(row["owner_id"])
+                if current_owner == owner_id:
+                    self._conn.execute(
+                        "UPDATE web_manager_leases "
+                        "SET heartbeat_at = ?, updated_at = ? "
+                        "WHERE directory = ?",
+                        (now, now, normalized_directory),
+                    )
+                    self._conn.commit()
+                    return True
+
+                heartbeat_at = str(row["heartbeat_at"])
+                if not _is_stale_timestamp(
+                    heartbeat_at,
+                    stale_after_seconds=stale_after_seconds,
+                ):
+                    self._conn.rollback()
+                    return False
+
                 self._conn.execute(
                     "UPDATE web_manager_leases "
-                    "SET heartbeat_at = ?, updated_at = ? "
+                    "SET owner_id = ?, heartbeat_at = ?, created_at = ?, updated_at = ? "
                     "WHERE directory = ?",
-                    (now, now, normalized_directory),
+                    (owner_id, now, now, now, normalized_directory),
                 )
                 self._conn.commit()
                 return True
-
-            heartbeat_at = str(row["heartbeat_at"])
-            if not _is_stale_timestamp(
-                heartbeat_at,
-                stale_after_seconds=stale_after_seconds,
-            ):
-                return False
-
-            self._conn.execute(
-                "UPDATE web_manager_leases "
-                "SET owner_id = ?, heartbeat_at = ?, created_at = ?, updated_at = ? "
-                "WHERE directory = ?",
-                (owner_id, now, now, now, normalized_directory),
-            )
-            self._conn.commit()
-            return True
+            except sqlite3.OperationalError as exc:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                if "database is locked" in str(exc).lower():
+                    return False
+                raise
+            except Exception:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
 
     def renew_web_manager_lease(self, directory: str, *, owner_id: str) -> bool:
         normalized_directory = _normalize_directory_key(directory)
