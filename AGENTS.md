@@ -50,7 +50,7 @@ uv tool install --reinstall .
 - Create or reset `TODO.md` before starting substantive work.
 - Use compact TODO markers: `[ ]` pending, `[>]` in progress, `[X]` done, `[!]` blocked, `[-]` dropped.
 - Update `TODO.md` as you work. Mark steps complete when they finish, and revise the list when scope changes.
-- If `TODO.md` contains an old completed or unrelated list, replace it before making new changes.
+- If TODO.md contains a completed task list, reset it before adding new changes. If it contains an unfinished list, append the new task instead.
 
 ## Architecture Snapshot
 
