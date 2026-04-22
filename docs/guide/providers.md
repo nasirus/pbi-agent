@@ -177,7 +177,7 @@ The provider card shows the stored account email, plan label when available, exp
 
 ```bash
 export XAI_API_KEY="xai-..."
-uv run pbi-agent --provider xai run --prompt "List the report pages in this PBIP project."
+uv run pbi-agent --provider xai run --prompt "Summarize the main folders and scripts in this repository."
 ```
 
 ## Google

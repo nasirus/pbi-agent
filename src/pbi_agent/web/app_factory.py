@@ -25,7 +25,7 @@ from pbi_agent.web.session_manager import APP_EVENT_STREAM_ID, WebSessionManager
 
 WEB_DIR = Path(__file__).resolve().parent
 APP_STATIC_DIR = WEB_DIR / "static" / "app"
-FAVICON_PATH = WEB_DIR / "static" / "favicon.png"
+LOGO_PATH = WEB_DIR / "static" / "logo.jpg"
 
 
 def create_app(
@@ -54,7 +54,7 @@ def create_app(
             manager.shutdown()
 
     app = FastAPI(
-        title=title or "PBI Agent",
+        title=title or "pbi-agent",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -84,15 +84,19 @@ def create_app(
 
     @app.get("/favicon.ico")
     def favicon_ico() -> FileResponse:
-        return FileResponse(FAVICON_PATH, media_type="image/png")
+        return FileResponse(LOGO_PATH, media_type="image/jpeg")
 
     @app.get("/favicon.png")
     def favicon_png() -> FileResponse:
-        return FileResponse(FAVICON_PATH, media_type="image/png")
+        return FileResponse(LOGO_PATH, media_type="image/jpeg")
 
     @app.get("/logo.png")
     def logo() -> FileResponse:
-        return FileResponse(FAVICON_PATH, media_type="image/png")
+        return FileResponse(LOGO_PATH, media_type="image/jpeg")
+
+    @app.get("/logo.jpg")
+    def logo_jpg() -> FileResponse:
+        return FileResponse(LOGO_PATH, media_type="image/jpeg")
 
     app.include_router(system_router)
     app.include_router(config_router)
@@ -104,7 +108,7 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> Response:
-        return spa_index_response(title or "PBI Agent")
+        return spa_index_response(title or "pbi-agent")
 
     @app.get("/{full_path:path}", response_class=HTMLResponse)
     def spa_fallback(full_path: str) -> Response:
@@ -112,7 +116,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="Not found.")
         if full_path == APP_EVENT_STREAM_ID:
             raise HTTPException(status_code=404, detail="Not found.")
-        return spa_index_response(title or "PBI Agent")
+        return spa_index_response(title or "pbi-agent")
 
     return app
 
@@ -129,7 +133,7 @@ def spa_index_response(title: str) -> Response:
             "<style>body{font-family:system-ui,sans-serif;background:#0b1020;"
             "color:#eef2ff;padding:40px}code{background:#111827;padding:2px 6px;"
             "border-radius:6px}</style></head><body>"
-            "<h1>PBI Agent Web UI assets are missing.</h1>"
+            "<h1>pbi-agent web assets are missing.</h1>"
             "<p>Run <code>bun install</code> then <code>bun run web:build</code> "
             "to build the bundled frontend.</p></body></html>"
         )

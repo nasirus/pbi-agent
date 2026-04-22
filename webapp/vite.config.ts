@@ -16,6 +16,18 @@ export default defineConfig({
         target: "http://127.0.0.1:8000",
         ws: true,
       },
+      "/logo.jpg": {
+        target: "http://127.0.0.1:8000",
+      },
+      "/logo.png": {
+        target: "http://127.0.0.1:8000",
+      },
+      "/favicon.ico": {
+        target: "http://127.0.0.1:8000",
+      },
+      "/favicon.png": {
+        target: "http://127.0.0.1:8000",
+      },
     },
   },
   build: {

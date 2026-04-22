@@ -363,8 +363,8 @@ def test_remote_listing_ignores_internal_dot_agents_skills(
 ) -> None:
     archive_bytes = _make_zip_archive(
         {
-            "repo-main/skills/powerbi/SKILL.md": (
-                "---\nname: powerbi\ndescription: Public skill.\n---\n\n# PowerBI\n"
+            "repo-main/skills/workspace-helper/SKILL.md": (
+                "---\nname: workspace-helper\ndescription: Public skill.\n---\n\n# Workspace Helper\n"
             ),
             "repo-main/.agents/skills/create-skill/SKILL.md": (
                 "---\nname: create-skill\ndescription: Internal skill.\n---\n\n# Internal\n"
@@ -375,7 +375,7 @@ def test_remote_listing_ignores_internal_dot_agents_skills(
 
     listing = list_remote_project_skills("owner/repo")
 
-    assert [candidate.name for candidate in listing.candidates] == ["powerbi"]
+    assert [candidate.name for candidate in listing.candidates] == ["workspace-helper"]
     assert all(
         candidate.subpath != ".agents/skills/create-skill"
         for candidate in listing.candidates

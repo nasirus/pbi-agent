@@ -1,5 +1,5 @@
-[X] Run full Python test suite and capture failures
-[X] Diagnose failing tests and isolate root causes
-[X] Implement targeted fixes
-[X] Re-run affected tests, then full Python suite if needed
-[X] Append task summary to MEMORY.md
+[X] Consolidate branding assets to one canonical logo file
+[X] Update backend and app/docs references to the shared logo
+[X] Remove duplicated favicon/logo source files
+[!] JS build validation remains blocked in this shell because `bun` and `node` are unavailable
+[X] Append task summary to `MEMORY.md`

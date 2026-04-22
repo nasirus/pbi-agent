@@ -1,6 +1,6 @@
 ---
 title: 'CLI Reference'
-description: 'Commands, global options, defaults, and audit behavior for pbi-agent.'
+description: 'Commands, global options, and runtime defaults for pbi-agent.'
 ---
 
 # CLI Reference
@@ -33,7 +33,7 @@ If you run `pbi-agent` without a command, the CLI inserts `web` automatically. G
 | `--mcp` | none | `false` | List discovered project MCP servers from `.agents/mcp.json` and exit. |
 | `--agents` | none | `false` | List discovered project sub-agents from `.agents/agents/*.md` and exit. |
 
-Saved config is only mutated by `pbi-agent config ...` commands. Runtime commands such as `run`, `audit`, and `web` resolve settings but do not rewrite saved providers or profiles.
+Saved config is only mutated by `pbi-agent config ...` commands. Runtime entry points such as `run` and `web` resolve settings but do not rewrite saved providers or profiles.
 
 Per-provider model defaults:
 
@@ -250,7 +250,7 @@ After `/image add`, send your normal prompt. The staged images are attached to t
 Execute a single prompt turn and exit.
 
 ```bash
-pbi-agent run --prompt "Summarize the tables in this model."
+pbi-agent run --prompt "Summarize the main modules in this repository."
 pbi-agent run --prompt "Read the text in this image." --image ./general_ocr_002.png
 ```
 
@@ -273,62 +273,6 @@ Supported image formats are `.png`, `.jpg`, `.jpeg`, and `.webp`.
 
 For unsupported providers, image input fails fast with a clear error.
 
-## `pbi-agent audit`
-
-Run report audit mode and write markdown output into the selected PBIP directory.
-
-```bash
-pbi-agent audit --report-dir .
-```
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `--report-dir` | `.` | Relative report directory to audit. The path must exist and be a directory. |
-
-### Audit Domains and Weights
-
-| Domain | Weight |
-| --- | --- |
-| Security | `x3.0` |
-| Performance | `x1.5` |
-| DAX Quality | `x1.5` |
-| Modeling | `x1.5` |
-| Structure | `x1.5` |
-| Documentation | `x1.0` |
-| Anti-patterns | `x1.0` |
-
-### Audit Output
-
-| File | Meaning |
-| --- | --- |
-| `AUDIT-REPORT.md` | Detailed report with evidence, score card, consolidated findings, and action plan |
-| `AUDIT-TODO.md` | Progress tracker used to resume incomplete audits |
-
-### Audit Grades
-
-| Grade | Range |
-| --- | --- |
-| `A` | `90-100%` |
-| `B` | `80-89%` |
-| `C` | `70-79%` |
-| `D` | `60-69%` |
-| `F` | `<60%` |
-
-See [Audit System](/guide/audit) for the full scoring summary.
-
-## `pbi-agent init`
-
-Scaffold a new PBIP template project from the bundled report assets.
-
-```bash
-pbi-agent init --dest .
-```
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `--dest` | current working directory | Target directory for the template files. |
-| `--force` | `false` | Overwrite existing files that would otherwise block initialization. |
-
 ::: warning
-`init`, `sessions`, and `config` do not resolve provider settings or require an API key. Runtime commands still validate provider configuration before they start the session.
+`skills`, `commands`, `agents`, `sessions`, and `config` do not resolve provider settings or require an API key. Runtime commands still validate provider configuration before they start the session.
 :::
