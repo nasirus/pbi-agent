@@ -4,7 +4,7 @@
 
 # pbi-agent
 
-*work smart.*
+*Work smart. Build faster.*
 
 [![Tests](https://github.com/pbi-agent/pbi-agent/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/pbi-agent/pbi-agent/actions/workflows/tests.yml)
 [![Publish](https://github.com/pbi-agent/pbi-agent/actions/workflows/publish.yml/badge.svg)](https://github.com/pbi-agent/pbi-agent/actions/workflows/publish.yml)
