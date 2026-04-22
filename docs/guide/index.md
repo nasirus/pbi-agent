@@ -5,7 +5,7 @@ description: 'What pbi-agent is, how it is structured, and which providers it su
 
 # What Is pbi-agent?
 
-`pbi-agent` is a local CLI tool for editing Power BI Project (`.pbip`) workspaces with an LLM agent. It communicates with providers over synchronous HTTP REST APIs using `urllib.request`, so the runtime does not depend on provider SDKs.
+`pbi-agent` is a local coding agent for multi-domain workspace automation. It communicates with providers over synchronous HTTP REST APIs using `urllib.request`, so the runtime does not depend on provider SDKs.
 
 ::: tip
 The same CLI surface can target OpenAI, xAI, Google Gemini, Anthropic, or a generic OpenAI-compatible backend.
@@ -30,10 +30,10 @@ CLI
 | CLI | Parses global options, inserts the default `web` command when needed, and dispatches subcommands. |
 | Config | Resolves provider, API key, model, retry limits, and other runtime settings. |
 | Provider | Sends synchronous HTTP requests to the selected API shape and normalizes tool calls and text output. |
-| Agent Session | Runs interactive sessions, single-turn execution, audit mode, and delegated `sub_agent` child sessions. |
+| Agent Session | Runs interactive sessions, single-turn execution, and delegated `sub_agent` child sessions. |
 | Tool Runtime | Executes requested tools serially or in parallel based on `--max-tool-workers`. |
 | Tool Catalog | Merges built-in tools with any discovered MCP tools and project sub-agent choices before provider setup. |
-| Tools | Exposes `shell`, `python_exec`, `apply_patch`, `skill_knowledge`, `init_report`, `sub_agent`, and discovered MCP tools. |
+| Tools | Exposes `shell`, `python_exec`, `apply_patch`, `sub_agent`, workspace file/image/web tools, and discovered MCP tools. |
 
 ## Supported Providers
 

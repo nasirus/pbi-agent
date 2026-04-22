@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="src/pbi_agent/web/static/favicon.png" alt="PBI Agent logo" width="120">
+<img src="src/pbi_agent/web/static/logo.jpg" alt="pbi-agent logo" width="120">
 
-# PBI AGENT
+# pbi-agent
 
-*Lightweight local coding agent.*
+*work smart.*
 
 [![Tests](https://github.com/pbi-agent/pbi-agent/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/pbi-agent/pbi-agent/actions/workflows/tests.yml)
 [![Publish](https://github.com/pbi-agent/pbi-agent/actions/workflows/publish.yml/badge.svg)](https://github.com/pbi-agent/pbi-agent/actions/workflows/publish.yml)
@@ -14,7 +14,7 @@
 
 </div>
 
-`pbi-agent` is a lightweight, model-agnostic coding agent that runs in your terminal for orchestrating work through multi-agent collaboration and kanban-style coordination.
+`pbi-agent` is a lightweight, model-agnostic local coding agent for multi-domain work. It combines interactive sessions, reusable project skills and commands, sub-agents, MCP tools, and kanban-style coordination in one workspace-first runtime.
 
 Repository: [https://github.com/pbi-agent/pbi-agent](https://github.com/pbi-agent/pbi-agent)
 

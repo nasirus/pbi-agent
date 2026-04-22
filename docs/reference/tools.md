@@ -14,8 +14,6 @@ Project-local MCP servers are discovered from `.agents/mcp.json` and their tools
 | `shell` | yes | Run a shell command in the workspace and return stdout, stderr, and exit code. |
 | `python_exec` | yes | Run trusted local Python code with the same interpreter/environment as the CLI, including `pandas`, `pypdf`, and `python-docx`, and optionally capture a structured `result`. |
 | `apply_patch` | yes | Create, update, or delete files through a V4A diff-style file operation. |
-| `skill_knowledge` | no | Load bundled Power BI skill markdown from the local knowledge base. |
-| `init_report` | no | Scaffold the bundled PBIP template into a destination directory. |
 | `sub_agent` | no | Delegate a scoped task to a child agent, optionally selecting a discovered project sub-agent type and inheriting parent context. |
 | `list_files` | no | List files and directories in the workspace, with optional glob and type filtering. |
 | `search_files` | no | Search text file contents for a string or regex pattern. |
@@ -103,40 +101,6 @@ Execute trusted local Python snippets in a subprocess using the same Python inte
 `python_exec` is trusted local execution, not a sandbox. Executed code can read and write files the CLI can access, import installed packages from the active Python environment, including `pandas`, `pypdf`, and `python-docx`, and make any Python standard-library or package calls available to that interpreter. The subprocess boundary is for runtime stability and timeout enforcement, not for security isolation.
 :::
 
-## `skill_knowledge`
-
-Load Power BI skill markdown from the bundled knowledge base.
-
-| Parameter | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `skills` | `string[]` | yes | One or more skill names to retrieve. |
-
-```json
-{
-  "skills": ["report_structure", "bar_chart_visual"]
-}
-```
-
-::: details Bundled skill files (15)
-`action_button`, `bar_chart_visual`, `card_visual`, `composite_model_entity_query_guardrails`, `csv_local_import`, `filter_propagation`, `navigation_bookmarks`, `report_structure`, `skill_generator`, `slicer_visual`, `table_visual`, `theme_branding`, `tmdl_descriptions`, `tmdl_modeling`, and `visual_container_schema`.
-:::
-
-## `init_report`
-
-Programmatically scaffold the bundled PBIP template.
-
-| Parameter | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `dest` | `string` | no | Destination directory. Defaults to `"."`. |
-| `force` | `boolean` | no | Overwrite existing template files when `true`. Defaults to `false`. |
-
-```json
-{
-  "dest": ".",
-  "force": false
-}
-```
-
 ## `sub_agent`
 
 Delegate a focused task to a child agent that runs with the same provider and tool catalog as the parent session.
@@ -162,7 +126,7 @@ Runtime behavior:
 - The child inherits the parent provider and tool catalog, but `sub_agent` itself is disabled inside the child, so nested sub-agent calls fail fast.
 - OpenAI and Google reuse the parent conversation checkpoint when available; other providers fall back to replaying the visible parent transcript plus the current live user turn.
 - Unknown `agent_type` values are rejected before the child session starts.
-- The child session is bounded to `50` provider requests or `600` elapsed seconds, whichever happens first.
+- The child session is bounded to `100` provider requests or `1200` elapsed seconds, whichever happens first.
 
 ## `list_files`
 

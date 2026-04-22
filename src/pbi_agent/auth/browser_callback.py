@@ -11,7 +11,7 @@ _DEFAULT_CALLBACK_PORT = 1455
 _CALLBACK_SERVER_HOST = "127.0.0.1"
 _SUCCESS_HTML = """<!doctype html>
 <html>
-  <head><meta charset="utf-8"><title>PBI Agent Authorization Complete</title></head>
+  <head><meta charset="utf-8"><title>pbi-agent authorization complete</title></head>
   <body>
     <h1>Authorization complete</h1>
     <p>You can close this window and return to pbi-agent.</p>
@@ -21,7 +21,7 @@ _SUCCESS_HTML = """<!doctype html>
 """
 _ERROR_HTML = """<!doctype html>
 <html>
-  <head><meta charset="utf-8"><title>PBI Agent Authorization Failed</title></head>
+  <head><meta charset="utf-8"><title>pbi-agent authorization failed</title></head>
   <body>
     <h1>Authorization failed</h1>
     <p>{message}</p>
@@ -74,9 +74,7 @@ class _BrowserCallbackHandler(BaseHTTPRequestHandler):
                     code=_first_query_value(params, "code"),
                     state=_first_query_value(params, "state"),
                     error=_first_query_value(params, "error"),
-                    error_description=_first_query_value(
-                        params, "error_description"
-                    ),
+                    error_description=_first_query_value(params, "error_description"),
                 )
             )
         except Exception as exc:  # pragma: no cover - defensive
@@ -88,7 +86,9 @@ class _BrowserCallbackHandler(BaseHTTPRequestHandler):
             return
         self._send_html(
             400,
-            _ERROR_HTML.format(message=outcome.error_message or "Authorization failed."),
+            _ERROR_HTML.format(
+                message=outcome.error_message or "Authorization failed."
+            ),
         )
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A003

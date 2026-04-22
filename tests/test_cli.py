@@ -253,12 +253,12 @@ class DefaultWebCommandTests(unittest.TestCase):
     def test_parser_accepts_skills_add_skill_without_source(self) -> None:
         parser = cli.build_parser()
 
-        args = parser.parse_args(["skills", "add", "--skill", "powerbi"])
+        args = parser.parse_args(["skills", "add", "--skill", "workspace-helper"])
 
         self.assertEqual(args.command, "skills")
         self.assertEqual(args.skills_action, "add")
         self.assertIsNone(args.source)
-        self.assertEqual(args.skill, "powerbi")
+        self.assertEqual(args.skill, "workspace-helper")
 
     def test_parser_accepts_skills_add_local_path_source(self) -> None:
         parser = cli.build_parser()
@@ -894,10 +894,12 @@ class DefaultWebCommandTests(unittest.TestCase):
     def test_handle_skills_add_with_skill_and_no_source_installs_default_catalog(
         self,
     ) -> None:
-        args = cli.build_parser().parse_args(["skills", "add", "--skill", "powerbi"])
+        args = cli.build_parser().parse_args(
+            ["skills", "add", "--skill", "workspace-helper"]
+        )
         result = Mock(name="result")
-        result.name = "powerbi"
-        result.install_path = Path("/tmp/workspace/.agents/skills/powerbi")
+        result.name = "workspace-helper"
+        result.install_path = Path("/tmp/workspace/.agents/skills/workspace-helper")
 
         with (
             patch(
@@ -911,8 +913,10 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         mock_install.assert_called_once()
         self.assertEqual(mock_install.call_args.args[0], "pbi-agent/skills")
-        self.assertEqual(mock_install.call_args.kwargs["skill_name"], "powerbi")
-        self.assertIn("Installed skill 'powerbi'", stdout.getvalue())
+        self.assertEqual(
+            mock_install.call_args.kwargs["skill_name"], "workspace-helper"
+        )
+        self.assertIn("Installed skill 'workspace-helper'", stdout.getvalue())
 
     def test_handle_skills_add_with_explicit_source_and_list_keeps_source(self) -> None:
         args = cli.build_parser().parse_args(

@@ -1,11 +1,11 @@
 ---
 title: 'pbi-agent'
-description: 'Multi-provider LLM CLI agent for Power BI report editing'
+description: 'Local coding agent for skills, commands, agents, and multi-domain workflows'
 layout: home
 hero:
   name: 'pbi-agent'
   text: 'Documentation'
-  tagline: 'Multi-provider LLM CLI agent for Power BI report editing'
+  tagline: 'Local coding agent for skills, commands, agents, and multi-domain workflows'
   actions:
     - theme: brand
       text: 'Get Started'
@@ -16,14 +16,14 @@ hero:
 features:
   - title: 'Multi-Provider Support'
     details: 'Target OpenAI, xAI, Google Gemini, Anthropic, or an OpenAI-compatible gateway from the same CLI.'
+  - title: 'Project Skills & Commands'
+    details: 'Install reusable project-local skills and slash-command presets from local sources or GitHub catalogs.'
   - title: 'Parallel Tool Execution'
     details: 'Run multiple model-requested tool calls concurrently with a configurable worker limit.'
   - title: 'Project Sub-Agents'
     details: 'Discover project-local sub-agent definitions from `.agents/agents/*.md` and route delegated work through `sub_agent`.'
-  - title: 'PBIP Template Scaffolding'
-    details: 'Bootstrap a Power BI Project from the bundled template with the init command or the init_report tool.'
   - title: 'Browser UI & Headless Runs'
-    details: 'Use the default browser UI for interactive work, or switch to single-prompt and audit commands for headless execution.'
+    details: 'Use the default browser UI for interactive work, or switch to single-prompt runs for headless execution.'
   - title: 'MCP Tool Integration'
     details: 'Discover project-local MCP servers from `.agents/mcp.json` and expose their tools to the model.'
 ---
@@ -82,11 +82,11 @@ pbi-agent --api-key "$OPENAI_API_KEY"
 | Section | What you will find |
 | --- | --- |
 | [Guide](/guide/) | Installation, provider setup, and architecture overview |
-| [CLI Reference](/reference/cli) | Commands, flags, defaults, and audit behavior |
+| [CLI Reference](/reference/cli) | Commands, flags, and runtime defaults |
 | [Tools](/reference/tools) | The built-in function tools available to the agent |
 | [Environment Variables](/reference/environment) | `PBI_AGENT_*` settings and provider-specific key fallbacks |
 | [Customization](/guide/customization) | `INSTRUCTIONS.md`, `AGENTS.md`, project skills, sub-agents, and MCP discovery |
 
 ::: details Why this project exists
-`pbi-agent` is designed for local, file-based Power BI Project workflows. It edits PBIP assets directly and talks to LLM providers through synchronous HTTP REST requests implemented with Python's standard library.
+`pbi-agent` is built for local, file-based coding workflows that need more than a bare chat loop. It keeps the runtime small, talks to providers through synchronous HTTP REST requests implemented with Python's standard library, and lets each workspace define its own skills, commands, agents, and MCP integrations.
 :::

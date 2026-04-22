@@ -27,7 +27,7 @@ from pbi_agent.auth.models import (
     DeviceAuthChallenge,
 )
 from pbi_agent.auth.store import build_auth_session, save_auth_session
-from pbi_agent.branding import PBI_AGENT_NAME, PBI_AGENT_TAGLINE
+from pbi_agent.branding import PBI_AGENT_TAGLINE
 from pbi_agent.cli import build_parser
 from pbi_agent.config import (
     ModelProfileConfig,
@@ -153,7 +153,7 @@ def test_web_server_prints_banner_and_starts_uvicorn() -> None:
         server.serve(debug=False)
 
     rendered = output.getvalue()
-    assert PBI_AGENT_NAME in rendered
+    assert "PPPPPP  BBBBBB  IIIII" in rendered
     assert PBI_AGENT_TAGLINE in rendered
     assert "http://127.0.0.1:9001" in rendered
     mock_run.assert_called_once()
@@ -580,7 +580,7 @@ def test_task_creation_is_visible_on_app_event_stream() -> None:
     with TestClient(app) as client:
         create_response = client.post(
             "/api/tasks",
-            json={"title": "Task A", "prompt": "Investigate the PBIP model"},
+            json={"title": "Task A", "prompt": "Investigate the workspace layout"},
         )
         assert create_response.status_code == 200
 
@@ -598,28 +598,30 @@ def test_task_creation_structures_plain_prompt_content() -> None:
         response = client.post(
             "/api/tasks",
             json={
-                "title": "Investigate PBIP",
-                "prompt": "Review the model and list the broken visuals.",
+                "title": "Investigate Workspace",
+                "prompt": "Review the repository and list the broken workflows.",
             },
         )
 
     assert response.status_code == 200
     task = response.json()["task"]
-    assert task["title"] == "Investigate PBIP"
+    assert task["title"] == "Investigate Workspace"
     assert task["prompt"] == (
-        "# Task\nInvestigate PBIP\n\n## Goal\n"
-        "Review the model and list the broken visuals."
+        "# Task\nInvestigate Workspace\n\n## Goal\n"
+        "Review the repository and list the broken workflows."
     )
 
 
 def test_task_creation_preserves_existing_structured_prompt() -> None:
     app = create_app(_settings())
-    structured_prompt = "# Task\nInvestigate PBIP\n\n## Goal\nReview the model."
+    structured_prompt = (
+        "# Task\nInvestigate Workspace\n\n## Goal\nReview the repository."
+    )
 
     with TestClient(app) as client:
         response = client.post(
             "/api/tasks",
-            json={"title": "Investigate PBIP", "prompt": structured_prompt},
+            json={"title": "Investigate Workspace", "prompt": structured_prompt},
         )
 
     assert response.status_code == 200
@@ -632,7 +634,7 @@ def test_task_creation_rejects_blank_title() -> None:
     with TestClient(app) as client:
         response = client.post(
             "/api/tasks",
-            json={"title": "   ", "prompt": "Investigate the PBIP model"},
+            json={"title": "   ", "prompt": "Investigate the workspace layout"},
         )
 
     assert response.status_code == 422
@@ -3475,6 +3477,7 @@ def test_static_and_spa_routes_return_expected_responses() -> None:
         favicon_ico_response = client.get("/favicon.ico")
         favicon_png_response = client.get("/favicon.png")
         logo_response = client.get("/logo.png")
+        logo_jpg_response = client.get("/logo.jpg")
         api_not_found_response = client.get("/api/not-found")
         stream_guard_response = client.get("/app")
 
@@ -3483,11 +3486,13 @@ def test_static_and_spa_routes_return_expected_responses() -> None:
     assert fallback_response.status_code == 200
     assert "text/html" in fallback_response.headers["content-type"]
     assert favicon_ico_response.status_code == 200
-    assert favicon_ico_response.headers["content-type"] == "image/png"
+    assert favicon_ico_response.headers["content-type"] == "image/jpeg"
     assert favicon_png_response.status_code == 200
-    assert favicon_png_response.headers["content-type"] == "image/png"
+    assert favicon_png_response.headers["content-type"] == "image/jpeg"
     assert logo_response.status_code == 200
-    assert logo_response.headers["content-type"] == "image/png"
+    assert logo_response.headers["content-type"] == "image/jpeg"
+    assert logo_jpg_response.status_code == 200
+    assert logo_jpg_response.headers["content-type"] == "image/jpeg"
     assert api_not_found_response.status_code == 404
     assert stream_guard_response.status_code == 404
 

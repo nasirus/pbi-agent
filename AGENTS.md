@@ -4,7 +4,7 @@ This file provides guidance to Coding Agent when working with code in this repos
 
 ## Project Summary
 
-**pbi-agent** is a local CLI and browser-based agent for creating, auditing, and editing Power BI PBIP reports with natural-language prompts. Provider integrations support OpenAI, xAI, Google Gemini, Anthropic, and generic OpenAI-compatible endpoints, and provider HTTP calls must use `urllib.request`. The default branch is `master`.
+**pbi-agent** is a local CLI and browser-based coding agent for multi-domain workspace tasks. It supports project-local skills, commands, sub-agents, MCP tool integration, and provider backends including OpenAI, xAI, Google Gemini, Anthropic, and generic OpenAI-compatible endpoints. Provider HTTP calls must use `urllib.request`. The default branch is `master`.
 
 ## Workflow
 
@@ -55,8 +55,8 @@ uv tool install --reinstall .
 ## Architecture Snapshot
 
 - Entry point: `src/pbi_agent/__main__.py` calls `src/pbi_agent/cli.py`.
-- CLI commands: `web`, `run`, `audit`, `init`, `sessions`, `config`. When no command is provided, the CLI defaults to `web`.
-- `pbi-agent web` uses saved web settings/profile resolution; provider/model runtime flags are for `run` and `audit`, not `web`.
+- CLI commands: `web`, `run`, `sessions`, `config`, `skills`, `commands`, and `agents`. When no command is provided, the CLI defaults to `web`.
+- `pbi-agent web` uses saved web settings/profile resolution; provider/model runtime flags are for `run`, not `web`.
 - Web backend: FastAPI under `src/pbi_agent/web/`, with routes in `src/pbi_agent/web/api/routes/`, orchestration in `src/pbi_agent/web/session_manager.py`, event/display publishing in `src/pbi_agent/web/display.py`, and Uvicorn startup helpers in `src/pbi_agent/web/server_runtime.py`.
 - Frontend: Vite + React + TypeScript in `webapp/`, using `react-router-dom`, `@tanstack/react-query`, `zustand`, and `@dnd-kit/core`. `bun run web:build` writes the SPA bundle to `src/pbi_agent/web/static/app`.
 - When changing web API contracts, keep `src/pbi_agent/web/api/routes/`, `src/pbi_agent/web/api/schemas/`, `src/pbi_agent/web/session_manager.py`, `webapp/src/api.ts`, and `webapp/src/types.ts` aligned.
@@ -64,7 +64,7 @@ uv tool install --reinstall .
 - Display abstraction: `src/pbi_agent/display/protocol.py` defines `DisplayProtocol`; console output lives in `src/pbi_agent/display/console_display.py`; tests commonly use `tests/conftest.py::DisplaySpy`.
 - Providers: `src/pbi_agent/providers/base.py` defines the abstract `Provider`; `src/pbi_agent/providers/__init__.py` exposes `create_provider()`. API shapes are OpenAI/xAI `Responses`, Google `Interactions`, Anthropic `Messages`, and generic OpenAI-compatible `Chat Completions`.
 - Agent loop: `src/pbi_agent/agent/session.py` runs turns and tool follow-ups, `src/pbi_agent/agent/system_prompt.py` composes workspace instructions into the runtime prompt, and `src/pbi_agent/agent/tool_runtime.py` executes tool calls in parallel. Sub-agents are capped at 100 requests, 1200 seconds, and cannot recurse.
-- Tools: `src/pbi_agent/tools/registry.py` registers all tools. Handlers receive `ToolContext` (`settings`, `display`, usage, tracer, parent context). Core tools include `apply_patch`, `shell`, `python_exec`, `sub_agent`, `init_report`, `skill_knowledge`, `read_file`, `read_image`, `search_files`, `list_files`, and `read_web_url`.
+- Tools: `src/pbi_agent/tools/registry.py` registers all tools. Handlers receive `ToolContext` (`settings`, `display`, usage, tracer, parent context). Core tools include `apply_patch`, `shell`, `python_exec`, `sub_agent`, `read_file`, `read_image`, `search_files`, `list_files`, and `read_web_url`.
 - Settings: `src/pbi_agent/config.py` resolves runtime field-by-field from CLI flags, `PBI_AGENT_*` env vars, provider-specific env vars, saved providers/model profiles in `~/.pbi-agent/config.json`, then defaults, and loads `.env` via `python-dotenv`.
 - Models and usage accounting: `src/pbi_agent/models/messages.py` defines `TokenUsage`, `ToolCall`, and `CompletedResponse`, and also loads model pricing/context windows (with optional user overrides from `~/.pbi-agent/model_catalog.json`).
 
@@ -86,7 +86,6 @@ uv tool install --reinstall .
 
 - Provider and tool HTTP communication must use `urllib.request`; do not add `requests` or alternate HTTP clients for those paths.
 - Internal data files (indexes, caches, config, session DB) go in `~/.pbi-agent/`, never in the user's workspace.
-- Bundled PBIP template assets must stay under `src/pbi_agent/report/`; hatchling packaging relies on git tracking for non-Python assets.
 - Workspace confinement: `shell` tool rejects path traversal; all file tools validate paths against workspace boundaries.
 - `python_exec` runs trusted local Python — it is not a sandbox.
 - Keep the web implementation aligned with the current FastAPI backend plus Vite/React frontend; do not introduce a parallel web framework or client stack.

@@ -1,12 +1,13 @@
 import { defineConfig, type HeadConfig } from 'vitepress'
+import logoUrl from '../../src/pbi_agent/web/static/logo.jpg'
 
 const siteName = 'pbi-agent'
 const siteDescription =
-  'Multi-provider LLM CLI agent for Power BI report editing'
+  'Local coding agent for skills, commands, agents, and multi-domain workflows'
 const siteBase = '/pbi-agent/'
 const siteUrl = 'https://pbi-agent.github.io/pbi-agent/'
 const socialImageUrl = new URL('social-card.jpg', siteUrl).toString()
-const faviconUrl = `${siteBase}favicon.png`
+const faviconUrl = logoUrl
 
 function resolvePageUrl(page: string): string {
   if (page === 'index.md') {
@@ -22,7 +23,7 @@ function resolvePageUrl(page: string): string {
 
 function resolveSocialTitle(title: string, page: string): string {
   if (page === 'index.md') {
-    return 'pbi-agent docs for Power BI editing'
+    return 'pbi-agent docs'
   }
 
   return `${title} | pbi-agent docs`
@@ -66,7 +67,7 @@ export default defineConfig({
   lastUpdated: true,
   srcExclude: ['**/README.md', '**/TODO.md'],
   head: [
-    ['link', { rel: 'icon', type: 'image/png', href: faviconUrl }],
+    ['link', { rel: 'icon', type: 'image/jpeg', href: faviconUrl }],
     ['link', { rel: 'apple-touch-icon', href: faviconUrl }],
     ['meta', { name: 'theme-color', content: '#0f172a' }]
   ],
@@ -86,7 +87,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/', activeMatch: '/guide/' },
       { text: 'Reference', link: '/reference/cli', activeMatch: '/reference/' },
-      { text: 'GitHub', link: 'https://github.com/nasirus/pbi-agent' }
+      { text: 'GitHub', link: 'https://github.com/pbi-agent/pbi-agent' }
     ],
     sidebar: {
       '/guide/': [
@@ -97,7 +98,6 @@ export default defineConfig({
             { text: 'Introduction', link: '/guide/' },
             { text: 'Installation', link: '/guide/installation' },
             { text: 'Providers', link: '/guide/providers' },
-            { text: 'Audit System', link: '/guide/audit' },
             { text: 'Customization', link: '/guide/customization' }
           ]
         }
@@ -121,11 +121,11 @@ export default defineConfig({
     externalLinkIcon: true,
     editLink: {
       pattern:
-        'https://github.com/nasirus/pbi-agent/edit/master/docs/:path',
+        'https://github.com/pbi-agent/pbi-agent/edit/master/docs/:path',
       text: 'Edit this page on GitHub'
     },
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/nasirus/pbi-agent' }
+      { icon: 'github', link: 'https://github.com/pbi-agent/pbi-agent' }
     ],
     footer: {
       message: 'Released under the MIT License.',

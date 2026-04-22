@@ -12,10 +12,6 @@ description: 'Prerequisites, package installation, source setup, and a minimal f
 | Python | `>= 3.12` |
 | `uv` | Recommended for local development and running the CLI from source |
 
-::: warning
-`pbi-agent` operates on PBIP projects, not `.pbix` files. If you are starting from Power BI Desktop, save the report as a Power BI Project first or bootstrap one with `pbi-agent init`.
-:::
-
 ## Install from PyPI
 
 ```bash
@@ -58,15 +54,11 @@ uv run pbi-agent
 ```
 
 ```bash
-uv run pbi-agent run --prompt "Describe the PBIP project structure in this workspace."
+uv run pbi-agent run --prompt "Summarize this repository and identify the main moving parts."
 ```
 
 ::: tip
 Startup loads environment variables from a local `.env` file automatically through `python-dotenv`, so you can keep `PBI_AGENT_API_KEY`, `PBI_AGENT_PROVIDER`, and related settings there.
-:::
-
-::: details First-time bootstrap
-If you do not already have a PBIP workspace, create one in the current directory with `uv run pbi-agent init --dest .`. The `init` command does not require provider credentials because it only copies the bundled report template.
 :::
 
 ## Alternative: Connect a ChatGPT Subscription
