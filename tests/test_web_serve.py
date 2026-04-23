@@ -801,6 +801,96 @@ def test_run_task_advances_to_next_configured_stage(monkeypatch, tmp_path) -> No
     assert task_payload["session_id"] == "session-123"
 
 
+def test_run_task_exposes_live_session_before_completion(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    app = create_app(_settings())
+    run_started = threading.Event()
+    release_run = threading.Event()
+
+    def fake_run_single_turn(prompt, runtime, display, **kwargs):
+        del prompt, runtime
+        run_started.set()
+        display.render_markdown("Live progress")
+        assert release_run.wait(timeout=2)
+        return SimpleNamespace(
+            tool_errors=[],
+            text="Done.",
+            session_id=kwargs["resume_session_id"],
+        )
+
+    with patch(
+        "pbi_agent.web.session_manager.run_single_turn_in_directory",
+        side_effect=fake_run_single_turn,
+    ):
+        with TestClient(app) as client:
+            client.put(
+                "/api/board/stages",
+                json={
+                    "board_stages": [
+                        {"id": "backlog", "name": "Backlog"},
+                        {"id": "plan", "name": "Plan"},
+                    ]
+                },
+            )
+            create_response = client.post(
+                "/api/tasks",
+                json={"title": "Task A", "prompt": "Investigate", "stage": "plan"},
+            )
+            assert create_response.status_code == 200
+            task_id = create_response.json()["task"]["task_id"]
+
+            run_response = client.post(f"/api/tasks/{task_id}/run")
+            assert run_response.status_code == 200
+            running_task = run_response.json()["task"]
+            session_id = running_task["session_id"]
+            assert running_task["run_status"] == "running"
+            assert isinstance(session_id, str)
+            assert session_id
+
+            detail_response = client.get(f"/api/sessions/{session_id}")
+            assert detail_response.status_code == 200
+            active_live_session = detail_response.json()["active_live_session"]
+            assert active_live_session["kind"] == "task"
+            assert active_live_session["task_id"] == task_id
+            assert active_live_session["session_id"] == session_id
+
+            live_session_id = active_live_session["live_session_id"]
+            with client.websocket_connect(
+                f"/api/events/{live_session_id}"
+            ) as websocket:
+                events = [websocket.receive_json(), websocket.receive_json()]
+            assert [event["type"] for event in events] == [
+                "session_runtime_updated",
+                "session_state",
+            ]
+            assert events[1]["payload"]["state"] in {"starting", "running"}
+
+            assert run_started.wait(timeout=2)
+            deadline = time.monotonic() + 2
+            while True:
+                snapshot = app.state.manager.get_event_stream(
+                    live_session_id
+                ).snapshot()
+                if any(event["type"] == "message_added" for event in snapshot):
+                    break
+                if time.monotonic() > deadline:
+                    raise AssertionError("live event was not published")
+                time.sleep(0.01)
+
+            release_run.set()
+            deadline = time.monotonic() + 2
+            while True:
+                final_task = client.get("/api/tasks").json()["tasks"][0]
+                if final_task["run_status"] == "completed":
+                    break
+                if time.monotonic() > deadline:
+                    raise AssertionError("task run did not finish in time")
+                time.sleep(0.01)
+
+    assert final_task["session_id"] == session_id
+    assert final_task["last_result_summary"] == "Done."
+
+
 def test_run_task_from_backlog_moves_to_next_stage_before_execution(
     monkeypatch, tmp_path
 ) -> None:

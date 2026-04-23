@@ -99,8 +99,8 @@ from pbi_agent.web.command_registry import (
     search_slash_command_tuples,
 )
 from pbi_agent.web.display import (
-    KanbanTaskDisplay,
     WebDisplay,
+    _plain_text,
     history_message_content,
 )
 from pbi_agent.web.input_mentions import MentionSearchResult, WorkspaceFileIndex
@@ -1188,6 +1188,7 @@ class WebSessionManager:
             if task_id in self._running_task_ids:
                 raise RuntimeError("Task is already running.")
             self._running_task_ids.add(task_id)
+        live_session: LiveSessionState | None = None
         with SessionStore() as store:
             record = store.get_kanban_task(task_id)
             if record is None or record.directory != self._directory_key:
@@ -1220,20 +1221,39 @@ class WebSessionManager:
                 self._directory_key,
                 record.stage,
             )
-            self._resolve_task_runtime(
+            runtime = self._resolve_task_runtime(
                 record,
                 stage_record=stage_record,
                 allow_fallback=False,
             )
+            if record.session_id is None:
+                session_id = store.create_session(
+                    directory=self._directory_key,
+                    provider=runtime.settings.provider,
+                    provider_id=runtime.provider_id or None,
+                    model=runtime.settings.model,
+                    profile_id=runtime.profile_id or None,
+                    title=record.title,
+                )
+                updated_record = store.update_kanban_task(
+                    task_id,
+                    session_id=session_id,
+                )
+                if updated_record is None:
+                    with self._lock:
+                        self._running_task_ids.discard(task_id)
+                    raise KeyError(task_id)
+                record = updated_record
             running_record = store.set_kanban_task_running(task_id)
         if running_record is None:
             with self._lock:
                 self._running_task_ids.discard(task_id)
             raise KeyError(task_id)
+        live_session = self._create_task_live_session(running_record, runtime)
         self._publish_task_updated(running_record)
         worker = threading.Thread(
             target=self._run_task_worker,
-            args=(task_id,),
+            args=(task_id, live_session.live_session_id),
             daemon=True,
             name=f"pbi-agent-web-task-{task_id[:8]}",
         )
@@ -1898,7 +1918,13 @@ class WebSessionManager:
             )
             self._publish_live_session_lifecycle("live_session_ended", live_session)
 
-    def _run_task_worker(self, task_id: str) -> None:
+    def _run_task_worker(
+        self, task_id: str, live_session_id: str | None = None
+    ) -> None:
+        live_session = (
+            self._live_sessions.get(live_session_id) if live_session_id else None
+        )
+
         def publish_summary(summary: str) -> None:
             with SessionStore() as store:
                 updated = store.update_kanban_task(
@@ -1909,6 +1935,21 @@ class WebSessionManager:
                 self._publish_task_updated(updated)
 
         try:
+            if live_session is not None:
+                live_session.status = "running"
+                self._publish_live_event(
+                    live_session.live_session_id,
+                    "session_state",
+                    {
+                        "state": "running",
+                        "live_session_id": live_session.live_session_id,
+                        "session_id": live_session.bound_session_id,
+                        "resume_session_id": live_session.bound_session_id,
+                    },
+                )
+                self._publish_live_session_lifecycle(
+                    "live_session_updated", live_session
+                )
             while True:
                 with SessionStore() as store:
                     record = store.get_kanban_task(task_id)
@@ -1927,14 +1968,21 @@ class WebSessionManager:
                 outcome = run_single_turn_in_directory(
                     self._task_prompt_for_run(record.prompt, stage_record),
                     runtime,
-                    KanbanTaskDisplay(
-                        publish_summary=publish_summary,
+                    live_session.display
+                    if live_session is not None
+                    else WebDisplay(
+                        publish_event=lambda _event_type, _payload: None,
                         verbose=runtime.settings.verbose,
                     ),
                     project_dir=record.project_dir,
                     workspace_root=self._workspace_root,
                     resume_session_id=record.session_id,
                 )
+                if live_session is not None:
+                    self._bind_live_session(
+                        live_session.live_session_id,
+                        outcome.session_id,
+                    )
                 if outcome.tool_errors:
                     status = KANBAN_RUN_STATUS_FAILED
                     summary = shorten(
@@ -1988,11 +2036,150 @@ class WebSessionManager:
                 )
             if updated is not None:
                 self._publish_task_updated(updated)
+            if live_session is not None:
+                live_session.exit_code = 1
+                live_session.fatal_error = format_user_facing_error(exc)
+                self._publish_live_event(
+                    live_session.live_session_id,
+                    "message_added",
+                    {
+                        "item_id": f"fatal-{uuid.uuid4().hex}",
+                        "role": "error",
+                        "content": live_session.fatal_error,
+                        "markdown": False,
+                    },
+                )
         finally:
+            if live_session is not None:
+                if live_session.exit_code is None:
+                    live_session.exit_code = 0
+                live_session.status = "ended"
+                live_session.ended_at = _now_iso()
+                self._publish_live_event(
+                    live_session.live_session_id,
+                    "session_state",
+                    {
+                        "state": "ended",
+                        "live_session_id": live_session.live_session_id,
+                        "session_id": live_session.bound_session_id,
+                        "resume_session_id": live_session.bound_session_id,
+                        "exit_code": live_session.exit_code,
+                        "fatal_error": live_session.fatal_error,
+                    },
+                )
+                self._publish_live_session_lifecycle("live_session_ended", live_session)
             with self._lock:
                 self._running_task_ids.discard(task_id)
                 self._task_workers.pop(task_id, None)
             self._finalize_shutdown_if_idle()
+
+    def _create_task_live_session(
+        self,
+        record: KanbanTaskRecord,
+        runtime: ResolvedRuntime,
+    ) -> LiveSessionState:
+        bound_session_id = record.session_id
+        new_live_session_id = uuid.uuid4().hex
+        event_stream = EventStream()
+        snapshot = LiveSessionSnapshot(
+            session_id=bound_session_id,
+            runtime=_runtime_summary(runtime),
+        )
+        display = WebDisplay(
+            publish_event=lambda event_type, payload, current=new_live_session_id: (
+                self._publish_task_live_event(
+                    current,
+                    record.task_id,
+                    event_type,
+                    payload,
+                )
+            ),
+            verbose=runtime.settings.verbose,
+            model=runtime.settings.model,
+            reasoning_effort=runtime.settings.reasoning_effort,
+            bind_session=lambda next_bound_session_id, current=new_live_session_id: (
+                self._bind_live_session(current, next_bound_session_id)
+            ),
+        )
+        live_session = LiveSessionState(
+            live_session_id=new_live_session_id,
+            event_stream=event_stream,
+            snapshot=snapshot,
+            display=display,
+            worker=threading.current_thread(),
+            runtime=runtime,
+            bound_session_id=bound_session_id,
+            created_at=_now_iso(),
+            kind="task",
+            task_id=record.task_id,
+            project_dir=record.project_dir,
+            status="starting",
+        )
+        with self._lock:
+            self._live_sessions[new_live_session_id] = live_session
+        self._publish_live_session_runtime(live_session)
+        self._publish_live_event(
+            new_live_session_id,
+            "session_state",
+            {
+                "state": "starting",
+                "live_session_id": new_live_session_id,
+                "session_id": bound_session_id,
+                "resume_session_id": bound_session_id,
+            },
+        )
+        self._app_stream.publish(
+            "live_session_started",
+            {"live_session": self._serialize_live_session(live_session)},
+        )
+        return live_session
+
+    def _publish_task_live_event(
+        self,
+        live_session_id: str,
+        task_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        event = self._publish_live_event(live_session_id, event_type, payload)
+        summary = self._summary_for_task_live_event(event_type, payload)
+        if summary is not None:
+            with SessionStore() as store:
+                updated = store.update_kanban_task(
+                    task_id,
+                    last_result_summary=summary,
+                )
+            if updated is not None:
+                self._publish_task_updated(updated)
+        return event
+
+    def _summary_for_task_live_event(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> str | None:
+        if event_type == "message_added":
+            content = str(payload.get("content") or "").strip()
+            if content:
+                return shorten(_plain_text(content), 200)
+        if event_type == "thinking_updated":
+            title = str(payload.get("title") or "").strip()
+            if title:
+                return title
+            content = str(payload.get("content") or "").strip()
+            if content:
+                return shorten(content, 120)
+        if event_type == "tool_group_added":
+            tools = payload.get("tools")
+            if isinstance(tools, list) and tools:
+                latest = tools[-1]
+                if isinstance(latest, dict):
+                    text = str(latest.get("text") or latest.get("name") or "").strip()
+                    if text:
+                        return shorten(text, 200)
+        if event_type == "wait_state" and payload.get("active"):
+            return str(payload.get("message") or "Working...")
+        return None
 
     def _publish_task_updated(self, record: KanbanTaskRecord) -> dict[str, Any]:
         payload = self._serialize_task_record(record)
