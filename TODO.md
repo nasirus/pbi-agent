@@ -1,3 +1,3 @@
-[X] Rewrite `.agents/commands/ship-task.md` as an action/system-prompt style command
-[X] Validate Markdown diff
-[X] Update task memory
+[X] Inspect ~/codex for shell/output truncation limits
+[X] Inspect ~/opencode for shell/output truncation limits
+[X] Report comparison findings only
