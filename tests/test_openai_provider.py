@@ -1645,6 +1645,148 @@ def test_openai_request_turn_raises_for_failed_response_payload(
         raise AssertionError("Expected RuntimeError for failed OpenAI response")
 
 
+def test_openai_request_turn_raises_for_nested_failed_response_payload(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "response": {
+                    "error": {
+                        "code": "server_error",
+                        "message": "Nested processing failed.",
+                    }
+                }
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        provider.request_turn(
+            user_message="hello",
+            display=display_spy,
+            session_usage=TokenUsage(model=DEFAULT_MODEL),
+            turn_usage=TokenUsage(model=DEFAULT_MODEL),
+        )
+
+    assert str(exc_info.value) == (
+        "OpenAI response failed (server_error): Nested processing failed."
+    )
+
+
+def test_openai_request_turn_retries_nested_retryable_response_error(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    responses = [
+        {
+            "response": {
+                "error": {
+                    "code": "server_error",
+                    "message": "Temporary backend failure.",
+                }
+            }
+        },
+        {
+            "id": "resp_after_retry",
+            "model": DEFAULT_MODEL,
+            "usage": {
+                "input_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 3,
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Recovered."}],
+                }
+            ],
+        },
+    ]
+    requests: list[urllib.request.Request] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        requests.append(request)
+        return make_http_response(responses.pop(0))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings(max_retries=1))
+
+    response = provider.request_turn(
+        user_message="hello",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    assert response.text == "Recovered."
+    assert len(requests) == 2
+    assert display_spy.retry_notices == [(1, 1)]
+
+
+def test_openai_request_turn_traces_nested_response_error_as_failed(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    tracer = Mock()
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del request, timeout
+        return make_http_response(
+            {
+                "response": {
+                    "error": {
+                        "code": "server_error",
+                        "message": "Trace this failure.",
+                    }
+                }
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings())
+
+    with pytest.raises(RuntimeError):
+        provider.request_turn(
+            user_message="hello",
+            display=display_spy,
+            session_usage=TokenUsage(model=DEFAULT_MODEL),
+            turn_usage=TokenUsage(model=DEFAULT_MODEL),
+            tracer=tracer,
+        )
+
+    tracer.log_model_call.assert_called_once()
+    call_kwargs = tracer.log_model_call.call_args.kwargs
+    assert call_kwargs["status_code"] == 200
+    assert call_kwargs["success"] is False
+    assert call_kwargs["error_message"] == (
+        "OpenAI response failed (server_error): Trace this failure."
+    )
+    assert call_kwargs["metadata"] == {"attempt": 1, "semantic_error": True}
+
+
 def test_openai_request_turn_renders_web_search_as_tool_result(
     monkeypatch,
     display_spy,

@@ -52,6 +52,25 @@ _HTTP_ERROR_MESSAGES = {
     500: "The server had an error while processing your request.",
     503: "The engine is currently overloaded, please try again later.",
 }
+_RETRYABLE_RESPONSE_ERROR_CODES = {
+    "api_error",
+    "internal",
+    "server_error",
+    "service_unavailable",
+    "unavailable",
+    "overloaded_error",
+}
+
+
+class _ResponseFailedError(RuntimeError):
+    def __init__(self, *, code: str, message: str, payload: dict[str, Any]) -> None:
+        self.code = code
+        self.payload = payload
+        super().__init__(_format_response_failed_message(code, message))
+
+    @property
+    def retryable(self) -> bool:
+        return self.code.strip().lower() in _RETRYABLE_RESPONSE_ERROR_CODES
 
 
 class OpenAIProvider(Provider):
@@ -311,7 +330,35 @@ class OpenAIProvider(Provider):
                         streamed=bool(request_body.get("stream")),
                     )
 
-                _raise_if_response_failed(response_json)
+                try:
+                    _raise_if_response_failed(response_json)
+                except _ResponseFailedError as exc:
+                    last_error = exc
+                    last_error_message = str(exc)
+                    _trace_provider_call(
+                        tracer=tracer,
+                        provider=self._settings.provider,
+                        model=self._settings.model,
+                        url=request_auth.request_url,
+                        request_config=self._settings.redacted(),
+                        request_payload=_sanitize_request_payload_for_observability(
+                            request_body
+                        ),
+                        response_payload=response_json,
+                        duration_ms=_duration_ms(req_start),
+                        status_code=200,
+                        success=False,
+                        error_message=str(exc),
+                        metadata={
+                            "attempt": attempt + 1,
+                            "semantic_error": True,
+                        },
+                    )
+                    if exc.retryable and attempt < max_retries:
+                        retry_notice_max_retries = max_retries
+                        continue
+                    display.wait_stop()
+                    raise RuntimeError(str(exc)) from exc
                 result = self._parse_response(response_json)
                 _trace_provider_call(
                     tracer=tracer,
@@ -1122,14 +1169,43 @@ def _display_web_search_result(
 
 
 def _raise_if_response_failed(response_json: dict[str, Any]) -> None:
-    error_obj = response_json.get("error")
+    error_obj = _response_error_object(response_json)
     if isinstance(error_obj, dict):
         code = str(error_obj.get("code", "unknown_error"))
         message = str(error_obj.get("message", "No error message"))
-        raise RuntimeError(f"OpenAI response failed ({code}): {message}")
+        raise _ResponseFailedError(code=code, message=message, payload=response_json)
 
-    if response_json.get("status") == "failed":
-        raise RuntimeError("OpenAI response failed without error details.")
+    if (
+        response_json.get("status") == "failed"
+        or _nested_response_status(response_json) == "failed"
+    ):
+        raise _ResponseFailedError(
+            code="unknown_error",
+            message="No error details.",
+            payload=response_json,
+        )
+
+
+def _response_error_object(response_json: dict[str, Any]) -> Any:
+    error_obj = response_json.get("error")
+    if isinstance(error_obj, dict):
+        return error_obj
+    nested_response = response_json.get("response")
+    if isinstance(nested_response, dict):
+        return nested_response.get("error")
+    return None
+
+
+def _nested_response_status(response_json: dict[str, Any]) -> str | None:
+    nested_response = response_json.get("response")
+    if not isinstance(nested_response, dict):
+        return None
+    status = nested_response.get("status")
+    return status if isinstance(status, str) else None
+
+
+def _format_response_failed_message(code: str, message: str) -> str:
+    return f"OpenAI response failed ({code}): {message}"
 
 
 def _usage_value(usage_obj: Any, key: str) -> int:
