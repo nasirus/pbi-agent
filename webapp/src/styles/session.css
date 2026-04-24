@@ -576,6 +576,11 @@
   margin: 0;
 }
 
+.timeline-entry--user .timeline-entry__user-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .timeline-entry__file-tag {
   display: inline-flex;
   align-items: center;

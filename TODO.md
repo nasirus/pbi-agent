@@ -1,5 +1,5 @@
-[X] Locate Kanban task session link and tests
-[X] Update link to navigate in same tab
-[X] Add/adjust frontend regression coverage
+[X] Inspect review finding locations
+[X] Persist shell command timeline entries for saved sessions
+[X] Disable composer while shell commands are pending
 [X] Run focused validation
-[X] Update task memory
+[X] Update memory

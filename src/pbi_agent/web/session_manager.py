@@ -93,6 +93,8 @@ from pbi_agent.session_store import (
     WebManagerLeaseBusyError,
 )
 from pbi_agent.task_runner import run_single_turn_in_directory
+from pbi_agent.tools import shell as shell_tool
+from pbi_agent.tools.types import ToolContext
 from pbi_agent.web.command_registry import (
     list_slash_commands,
     search_slash_command_tuples,
@@ -153,6 +155,26 @@ def _deserialize_json_field(raw_value: str | None) -> Any:
         return json.loads(raw_value)
     except json.JSONDecodeError:
         return raw_value
+
+
+def _format_shell_command_output(result: dict[str, Any] | str) -> str:
+    if not isinstance(result, dict):
+        return f"## Shell command output\n\n```text\n{result}\n```"
+    exit_code = result.get("exit_code")
+    status = "timed out" if result.get("timed_out") else f"exit code {exit_code}"
+    sections = ["## Shell command output", "", f"Status: `{status}`"]
+    error = str(result.get("error") or "").strip()
+    if error:
+        sections.extend(["", "Error:", "```text", error, "```"])
+    stdout = str(result.get("stdout") or "")
+    stderr = str(result.get("stderr") or "")
+    sections.extend(["", "Stdout:", "```text", stdout or "(empty)", "```"])
+    if result.get("stdout_truncated"):
+        sections.append("_stdout truncated_")
+    sections.extend(["", "Stderr:", "```text", stderr or "(empty)", "```"])
+    if result.get("stderr_truncated"):
+        sections.append("_stderr truncated_")
+    return "\n".join(sections)
 
 
 def _serialize_run_session(record: RunSessionRecord) -> dict[str, Any]:
@@ -1041,6 +1063,89 @@ class WebSessionManager:
         )
         return self._serialize_live_session(live_session)
 
+    def run_shell_command(
+        self,
+        live_session_id: str,
+        *,
+        command: str,
+    ) -> dict[str, Any]:
+        live_session = self._require_live_session(live_session_id)
+        if live_session.status == "ended":
+            raise RuntimeError("Live session has already ended.")
+        normalized_command = command.strip()
+        if not normalized_command:
+            raise ValueError("Shell command must be a non-empty string.")
+        user_content = f"!{normalized_command}"
+
+        self._publish_live_event(
+            live_session_id,
+            "message_added",
+            {
+                "item_id": f"user-{uuid.uuid4().hex}",
+                "role": "user",
+                "content": user_content,
+                "file_paths": [],
+                "image_attachments": [],
+                "markdown": False,
+            },
+        )
+        live_session.display.shell_start([normalized_command])
+        result = shell_tool.handle(
+            {"command": normalized_command},
+            ToolContext(
+                settings=live_session.runtime.settings, display=live_session.display
+            ),
+        )
+        exit_code = result.get("exit_code") if isinstance(result, dict) else 1
+        timed_out = bool(result.get("timed_out")) if isinstance(result, dict) else False
+        live_session.display.shell_command(
+            normalized_command,
+            exit_code if isinstance(exit_code, int) else None,
+            timed_out,
+        )
+        live_session.display.tool_group_end()
+        assistant_content = _format_shell_command_output(result)
+        self._publish_live_event(
+            live_session_id,
+            "message_added",
+            {
+                "item_id": f"shell-output-{uuid.uuid4().hex}",
+                "role": "assistant",
+                "content": assistant_content,
+                "markdown": True,
+            },
+        )
+        if live_session.bound_session_id is not None:
+            self._persist_shell_command_messages(
+                live_session,
+                user_content=user_content,
+                assistant_content=assistant_content,
+            )
+        return self._serialize_live_session(live_session)
+
+    def _persist_shell_command_messages(
+        self,
+        live_session: LiveSessionState,
+        *,
+        user_content: str,
+        assistant_content: str,
+    ) -> None:
+        with SessionStore() as store:
+            session = store.get_session(live_session.bound_session_id or "")
+            if session is None or session.directory != self._directory_key:
+                return
+            for role, content in (
+                ("user", user_content),
+                ("assistant", assistant_content),
+            ):
+                store.add_message(
+                    session.session_id,
+                    role,
+                    content,
+                    provider_id=live_session.runtime.provider_id or None,
+                    profile_id=live_session.runtime.profile_id or None,
+                )
+
     def request_new_session(
         self,
         live_session_id: str,
@@ -1185,6 +1290,7 @@ class WebSessionManager:
                 raise RuntimeError("Task is already running.")
             self._running_task_ids.add(task_id)
         live_session: LiveSessionState | None = None
+        initial_user_message_id: int | None = None
         with SessionStore() as store:
             record = store.get_kanban_task(task_id)
             if record is None or record.directory != self._directory_key:
@@ -1240,16 +1346,33 @@ class WebSessionManager:
                         self._running_task_ids.discard(task_id)
                     raise KeyError(task_id)
                 record = updated_record
+            initial_prompt = self._task_prompt_for_run(
+                record, stage_record, store=store
+            )
+            initial_user_message_id = self._persist_task_user_prompt(
+                store,
+                record,
+                runtime,
+                initial_prompt,
+            )
             running_record = store.set_kanban_task_running(task_id)
         if running_record is None:
             with self._lock:
                 self._running_task_ids.discard(task_id)
             raise KeyError(task_id)
         live_session = self._create_task_live_session(running_record, runtime)
+        if initial_user_message_id is not None:
+            self._publish_persisted_user_message(
+                live_session,
+                running_record,
+                runtime,
+                initial_prompt,
+                initial_user_message_id,
+            )
         self._publish_task_updated(running_record)
         worker = threading.Thread(
             target=self._run_task_worker,
-            args=(task_id, live_session.live_session_id),
+            args=(task_id, live_session.live_session_id, initial_user_message_id),
             daemon=True,
             name=f"pbi-agent-web-task-{task_id[:8]}",
         )
@@ -1917,11 +2040,15 @@ class WebSessionManager:
             self._publish_live_session_lifecycle("live_session_ended", live_session)
 
     def _run_task_worker(
-        self, task_id: str, live_session_id: str | None = None
+        self,
+        task_id: str,
+        live_session_id: str | None = None,
+        initial_user_message_id: int | None = None,
     ) -> None:
         live_session = (
             self._live_sessions.get(live_session_id) if live_session_id else None
         )
+        current_user_message_id = initial_user_message_id
 
         def publish_summary(summary: str) -> None:
             with SessionStore() as store:
@@ -1963,8 +2090,25 @@ class WebSessionManager:
                     stage_record=stage_record,
                     allow_fallback=False,
                 )
+                prompt = self._task_prompt_for_run(record, stage_record)
+                if current_user_message_id is None:
+                    with SessionStore() as store:
+                        current_user_message_id = self._persist_task_user_prompt(
+                            store,
+                            record,
+                            runtime,
+                            prompt,
+                        )
+                    if live_session is not None and current_user_message_id is not None:
+                        self._publish_persisted_user_message(
+                            live_session,
+                            record,
+                            runtime,
+                            prompt,
+                            current_user_message_id,
+                        )
                 outcome = run_single_turn_in_directory(
-                    self._task_prompt_for_run(record, stage_record),
+                    prompt,
                     runtime,
                     live_session.display
                     if live_session is not None
@@ -1975,7 +2119,9 @@ class WebSessionManager:
                     project_dir=record.project_dir,
                     workspace_root=self._workspace_root,
                     resume_session_id=record.session_id,
+                    persisted_user_message_id=current_user_message_id,
                 )
+                current_user_message_id = None
                 if live_session is not None:
                     self._bind_live_session(
                         live_session.live_session_id,
@@ -2131,6 +2277,49 @@ class WebSessionManager:
             {"live_session": self._serialize_live_session(live_session)},
         )
         return live_session
+
+    def _persist_task_user_prompt(
+        self,
+        store: SessionStore,
+        record: KanbanTaskRecord,
+        runtime: ResolvedRuntime,
+        prompt: str,
+    ) -> int | None:
+        if record.session_id is None:
+            return None
+        return store.add_message(
+            record.session_id,
+            "user",
+            prompt.strip(),
+            provider_id=runtime.provider_id or None,
+            profile_id=runtime.profile_id or None,
+        )
+
+    def _publish_persisted_user_message(
+        self,
+        live_session: LiveSessionState,
+        record: KanbanTaskRecord,
+        runtime: ResolvedRuntime,
+        prompt: str,
+        message_id: int,
+    ) -> None:
+        if record.session_id is None:
+            return
+        message = MessageRecord(
+            id=message_id,
+            session_id=record.session_id,
+            role="user",
+            content=prompt.strip(),
+            provider_id=runtime.provider_id or None,
+            profile_id=runtime.profile_id or None,
+            created_at=_now_iso(),
+        )
+        self._publish_task_live_event(
+            live_session.live_session_id,
+            record.task_id,
+            "message_added",
+            _serialize_history_message(message),
+        )
 
     def _publish_task_live_event(
         self,

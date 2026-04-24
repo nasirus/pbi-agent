@@ -806,6 +806,7 @@ def test_run_task_exposes_live_session_before_completion(monkeypatch, tmp_path) 
 
     def fake_run_single_turn(prompt, runtime, display, **kwargs):
         del prompt, runtime
+        assert isinstance(kwargs["persisted_user_message_id"], int)
         run_started.set()
         display.render_markdown("Live progress")
         assert release_run.wait(timeout=2)
@@ -846,7 +847,20 @@ def test_run_task_exposes_live_session_before_completion(monkeypatch, tmp_path) 
 
             detail_response = client.get(f"/api/sessions/{session_id}")
             assert detail_response.status_code == 200
-            active_live_session = detail_response.json()["active_live_session"]
+            detail_payload = detail_response.json()
+            assert detail_payload["history_items"] == [
+                {
+                    "item_id": detail_payload["history_items"][0]["item_id"],
+                    "role": "user",
+                    "content": "Investigate",
+                    "file_paths": [],
+                    "image_attachments": [],
+                    "markdown": False,
+                    "historical": True,
+                    "created_at": detail_payload["history_items"][0]["created_at"],
+                }
+            ]
+            active_live_session = detail_payload["active_live_session"]
             assert active_live_session["kind"] == "task"
             assert active_live_session["task_id"] == task_id
             assert active_live_session["session_id"] == session_id
@@ -1242,6 +1256,81 @@ def test_auto_start_stage_runs_once_before_done(monkeypatch, tmp_path) -> None:
     assert task_payload["stage"] == "done"
     assert task_payload["run_status"] == "completed"
     assert task_payload["session_id"] == "session-2"
+
+
+def test_auto_started_stage_prompt_is_visible_while_running(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _write_default_commands(tmp_path)
+    app = create_app(_settings())
+    second_run_started = threading.Event()
+    release_second_run = threading.Event()
+    call_count = 0
+
+    def fake_run_single_turn_in_directory(prompt, _runtime, _display, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        assert isinstance(kwargs["persisted_user_message_id"], int)
+        if call_count == 2:
+            assert prompt == "/implement"
+            second_run_started.set()
+            assert release_second_run.wait(timeout=2)
+        return SimpleNamespace(
+            tool_errors=[],
+            text=f"Completed run {call_count}.",
+            session_id=kwargs["resume_session_id"],
+        )
+
+    with patch(
+        "pbi_agent.web.session_manager.run_single_turn_in_directory",
+        side_effect=fake_run_single_turn_in_directory,
+    ):
+        with TestClient(app) as client:
+            client.put(
+                "/api/board/stages",
+                json={
+                    "board_stages": [
+                        {"id": "backlog", "name": "Backlog"},
+                        {"id": "plan", "name": "Plan", "command_id": "plan"},
+                        {
+                            "id": "implement",
+                            "name": "Implement",
+                            "command_id": "implement",
+                            "auto_start": True,
+                        },
+                    ]
+                },
+            )
+            create_response = client.post(
+                "/api/tasks",
+                json={"title": "Task A", "prompt": "Investigate", "stage": "plan"},
+            )
+            assert create_response.status_code == 200
+            task_id = create_response.json()["task"]["task_id"]
+
+            run_response = client.post(f"/api/tasks/{task_id}/run")
+            assert run_response.status_code == 200
+            session_id = run_response.json()["task"]["session_id"]
+
+            assert second_run_started.wait(timeout=2)
+            detail_response = client.get(f"/api/sessions/{session_id}")
+            release_second_run.set()
+
+            deadline = time.monotonic() + 2
+            while True:
+                task_payload = client.get("/api/tasks").json()["tasks"][0]
+                if task_payload["run_status"] == "completed":
+                    break
+                if time.monotonic() > deadline:
+                    raise AssertionError("auto-start task did not finish in time")
+                time.sleep(0.01)
+
+    assert detail_response.status_code == 200
+    history = detail_response.json()["history_items"]
+    assert [item["role"] for item in history] == ["user", "user"]
+    assert history[0]["content"] == "/plan\n# Task\nTask A\n\n## Goal\nInvestigate"
+    assert history[1]["content"] == "/implement"
 
 
 def test_second_manager_start_does_not_mark_running_task_failed(
@@ -2151,6 +2240,125 @@ def test_submit_session_input_accepts_uploaded_image_ids() -> None:
     assert (
         message_events[0]["payload"]["image_attachments"][0]["upload_id"] == upload_id
     )
+
+
+def test_shell_command_endpoint_runs_command_and_publishes_events(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "example.txt").write_text("hello\n", encoding="utf-8")
+
+    def fake_run_session_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        display.user_prompt()
+        return 0
+
+    with patch("pbi_agent.web.session_manager.run_session_loop", fake_run_session_loop):
+        app = create_app(_settings())
+
+        with TestClient(app) as client:
+            response = client.post("/api/live-sessions", json={})
+            assert response.status_code == 200
+            live_session_id = response.json()["session"]["live_session_id"]
+
+            shell_response = client.post(
+                f"/api/live-sessions/{live_session_id}/shell-command",
+                json={"command": "cat example.txt"},
+            )
+            assert shell_response.status_code == 200
+
+            events = app.state.manager.get_event_stream(live_session_id).snapshot()
+
+    user_events = [
+        event
+        for event in events
+        if event["type"] == "message_added" and event["payload"].get("role") == "user"
+    ]
+    assert user_events[-1]["payload"]["content"] == "!cat example.txt"
+    assert any(event["type"] == "tool_group_added" for event in events)
+    assistant_events = [
+        event
+        for event in events
+        if event["type"] == "message_added"
+        and event["payload"].get("role") == "assistant"
+    ]
+    assert "Status: `exit code 0`" in assistant_events[-1]["payload"]["content"]
+    assert "hello" in assistant_events[-1]["payload"]["content"]
+
+
+def test_shell_command_endpoint_persists_messages_for_bound_session(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    (tmp_path / "example.txt").write_text("hello\n", encoding="utf-8")
+
+    def fake_run_session_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        display.user_prompt()
+        return 0
+
+    with patch("pbi_agent.web.session_manager.run_session_loop", fake_run_session_loop):
+        app = create_app(_settings())
+
+        with TestClient(app) as client:
+            with SessionStore() as store:
+                session_id = store.create_session(
+                    str(tmp_path),
+                    "openai",
+                    "gpt-5.4",
+                    provider_id="openai",
+                    profile_id="analysis",
+                )
+
+            create_response = client.post("/api/live-sessions", json={})
+            assert create_response.status_code == 200
+            create_response = client.post(
+                "/api/live-sessions",
+                json={"resume_session_id": session_id},
+            )
+            assert create_response.status_code == 200
+            live_session_id = create_response.json()["session"]["live_session_id"]
+
+            shell_response = client.post(
+                f"/api/live-sessions/{live_session_id}/shell-command",
+                json={"command": "cat example.txt"},
+            )
+            assert shell_response.status_code == 200
+
+            detail_response = client.get(f"/api/sessions/{session_id}")
+            assert detail_response.status_code == 200
+
+    history_items = detail_response.json()["history_items"]
+    assert history_items[-2]["role"] == "user"
+    assert history_items[-2]["content"] == "!cat example.txt"
+    assert history_items[-2]["markdown"] is False
+    assert history_items[-1]["role"] == "assistant"
+    assert "Status: `exit code 0`" in history_items[-1]["content"]
+    assert "hello" in history_items[-1]["content"]
+    assert history_items[-1]["markdown"] is True
+
+
+def test_shell_command_endpoint_rejects_empty_command() -> None:
+    def fake_run_session_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        display.user_prompt()
+        return 0
+
+    with patch("pbi_agent.web.session_manager.run_session_loop", fake_run_session_loop):
+        app = create_app(_settings())
+
+        with TestClient(app) as client:
+            response = client.post("/api/live-sessions", json={})
+            assert response.status_code == 200
+            live_session_id = response.json()["session"]["live_session_id"]
+
+            shell_response = client.post(
+                f"/api/live-sessions/{live_session_id}/shell-command",
+                json={"command": "   "},
+            )
+
+    assert shell_response.status_code == 400
 
 
 def test_submit_session_input_does_not_duplicate_workspace_image_mentions(

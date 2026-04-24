@@ -1264,6 +1264,7 @@ def test_run_single_turn_resumed_session_bootstraps_from_history_without_previou
         store.update_session(session_id, previous_id="resp_parent")
         store.add_message(session_id, "user", "hello")
         store.add_message(session_id, "assistant", "hi")
+        store.add_message(session_id, "user", "failed earlier")
 
     provider = OpenAIProvider(Settings(api_key="test-key", provider="openai"))
     display = _SessionDisplaySpy([])
@@ -1334,6 +1335,42 @@ def test_run_single_turn_resumed_session_bootstraps_from_history_without_previou
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "hi"},
         {"role": "user", "content": "continue"},
+    ]
+
+
+def test_resume_session_does_not_restore_trailing_user_only_turn(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "sessions.db"
+    monkeypatch.setenv("PBI_AGENT_SESSION_DB_PATH", str(db_path))
+
+    with SessionStore(db_path=db_path) as store:
+        session_id = store.create_session(
+            directory=os.getcwd(),
+            provider="openai",
+            model=DEFAULT_MODEL,
+            title="existing",
+        )
+        store.add_message(session_id, "user", "hello")
+        store.add_message(session_id, "assistant", "hi")
+        store.add_message(session_id, "user", "failed earlier")
+
+        provider = _ProviderStub()
+        display = _DisplaySpy()
+
+        _resume_session(
+            provider=provider,
+            store=store,
+            session_id=session_id,
+            session_usage=TokenUsage(model=DEFAULT_MODEL),
+            display=display,
+        )
+
+    assert [message.content for message in provider.restored_messages] == [
+        "hello",
+        "hi",
     ]
 
 
