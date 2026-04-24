@@ -1,5 +1,5 @@
-[X] Inspect review finding locations
-[X] Persist shell command timeline entries for saved sessions
-[X] Disable composer while shell commands are pending
-[X] Run focused validation
+[X] Inspect shell submit focus flow
+[X] Refocus composer after successful shell command
+[X] Add/update focused tests
+[X] Run validation
 [X] Update memory
