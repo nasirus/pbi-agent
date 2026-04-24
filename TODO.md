@@ -1,5 +1,3 @@
-[X] Inspect shell submit focus flow
-[X] Refocus composer after successful shell command
-[X] Add/update focused tests
-[X] Run validation
+[X] Restore pytest in selected workspace environment
+[X] Verify pytest discovery command
 [X] Update memory

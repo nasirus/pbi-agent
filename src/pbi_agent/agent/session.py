@@ -440,8 +440,9 @@ def run_session_loop(
                     metadata={"resumed": resume_session_id is not None},
                 )
                 display.assistant_start()
+                user_message_id: int | None = None
                 try:
-                    _add_message(
+                    user_message_id = _add_message(
                         store,
                         session_id,
                         current_runtime,
@@ -517,6 +518,8 @@ def run_session_loop(
                         usage=turn_usage,
                         metadata={"error_message": str(exc)},
                     )
+                    if user_message_id is not None:
+                        _delete_message(store, user_message_id)
                     raise
 
     _close_store(store)
@@ -997,6 +1000,15 @@ def _add_message(
         return None
 
 
+def _delete_message(store: SessionStore | None, message_id: int | None) -> None:
+    if store is None or message_id is None:
+        return
+    try:
+        store.delete_message(message_id)
+    except Exception:
+        _log.warning("Failed to delete message from session store", exc_info=True)
+
+
 def _resume_session(
     *,
     provider: Any,
@@ -1080,6 +1092,12 @@ def _build_parent_context_snapshot(
         except Exception:
             _log.warning("Failed to capture parent session history", exc_info=True)
 
+    current_turn = (current_user_turn_text or "").strip() or None
+    if current_turn and messages:
+        last_message = messages[-1]
+        if last_message.role == "user" and last_message.content.strip() == current_turn:
+            messages = messages[:-1]
+
     continuation_id: str | None = None
     try:
         continuation_id = provider.get_conversation_checkpoint()
@@ -1088,7 +1106,6 @@ def _build_parent_context_snapshot(
             "Failed to capture provider conversation checkpoint", exc_info=True
         )
 
-    current_turn = (current_user_turn_text or "").strip() or None
     if not messages and current_turn is None and continuation_id is None:
         return None
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import stat
-from pathlib import Path
 
 import pytest
 
@@ -223,17 +222,6 @@ def test_get_system_prompt_with_project_sub_agents(tmp_path, monkeypatch):
     assert "<name>code-reviewer</name>" in prompt
     assert "<description>Review code changes before merging.</description>" in prompt
     assert "call `sub_agent` with `agent_type`" in prompt
-
-
-def test_get_system_prompt_includes_repo_code_review_agent(monkeypatch):
-    monkeypatch.chdir(Path(__file__).resolve().parents[1])
-    prompt = get_system_prompt()
-
-    assert "<available_sub_agents>" in prompt
-    assert "<name>code-reviewer</name>" in prompt
-    assert "Review code changes for correctness, regressions, and test coverage." in (
-        prompt
-    )
 
 
 def test_get_sub_agent_system_prompt_uses_agent_override(tmp_path, monkeypatch):

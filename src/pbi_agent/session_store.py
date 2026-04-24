@@ -883,6 +883,15 @@ class SessionStore:
             self._conn.commit()
         return cursor.lastrowid  # type: ignore[return-value]
 
+    def delete_message(self, message_id: int) -> bool:
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM messages WHERE id = ?",
+                (message_id,),
+            )
+            self._conn.commit()
+        return cursor.rowcount > 0
+
     def list_messages(self, session_id: str) -> list[MessageRecord]:
         with self._lock:
             rows = self._conn.execute(
