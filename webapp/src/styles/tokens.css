@@ -119,7 +119,7 @@
   --duration-slow: 300ms;
 
   --sidebar-width: 300px;
-  --topbar-height: 60px;
+  --topbar-height: 48px;
 }
 
 :root[data-theme='light'] {

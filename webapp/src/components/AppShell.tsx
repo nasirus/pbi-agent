@@ -1,13 +1,30 @@
 import { lazy, Suspense, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3Icon, KanbanSquareIcon, MessageSquareTextIcon, SettingsIcon } from "lucide-react";
+import {
+  BarChart3Icon,
+  CheckIcon,
+  KanbanSquareIcon,
+  MessageSquareTextIcon,
+  MoonStarIcon,
+  PaletteIcon,
+  SettingsIcon,
+  SunIcon,
+} from "lucide-react";
 import { fetchBootstrap, fetchConfigBootstrap } from "../api";
 import { useTaskEvents } from "../hooks/useTaskEvents";
 import { useSessionStore } from "../store";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Separator } from "./ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { LoadingSpinner } from "./shared/LoadingSpinner";
 import { OnboardingModal } from "./OnboardingModal";
 import { themeOptions, useTheme, type AppTheme } from "./ThemeProvider";
@@ -31,6 +48,12 @@ const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: BarChart3Icon },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
+
+const themeIcons: Record<AppTheme, typeof SunIcon> = {
+  light: SunIcon,
+  dark: MoonStarIcon,
+  prism: PaletteIcon,
+};
 
 export function AppShell() {
   useTaskEvents();
@@ -98,61 +121,87 @@ export function AppShell() {
       ? activeSession.runtime.reasoning_effort
       : (activeRuntime?.reasoning_effort ?? null);
 
+  const ThemeIcon = themeIcons[theme];
+
   return (
     <div className="app-shell bg-background text-foreground">
-      <header className="topbar border-b border-border bg-sidebar/90 backdrop-blur-xl">
-        <div className="topbar__brand">
-          <span className="topbar__brand-mark">P</span>
-          <span className="topbar__brand-copy">
-            <strong>Prism</strong>
-            <span>Agent</span>
-          </span>
-          {folderLabel ? (
-            <Badge variant="outline" className="topbar__folder" title={bootstrap?.workspace_root}>
-              {folderLabel}
-            </Badge>
-          ) : null}
-        </div>
+      <header className="header">
+        <div className="header__left">
+          {/* Brand */}
+          <div className="header__brand">
+            <span className="header__brand-mark" aria-hidden="true">P</span>
+            <span className="header__brand-name">
+              <strong>Prism</strong> Agent
+            </span>
+          </div>
 
-        <nav className="topnav" aria-label="Primary navigation">
-          {navItems.map(({ to, label, icon: Icon }) => (
-            <Button key={to} variant="ghost" size="sm" asChild>
-              <NavLink to={to}>
-                <Icon data-icon="inline-start" />
-                {label}
-              </NavLink>
-            </Button>
-          ))}
-        </nav>
-
-        <div className="runtime-meta">
-          <Badge variant={requiresOnboarding ? "destructive" : "secondary"} className="runtime-meta__pill">
-            {displayedProvider}
-          </Badge>
-          {displayedModel && <Badge variant="outline" className="runtime-meta__pill">{displayedModel}</Badge>}
-          {displayedReasoningEffort && displayedReasoningEffort !== "none" && (
-            <Badge variant="outline" className="runtime-meta__pill">{displayedReasoningEffort}</Badge>
+          {folderLabel && (
+            <>
+              <Separator orientation="vertical" className="header__sep" />
+              <Badge variant="outline" className="header__workspace overflow-visible" title={bootstrap?.workspace_root}>
+                {folderLabel}
+              </Badge>
+            </>
           )}
+
+          <Separator orientation="vertical" className="header__sep" />
+
+          {/* Navigation */}
+          <nav className="header__nav" aria-label="Primary navigation">
+            {navItems.map(({ to, label, icon: Icon }) => (
+              <NavLink key={to} to={to} className="header__nav-link">
+                <Icon />
+                <span>{label}</span>
+              </NavLink>
+            ))}
+          </nav>
         </div>
 
-        <ToggleGroup
-          type="single"
-          value={theme}
-          onValueChange={(value) => {
-            if (value) setTheme(value as AppTheme);
-          }}
-          className="theme-switcher"
-          aria-label="Theme"
-          spacing={1}
-          size="sm"
-          variant="outline"
-        >
-          {themeOptions.map((option) => (
-            <ToggleGroupItem key={option.value} value={option.value} aria-label={`${option.label} theme`}>
-              {option.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+        <div className="header__right">
+          {/* Runtime info */}
+          <div className="header__runtime">
+            <Badge variant={requiresOnboarding ? "destructive" : "secondary"} className="header__runtime-pill overflow-visible">
+              {displayedProvider}
+            </Badge>
+            {displayedModel && (
+              <Badge variant="outline" className="header__runtime-pill overflow-visible">{displayedModel}</Badge>
+            )}
+            {displayedReasoningEffort && displayedReasoningEffort !== "none" && (
+              <Badge variant="outline" className="header__runtime-pill overflow-visible">{displayedReasoningEffort}</Badge>
+            )}
+          </div>
+
+          {/* Theme dropdown */}
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Change theme">
+                    <ThemeIcon />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Theme</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="min-w-36">
+              <DropdownMenuGroup>
+                {themeOptions.map((option) => {
+                  const OptionIcon = themeIcons[option.value];
+                  return (
+                    <DropdownMenuItem
+                      key={option.value}
+                      onSelect={() => setTheme(option.value)}
+                    >
+                      <OptionIcon />
+                      {option.label}
+                      {theme === option.value && <CheckIcon className="ml-auto text-primary" />}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </header>
 
       <main className="app-main">

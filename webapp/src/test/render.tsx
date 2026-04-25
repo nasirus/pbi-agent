@@ -2,6 +2,7 @@ import type { PropsWithChildren, ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderOptions } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { TooltipProvider } from "../components/ui/tooltip";
 
 type ExtendedRenderOptions = RenderOptions & {
   route?: string;
@@ -28,7 +29,9 @@ export function renderWithProviders(
     return (
       <MemoryRouter initialEntries={[route]}>
         <QueryClientProvider client={queryClient}>
-          {children}
+          <TooltipProvider>
+            {children}
+          </TooltipProvider>
         </QueryClientProvider>
       </MemoryRouter>
     );
