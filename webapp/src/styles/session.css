@@ -945,6 +945,15 @@
   font-family: var(--font-mono);
 }
 
+.git-diff-result__status,
+.git-diff-result__stat {
+  min-height: 1.625rem;
+  padding-block: var(--sp-1);
+  padding-inline: var(--sp-2);
+  gap: var(--sp-1);
+  line-height: var(--leading-normal);
+}
+
 .git-diff-result__stat--added {
   border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-border));
   color: var(--color-success);
@@ -995,7 +1004,7 @@
 .git-diff-result__gutter,
 .git-diff-result__marker,
 .git-diff-result__code {
-  padding: 2px var(--sp-2);
+  padding-block: 2px;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border-subtle) 54%, transparent);
   vertical-align: top;
 }
@@ -1003,6 +1012,7 @@
 .git-diff-result__gutter {
   width: 48px;
   min-width: 48px;
+  padding-inline: var(--sp-2);
   user-select: none;
   text-align: right;
   color: var(--color-text-tertiary);
@@ -1012,6 +1022,7 @@
 .git-diff-result__marker {
   width: 36px;
   min-width: 36px;
+  padding-inline: var(--sp-2);
   user-select: none;
   text-align: center;
   color: var(--color-text-tertiary);
@@ -1029,6 +1040,7 @@
 
 .git-diff-result__code {
   min-width: 0;
+  padding-inline: var(--sp-3);
   color: var(--color-text-secondary);
   white-space: pre;
 }
