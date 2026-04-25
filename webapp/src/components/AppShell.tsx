@@ -110,17 +110,6 @@ export function AppShell() {
     : isSessionRoute && activeSession?.liveSessionId && activeSession.runtime?.provider
       ? activeSession.runtime.provider
       : (activeRuntime?.provider ?? "...");
-  const displayedModel = requiresOnboarding
-    ? null
-    : isSessionRoute && activeSession?.liveSessionId && activeSession.runtime?.model
-      ? activeSession.runtime.model
-      : (activeRuntime?.model ?? "...");
-  const displayedReasoningEffort = requiresOnboarding
-    ? null
-    : isSessionRoute && activeSession?.liveSessionId && activeSession.runtime?.reasoning_effort
-      ? activeSession.runtime.reasoning_effort
-      : (activeRuntime?.reasoning_effort ?? null);
-
   const ThemeIcon = themeIcons[theme];
 
   return (
@@ -158,19 +147,6 @@ export function AppShell() {
         </div>
 
         <div className="header__right">
-          {/* Runtime info */}
-          <div className="header__runtime">
-            <Badge variant={requiresOnboarding ? "destructive" : "secondary"} className="header__runtime-pill overflow-visible">
-              {displayedProvider}
-            </Badge>
-            {displayedModel && (
-              <Badge variant="outline" className="header__runtime-pill overflow-visible">{displayedModel}</Badge>
-            )}
-            {displayedReasoningEffort && displayedReasoningEffort !== "none" && (
-              <Badge variant="outline" className="header__runtime-pill overflow-visible">{displayedReasoningEffort}</Badge>
-            )}
-          </div>
-
           {/* Theme dropdown */}
           <DropdownMenu>
             <Tooltip>
