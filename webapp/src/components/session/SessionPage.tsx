@@ -489,7 +489,6 @@ export function SessionPage({
           sessions={sessionsQuery.data ?? []}
           isLoading={sessionsQuery.isLoading}
           activeSessionId={routeSessionId ?? sessionState?.sessionId ?? null}
-          workspaceRoot={workspaceRoot}
           onNewSession={handleNewSession}
           onResumeSession={(sessionId) => {
             void navigate(`/sessions/${encodeURIComponent(sessionId)}`);

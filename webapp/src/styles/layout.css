@@ -169,6 +169,10 @@
 /* ── Sidebar header actions ── */
 .sidebar__header-actions {
   display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  justify-content: space-between;
+  width: 100%;
   gap: var(--sp-2);
 }
 

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  FolderGit2Icon,
   MoreHorizontalIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -39,7 +38,6 @@ export function SessionSidebar({
   sessions,
   isLoading,
   activeSessionId,
-  workspaceRoot,
   onNewSession,
   onResumeSession,
   onDeleteSession,
@@ -49,7 +47,6 @@ export function SessionSidebar({
   sessions: SessionRecord[];
   isLoading: boolean;
   activeSessionId: string | null;
-  workspaceRoot: string | undefined;
   onNewSession: () => void;
   onResumeSession: (sessionId: string) => void;
   onDeleteSession: (session: SessionRecord) => void;
@@ -88,11 +85,15 @@ export function SessionSidebar({
   return (
     <>
       <div className="sidebar__header">
-        <span className="sidebar__title">Session History</span>
         <div className="sidebar__header-actions">
-          <Button type="button" size="sm" onClick={onNewSession}>
+          <Button
+            type="button"
+            size="sm"
+            className="sidebar__new-button"
+            onClick={onNewSession}
+          >
             <PlusIcon data-icon="inline-start" />
-            New
+            New Session
           </Button>
           <Button
             type="button"
@@ -107,15 +108,6 @@ export function SessionSidebar({
           </Button>
         </div>
       </div>
-
-      {workspaceRoot ? (
-        <div className="sidebar__workspace">
-          <Badge variant="outline" className="sidebar__workspace-path" title={workspaceRoot}>
-            <FolderGit2Icon data-icon="inline-start" />
-            {workspaceRoot}
-          </Badge>
-        </div>
-      ) : null}
 
       <div className="sidebar__list">
         {isLoading ? (
@@ -151,7 +143,9 @@ export function SessionSidebar({
                   </span>
                   <div className="session-card__meta">
                     <time className="session-card__time">{formatDate(session.updated_at)}</time>
-                    <Badge variant="secondary" className="session-card__model">{session.model}</Badge>
+                    <Badge variant="secondary" className="session-card__model">
+                      {session.model}
+                    </Badge>
                   </div>
                 </Button>
 
