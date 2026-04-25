@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "target": "ESNext",
     "useDefineForClassFields": true,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
@@ -8,10 +9,14 @@
     "strict": true,
     "jsx": "react-jsx",
     "resolveJsonModule": true,
+    "ignoreDeprecations": "6.0",
     "isolatedModules": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client", "node", "react", "react-dom", "vitest/globals"]
+    "types": ["vite/client", "node", "react", "react-dom", "vitest/globals"],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["./src", "./vite.config.ts"]
 }
