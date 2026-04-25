@@ -27,6 +27,8 @@
 
 ## Detailed Task Events
 ## 2026-04-25
+- Badge text crop fix: diagnosed clipped-looking small labels as shadcn `Badge` fixed `h-5` + `overflow-hidden`; changed to `min-h-6`, `leading-normal`, no clipping. Removed stale unused `AppShell` runtime variables. Validation: `bun run typecheck`; `bun run lint`; `bun run web:build`.
+- Session image attachment display: changed timeline/composer previews to use `object-fit: contain`, wider responsive grid cards, and viewport-bounded timeline images so attached images no longer crop. Validation: `bun run typecheck`; `git diff --check -- webapp/src/styles/session.css TODO.md`.
 - Sessions header cleanup: removed top-right model and reasoning-effort badges from `AppShell`, leaving provider status + theme control. Validation: `bun run typecheck`; `git diff --check -- webapp/src/components/AppShell.tsx TODO.md`.
 - Remove deprecated webapp TypeScript options: dropped `baseUrl` and now-unused `ignoreDeprecations` from `webapp/tsconfig.json`; `@/*` remains via `paths` + Vite alias. Validation: `bun run typecheck`.
 - Continue shadcn webapp refactor: added ThemeProvider/theme switcher, mapped DESIGN.md Prism/light/dark tokens, refactored app shell/session/board/dashboard/settings UI to shadcn components, fixed test setup for shadcn/Radix. Validation: `bunx --bun shadcn@latest docs dialog --cwd webapp`; `bun run typecheck`; `bun run lint`; `bun run test:web -- --reporter dot`; `bun run web:build`; `git diff --check`.

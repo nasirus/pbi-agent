@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { fetchBootstrap, fetchConfigBootstrap } from "../api";
 import { useTaskEvents } from "../hooks/useTaskEvents";
-import { useSessionStore } from "../store";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
@@ -59,10 +58,6 @@ export function AppShell() {
   useTaskEvents();
   const { theme, setTheme } = useTheme();
   const location = useLocation();
-  const activeSessionKey = useSessionStore((state) => state.activeSessionKey);
-  const activeSession = useSessionStore((state) =>
-    activeSessionKey ? state.sessionsByKey[activeSessionKey] ?? null : null,
-  );
 
   const bootstrapQuery = useQuery({
     queryKey: ["bootstrap"],
@@ -94,22 +89,6 @@ export function AppShell() {
     ? bootstrap.workspace_root.split(/[/\\]/).filter(Boolean).slice(-2).join("/")
     : null;
 
-  const isSessionRoute = location.pathname === "/sessions" || location.pathname.startsWith("/sessions/");
-
-  // Derive the default runtime display from the active profile in config-bootstrap.
-  // This query is kept fresh by settings-page mutations, so it always reflects the
-  // current active-profile selection without requiring a full page refresh.
-  const activeProfile = configBootstrap
-    ? (configBootstrap.model_profiles.find((p) => p.id === configBootstrap.active_profile_id)
-      ?? configBootstrap.model_profiles[0])
-    : null;
-  const activeRuntime = activeProfile?.resolved_runtime;
-
-  const displayedProvider = requiresOnboarding
-    ? "Not configured"
-    : isSessionRoute && activeSession?.liveSessionId && activeSession.runtime?.provider
-      ? activeSession.runtime.provider
-      : (activeRuntime?.provider ?? "...");
   const ThemeIcon = themeIcons[theme];
 
   return (
