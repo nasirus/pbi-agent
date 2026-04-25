@@ -499,7 +499,7 @@ export function SettingsPage() {
               onClick={() => setModal({ type: "create-provider" })}
             >
               <PlusIcon data-icon="inline-start" />
-              + Add Provider
+              Add Provider
             </Button>
           </CardHeader>
           <CardContent className="settings-panel__body">

@@ -556,7 +556,7 @@ describe("SettingsPage", () => {
 
     renderWithProviders(<SettingsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "+ Add Provider" }));
+    await user.click(await screen.findByRole("button", { name: "Add Provider" }));
 
     expect(screen.getAllByRole("option", { name: "OpenAI API" })[0]).toBeInTheDocument();
     expect(
@@ -573,7 +573,7 @@ describe("SettingsPage", () => {
 
     renderWithProviders(<SettingsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "+ Add Provider" }));
+    await user.click(await screen.findByRole("button", { name: "Add Provider" }));
     await user.selectOptions(
       document.querySelector('select[name="provider-kind"]') as HTMLSelectElement,
       "chatgpt",
