@@ -115,6 +115,30 @@ class DisplaySpy:
             }
         )
 
+    def patch_result(
+        self,
+        path: str,
+        operation: str,
+        success: bool,
+        *,
+        call_id: str = "",
+        detail: str = "",
+        diff: str = "",
+    ) -> None:
+        self.function_results.append(
+            {
+                "name": "apply_patch",
+                "success": success,
+                "call_id": call_id,
+                "arguments": {
+                    "path": path,
+                    "operation_type": operation,
+                    "detail": detail,
+                    "diff": diff,
+                },
+            }
+        )
+
     def tool_group_end(self) -> None:
         self.tool_group_end_count += 1
 

@@ -445,10 +445,8 @@ class _GitHubCopilotChatCompletionsProvider(GenericProvider):
 
     def _parse_response(self, response_json: dict[str, Any]) -> CompletedResponse:
         response = super()._parse_response(response_json)
-        choices = response_json.get("choices", [])
-        first_choice = choices[0] if choices and isinstance(choices[0], dict) else {}
-        message = first_choice.get("message", {})
-        if not isinstance(message, dict):
+        message = _first_message_with_reasoning(response_json.get("choices", []))
+        if message is None:
             return response
         reasoning_text = message.get("reasoning_text")
         if not isinstance(reasoning_text, str) or not reasoning_text.strip():
@@ -479,6 +477,21 @@ def _build_chat_completions_user_message(user_input: UserTurnInput) -> dict[str,
             }
         )
     return {"role": "user", "content": content}
+
+
+def _first_message_with_reasoning(choices: object) -> dict[str, Any] | None:
+    if not isinstance(choices, list):
+        return None
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message", {})
+        if not isinstance(message, dict):
+            continue
+        reasoning_text = message.get("reasoning_text")
+        if isinstance(reasoning_text, str) and reasoning_text.strip():
+            return message
+    return None
 
 
 def _github_copilot_chat_completions_headers(

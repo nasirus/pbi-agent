@@ -49,6 +49,7 @@ def test_resolve_runtime_for_profile_id_uses_saved_github_copilot_session(
     assert runtime.settings.provider == "github_copilot"
     assert runtime.settings.responses_url == GITHUB_COPILOT_RESPONSES_URL
     assert runtime.settings.model == "gpt-5"
+    assert runtime.settings.sub_agent_model == "gpt-5"
 
 
 def test_provider_ui_metadata_exposes_auth_mode_labels_and_methods() -> None:

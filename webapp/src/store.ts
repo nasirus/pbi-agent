@@ -1,11 +1,13 @@
 import { create } from "zustand";
 
 import type {
+  ApplyPatchToolMetadata,
   ImageAttachment,
   LiveSession,
   LiveSessionRuntime,
   LiveSessionSnapshot,
   TimelineItem,
+  TimelineToolGroupEntry,
   UsagePayload,
   WebEvent,
 } from "./types";
@@ -134,6 +136,43 @@ function isImageAttachment(value: unknown): value is ImageAttachment {
     && typeof (value as { upload_id: unknown }).upload_id === "string";
 }
 
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readApplyPatchMetadata(value: unknown): ApplyPatchToolMetadata | undefined {
+  if (value === null || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    tool_name: readOptionalString(record.tool_name),
+    path: readOptionalString(record.path),
+    operation: readOptionalString(record.operation),
+    success: readBoolean(record.success),
+    detail: readOptionalString(record.detail),
+    diff: readOptionalString(record.diff),
+    call_id: readOptionalString(record.call_id),
+  };
+}
+
+function readToolGroupItems(value: unknown): TimelineToolGroupEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => {
+    if (item === null || typeof item !== "object") {
+      return { text: String(item ?? "") };
+    }
+    const record = item as Record<string, unknown>;
+    return {
+      text: readString(record.text),
+      classes: readOptionalString(record.classes),
+      metadata: readApplyPatchMetadata(record.metadata),
+    };
+  });
+}
+
 function mapSnapshotItem(raw: Record<string, unknown>): TimelineItem | null {
   const kind = raw.kind;
   const itemId = typeof raw.itemId === "string" ? raw.itemId : null;
@@ -168,9 +207,7 @@ function mapSnapshotItem(raw: Record<string, unknown>): TimelineItem | null {
       kind: "tool_group",
       itemId,
       label: readString(raw.label, "Tool calls"),
-      items: Array.isArray(raw.items)
-        ? (raw.items as { text: string; classes?: string }[])
-        : [],
+      items: readToolGroupItems(raw.items),
       subAgentId: readOptionalString(raw.sub_agent_id),
     };
   }
@@ -483,9 +520,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             kind: "tool_group",
             itemId: String(payload.item_id),
             label: readString(payload.label, "Tool calls"),
-            items: Array.isArray(payload.items)
-              ? (payload.items as { text: string; classes?: string }[])
-              : [],
+            items: readToolGroupItems(payload.items),
             subAgentId: readOptionalString(payload.sub_agent_id),
           };
           patch.items = upsertItem(current.items, item);

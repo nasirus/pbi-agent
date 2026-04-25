@@ -6,12 +6,13 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from pbi_agent.agent import tool_runtime
+from pbi_agent.agent.tool_display import display_tool_results
 from pbi_agent.models.messages import ToolCall
 from pbi_agent.tools import apply_patch as apply_patch_tool
 from pbi_agent.tools import read_file as read_file_tool
 from pbi_agent.tools import shell as shell_tool
 from pbi_agent.tools.output import MAX_OUTPUT_CHARS
-from pbi_agent.tools.types import ToolContext
+from pbi_agent.tools.types import ToolContext, ToolResult
 
 
 def test_execute_tool_calls_reports_unknown_tool_error(monkeypatch) -> None:
@@ -292,3 +293,40 @@ def test_execute_tool_calls_records_observability_events(monkeypatch) -> None:
     assert kwargs["tool_call_id"] == "call_1"
     assert kwargs["tool_input"] == {"value": 7}
     assert kwargs["success"] is True
+
+
+def test_display_tool_results_routes_apply_patch_with_diff_to_patch_display(
+    display_spy,
+) -> None:
+    call = ToolCall(
+        call_id="call_patch_1",
+        name="apply_patch",
+        arguments={
+            "operation_type": "update_file",
+            "path": "TODO.md",
+            "diff": "-[ ] Old\n+[X] New",
+        },
+    )
+
+    result = ToolResult(
+        call_id="call_patch_1",
+        output_json=json.dumps(
+            {"ok": True, "result": {"status": "completed", "message": "ok"}}
+        ),
+    )
+
+    display_tool_results(display_spy, [call], [result])
+
+    assert display_spy.function_results == [
+        {
+            "name": "apply_patch",
+            "success": True,
+            "call_id": "call_patch_1",
+            "arguments": {
+                "path": "TODO.md",
+                "operation_type": "update_file",
+                "detail": "",
+                "diff": "-[ ] Old\n+[X] New",
+            },
+        }
+    ]

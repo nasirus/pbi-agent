@@ -17,6 +17,7 @@ import urllib.request
 from typing import Any, TYPE_CHECKING
 
 from pbi_agent.agent.system_prompt import get_system_prompt
+from pbi_agent.agent.tool_display import display_tool_results
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
 from pbi_agent.models.messages import (
@@ -244,15 +245,8 @@ class AnthropicProvider(Provider):
         had_errors = batch.had_errors
 
         tool_result_items: list[dict[str, Any]] = []
+        display_tool_results(display, fn_calls, batch.results)
         for result in batch.results:
-            call = _find_by_id(fn_calls, result.call_id)
-            if not (call and call.name == "sub_agent"):
-                display.function_result(
-                    name=call.name if call else "unknown",
-                    success=not result.is_error,
-                    call_id=result.call_id,
-                    arguments=call.arguments if call else None,
-                )
             tool_result_items.append(
                 {
                     "type": "tool_result",
@@ -615,13 +609,6 @@ class AnthropicProvider(Provider):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
-    for c in calls:
-        if c.call_id == call_id:
-            return c
-    return None
 
 
 def _anthropic_user_content_blocks(user_input: UserTurnInput) -> list[dict[str, Any]]:

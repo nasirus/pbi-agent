@@ -293,7 +293,10 @@ class ConsoleDisplay(DisplayProtocol):
         *,
         call_id: str = "",
         detail: str = "",
+        diff: str = "",
     ) -> None:
+        if self._tool_group.function_count:
+            self._tool_group.update_for_function("apply_patch")
         self._append_tool_line(
             "apply_patch",
             format_patch_tool_item(
@@ -303,6 +306,7 @@ class ConsoleDisplay(DisplayProtocol):
                 status=status_markup(success=success),
                 call_id=call_id,
                 detail=detail,
+                diff=diff,
             ),
         )
 

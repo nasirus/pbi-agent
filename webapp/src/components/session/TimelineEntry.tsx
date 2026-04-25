@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import type { ImageAttachment, TimelineItem } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { GitDiffResult, isApplyPatchToolMetadata } from "./GitDiffResult";
 
 function renderUserContent(
   content: string,
@@ -97,7 +98,10 @@ export function TimelineEntry({
   subAgentTitle?: string;
   subAgentStatus?: string;
 }) {
-  const [collapsed, setCollapsed] = useState(true);
+  const startsCollapsed =
+    item.kind !== "tool_group"
+    || !item.items.some((toolItem) => isApplyPatchToolMetadata(toolItem.metadata));
+  const [collapsed, setCollapsed] = useState(startsCollapsed);
 
   const subAgentBanner =
     subAgentTitle || subAgentStatus ? (
@@ -185,11 +189,18 @@ export function TimelineEntry({
       </Button>
       {!collapsed ? (
         <div className="timeline-entry__body">
-          {item.items.map((toolItem, index) => (
-            <pre key={`${item.itemId}-${index}`} className="timeline-entry__tool-item">
-              {toolItem.text}
-            </pre>
-          ))}
+          {item.items.map((toolItem, index) =>
+            isApplyPatchToolMetadata(toolItem.metadata) ? (
+              <GitDiffResult
+                key={`${item.itemId}-${index}`}
+                metadata={toolItem.metadata}
+              />
+            ) : (
+              <pre key={`${item.itemId}-${index}`} className="timeline-entry__tool-item">
+                {toolItem.text}
+              </pre>
+            ),
+          )}
         </div>
       ) : null}
     </div>

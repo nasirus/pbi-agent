@@ -1741,6 +1741,68 @@ def test_openai_request_turn_retries_nested_retryable_response_error(
     assert display_spy.retry_notices == [(1, 1)]
 
 
+def test_openai_request_turn_retries_nested_server_is_overloaded_response_error(
+    monkeypatch,
+    display_spy,
+    make_http_response,
+) -> None:
+    responses = [
+        {
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "error": {
+                    "code": "server_is_overloaded",
+                    "message": (
+                        "Our servers are currently overloaded. Please try again later."
+                    ),
+                },
+            },
+        },
+        {
+            "id": "resp_after_overload_retry",
+            "model": DEFAULT_MODEL,
+            "usage": {
+                "input_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens": 3,
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Recovered."}],
+                }
+            ],
+        },
+    ]
+    requests: list[urllib.request.Request] = []
+
+    def fake_urlopen(
+        request: urllib.request.Request,
+        timeout: float,
+    ) -> _FakeHTTPResponse:
+        del timeout
+        requests.append(request)
+        return make_http_response(responses.pop(0))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    provider = OpenAIProvider(_make_settings(max_retries=1))
+
+    response = provider.request_turn(
+        user_message="hello",
+        display=display_spy,
+        session_usage=TokenUsage(model=DEFAULT_MODEL),
+        turn_usage=TokenUsage(model=DEFAULT_MODEL),
+    )
+
+    assert response.text == "Recovered."
+    assert len(requests) == 2
+    assert display_spy.retry_notices == [(1, 1)]
+
+
 def test_openai_request_turn_traces_nested_response_error_as_failed(
     monkeypatch,
     display_spy,

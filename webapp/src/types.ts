@@ -369,11 +369,27 @@ export type TimelineThinkingItem = {
   subAgentId?: string;
 };
 
+export type ApplyPatchToolMetadata = {
+  tool_name?: string;
+  path?: string;
+  operation?: string;
+  success?: boolean;
+  detail?: string;
+  diff?: string;
+  call_id?: string;
+};
+
+export type TimelineToolGroupEntry = {
+  text: string;
+  classes?: string;
+  metadata?: ApplyPatchToolMetadata;
+};
+
 export type TimelineToolGroupItem = {
   kind: "tool_group";
   itemId: string;
   label: string;
-  items: { text: string; classes?: string }[];
+  items: TimelineToolGroupEntry[];
   subAgentId?: string;
 };
 

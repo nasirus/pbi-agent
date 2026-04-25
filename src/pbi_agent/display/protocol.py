@@ -15,6 +15,7 @@ from pbi_agent.display.formatting import tool_group_class
 class PendingToolGroupItem:
     text: str
     classes: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -47,8 +48,20 @@ class PendingToolGroup:
         self.function_count = function_count
         self.function_names.clear()
 
-    def add_item(self, text: str, *, classes: str = "") -> None:
-        self.items.append(PendingToolGroupItem(text=text, classes=classes))
+    def add_item(
+        self,
+        text: str,
+        *,
+        classes: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.items.append(
+            PendingToolGroupItem(
+                text=text,
+                classes=classes,
+                metadata=dict(metadata or {}),
+            )
+        )
 
     def update_for_function(self, tool_name: str) -> None:
         normalized = tool_name.strip() or "function"
@@ -161,6 +174,7 @@ class DisplayProtocol(Protocol):
         *,
         call_id: str = "",
         detail: str = "",
+        diff: str = "",
     ) -> None: ...
 
     def function_start(self, count: int) -> None: ...

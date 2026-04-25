@@ -80,6 +80,25 @@ def test_tool_group_end_prints_tool_summary_lines() -> None:
     assert "FAILED" in output
 
 
+def test_patch_result_keeps_apply_patch_group_label_and_diff() -> None:
+    display, stdout, _ = _display()
+
+    display.function_start(1)
+    display.patch_result(
+        "TODO.md",
+        "update_file",
+        True,
+        diff="-[ ] Old\n+[X] New",
+    )
+    display.tool_group_end()
+
+    output = stdout.getvalue()
+    assert "apply_patch" in output
+    assert "TODO.md" in output
+    assert "-[ ] Old" in output
+    assert "+[X] New" in output
+
+
 def test_read_file_tool_summary_tolerates_invalid_line_arguments() -> None:
     display, stdout, _ = _display()
 

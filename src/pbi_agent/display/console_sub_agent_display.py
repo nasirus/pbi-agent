@@ -228,7 +228,10 @@ class ConsoleSubAgentDisplay(DisplayProtocol):
         *,
         call_id: str = "",
         detail: str = "",
+        diff: str = "",
     ) -> None:
+        if self._tool_group.function_count:
+            self._tool_group.update_for_function("apply_patch")
         self._tool_group.add_item(
             format_patch_tool_item(
                 path,
@@ -237,6 +240,7 @@ class ConsoleSubAgentDisplay(DisplayProtocol):
                 status=status_markup(success=success),
                 call_id=call_id,
                 detail=detail,
+                diff=diff,
             ),
             classes=tool_item_class("apply_patch"),
         )

@@ -17,6 +17,7 @@ from pbi_agent import __version__
 from pbi_agent.auth.models import OAuthSessionAuth
 from pbi_agent.auth.service import build_runtime_request_auth, refresh_runtime_auth
 from pbi_agent.agent.system_prompt import get_system_prompt
+from pbi_agent.agent.tool_display import display_tool_results
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
 from pbi_agent.media import data_url_for_image
@@ -56,6 +57,7 @@ _RETRYABLE_RESPONSE_ERROR_CODES = {
     "api_error",
     "internal",
     "server_error",
+    "server_is_overloaded",
     "service_unavailable",
     "unavailable",
     "overloaded_error",
@@ -255,15 +257,7 @@ class OpenAIProvider(Provider):
             ),
         )
 
-        for result in batch.results:
-            call = _find_by_id(response.function_calls, result.call_id)
-            if not (call and call.name == "sub_agent"):
-                display.function_result(
-                    name=call.name if call else "unknown",
-                    success=not result.is_error,
-                    call_id=result.call_id,
-                    arguments=call.arguments if call else None,
-                )
+        display_tool_results(display, response.function_calls, batch.results)
         if displayable_calls:
             display.tool_group_end()
 
@@ -1090,13 +1084,6 @@ def _parse_function_call(item: dict[str, Any]) -> ToolCall:
         name=str(item.get("name", "")),
         arguments=arguments,
     )
-
-
-def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
-    for call in calls:
-        if call.call_id == call_id:
-            return call
-    return None
 
 
 def _extract_web_search_sources(item: dict[str, Any]) -> list[WebSearchSource]:

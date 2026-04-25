@@ -107,4 +107,43 @@ describe("SessionTimeline", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Done" })).toBeInTheDocument();
     expect(screen.queryByText("# Done")).not.toBeInTheDocument();
   });
+
+  it("renders apply_patch tool results as a structured git diff", () => {
+    render(
+      <SessionTimeline
+        items={[
+          {
+            kind: "tool_group",
+            itemId: "tool-1",
+            label: "apply_patch",
+            items: [
+              {
+                text: "update_file TODO.md  done\ndiff:\n-[ ] Old\n+[X] New",
+                classes: "tool-call-apply-patch",
+                metadata: {
+                  tool_name: "apply_patch",
+                  path: "TODO.md",
+                  operation: "update_file",
+                  success: true,
+                  diff: "-[ ] Old\n+[X] New",
+                  call_id: "call_patch_1",
+                },
+              },
+            ],
+          },
+        ]}
+        subAgents={{}}
+        connection="connected"
+        waitMessage={null}
+        itemsVersion={1}
+      />,
+    );
+
+    expect(screen.getByText("TODO.md")).toBeInTheDocument();
+    expect(screen.getByText("Updated")).toBeInTheDocument();
+    expect(screen.getByText("[ ] Old")).toBeInTheDocument();
+    expect(screen.getByText("[X] New")).toBeInTheDocument();
+    expect(screen.getByText("call_patch_1")).toBeInTheDocument();
+    expect(screen.queryByText(/update_file TODO.md/)).not.toBeInTheDocument();
+  });
 });

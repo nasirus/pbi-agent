@@ -5,6 +5,7 @@ import { renderWithProviders } from "../../test/render";
 import {
   ApiError,
   createProvider,
+  createModelProfile,
   fetchConfigBootstrap,
   fetchProviderModels,
   fetchProviderAuthFlow,
@@ -850,6 +851,49 @@ describe("SettingsPage", () => {
     expect(
       screen.getAllByRole("option", { name: "GPT-5.4 mini (gpt-5.4-mini)" }),
     ).toHaveLength(2);
+  });
+
+  it("leaves the sub-agent model blank so the main profile model is used", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createModelProfile).mockResolvedValue({
+      model_profile: makeConfigBootstrap().model_profiles[0],
+      config_revision: "rev-2",
+    });
+
+    renderWithProviders(<SettingsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "+ Add Profile" }));
+    await waitFor(() =>
+      expect(fetchProviderModels).toHaveBeenCalledWith("openai-main"),
+    );
+
+    await user.type(
+      document.querySelector<HTMLInputElement>('input[name="profile-name"]')!,
+      "Opus",
+    );
+    await user.selectOptions(
+      document.querySelector<HTMLSelectElement>('select[name="model"]')!,
+      "gpt-5.4",
+    );
+    expect(
+      await screen.findByText("Leave blank to use this profile's main model."),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector<HTMLSelectElement>('select[name="sub-agent-model"]')
+        ?.value,
+    ).toBe("");
+
+    await user.click(screen.getByRole("button", { name: "Add Profile" }));
+
+    await waitFor(() =>
+      expect(createModelProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-5.4",
+          sub_agent_model: null,
+        }),
+        "rev-1",
+      ),
+    );
   });
 
   it("falls back to text input when provider model discovery fails", async () => {

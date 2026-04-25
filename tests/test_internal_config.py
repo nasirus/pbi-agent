@@ -43,6 +43,26 @@ def _args(*argv: str):
     return build_parser().parse_args(list(argv))
 
 
+def _clear_runtime_env(monkeypatch) -> None:
+    for name in [
+        "PBI_AGENT_API_KEY",
+        "PBI_AGENT_PROVIDER",
+        "PBI_AGENT_MODEL",
+        "PBI_AGENT_SUB_AGENT_MODEL",
+        "PBI_AGENT_RESPONSES_URL",
+        "PBI_AGENT_GENERIC_API_URL",
+        "PBI_AGENT_REASONING_EFFORT",
+        "PBI_AGENT_MAX_TOOL_WORKERS",
+        "PBI_AGENT_MAX_RETRIES",
+        "PBI_AGENT_COMPACT_THRESHOLD",
+        "PBI_AGENT_MAX_TOKENS",
+        "PBI_AGENT_SERVICE_TIER",
+        "PBI_AGENT_WEB_SEARCH",
+        "PBI_AGENT_PROFILE_ID",
+    ]:
+        monkeypatch.delenv(name, raising=False)
+
+
 def _jwt(payload: dict[str, object]) -> str:
     def encode(part: dict[str, object]) -> str:
         raw = json.dumps(part, separators=(",", ":")).encode("utf-8")
@@ -220,6 +240,7 @@ def test_config_payload_ignores_commands_from_global_config(
 
 def test_resolve_web_runtime_uses_selected_web_profile(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
     monkeypatch.delenv("PBI_AGENT_PROVIDER", raising=False)
     monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -253,7 +274,7 @@ def test_resolve_web_runtime_uses_selected_web_profile(monkeypatch) -> None:
     assert settings.provider == "openai"
     assert settings.api_key == "saved-openai-key"
     assert settings.model == "gpt-5.4-2026-03-05"
-    assert settings.sub_agent_model == "gpt-5.4-mini"
+    assert settings.sub_agent_model == "gpt-5.4-2026-03-05"
     assert settings.max_tool_workers == 6
     assert settings.max_retries == 5
     assert settings.compact_threshold == 123456
@@ -322,10 +343,78 @@ def test_resolve_web_runtime_uses_saved_chatgpt_account_session(
     assert settings.auth.plan_type == "chatgpt_plus"
 
 
+def test_profile_without_sub_agent_model_uses_own_main_model(monkeypatch) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
+
+    create_provider_config(
+        ProviderConfig(
+            id="copilot",
+            name="Copilot",
+            kind="github_copilot",
+            auth_mode="copilot_account",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="opus",
+            name="Opus",
+            provider_id="copilot",
+            model="claude-opus-4.6",
+        )
+    )
+
+    settings = resolve_settings(_args("--profile-id", "opus", "run", "--prompt", "hi"))
+
+    assert settings.model == "claude-opus-4.6"
+    assert settings.sub_agent_model == "claude-opus-4.6"
+
+
+def test_profile_runtime_model_override_keeps_profile_sub_agent_fallback(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
+
+    create_provider_config(
+        ProviderConfig(
+            id="openai-main",
+            name="OpenAI Main",
+            kind="openai",
+            api_key="saved-openai-key",
+        )
+    )
+    create_model_profile_config(
+        ModelProfileConfig(
+            id="analysis",
+            name="Analysis",
+            provider_id="openai-main",
+            model="saved-model",
+        )
+    )
+
+    runtime = resolve_runtime(
+        _args(
+            "--profile-id",
+            "analysis",
+            "--model",
+            "cli-model",
+            "run",
+            "--prompt",
+            "hi",
+        )
+    )
+
+    assert runtime.settings.model == "cli-model"
+    assert runtime.settings.sub_agent_model == "saved-model"
+    assert runtime.profile_id is None
+
+
 def test_resolve_settings_prefers_cli_profile_selector_over_env_and_active_profile(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
     monkeypatch.setenv("PBI_AGENT_PROFILE_ID", "env-profile")
 
     create_provider_config(
@@ -366,6 +455,7 @@ def test_resolve_settings_prefers_cli_and_env_over_selected_profile(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
     monkeypatch.setenv("PBI_AGENT_MODEL", "env-model")
     monkeypatch.setenv("PBI_AGENT_MAX_RETRIES", "9")
 
@@ -407,6 +497,7 @@ def test_provider_specific_api_key_env_fallback_still_applies_after_profile_sele
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
     monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
     monkeypatch.setenv("XAI_API_KEY", "xai-env-key")
 
@@ -437,6 +528,7 @@ def test_saved_provider_env_var_reference_beats_saved_plaintext_secret(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
     monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_PRIMARY_KEY", "env-ref-key")
@@ -466,6 +558,7 @@ def test_saved_provider_env_var_reference_beats_saved_plaintext_secret(
 
 def test_runtime_overrides_do_not_persist_a_derived_profile(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
 
     create_provider_config(
         ProviderConfig(
@@ -501,6 +594,7 @@ def test_runtime_overrides_do_not_persist_a_derived_profile(monkeypatch) -> None
 
 def test_resolve_runtime_keeps_saved_chatgpt_account_profile_auth(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
     monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -551,6 +645,7 @@ def test_resolve_runtime_allows_provider_override_api_key_over_chatgpt_profile(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
     monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("XAI_API_KEY", raising=False)
@@ -704,6 +799,7 @@ def test_delete_provider_is_blocked_while_profile_still_references_it(
 
 def test_resolve_settings_falls_back_to_unsaved_runtime_defaults(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
+    _clear_runtime_env(monkeypatch)
     monkeypatch.setenv("PBI_AGENT_PROVIDER", "google")
     monkeypatch.setenv("GEMINI_API_KEY", "google-key")
 

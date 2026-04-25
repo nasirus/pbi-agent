@@ -315,6 +315,7 @@ export function ModelProfileModal({
     name: string;
     value: string;
     placeholder: string;
+    defaultOptionLabel?: string;
     mode: ModelFieldMode;
     setMode: (mode: ModelFieldMode) => void;
     options: Array<{ value: string; label: string }>;
@@ -330,7 +331,9 @@ export function ModelProfileModal({
             value={args.value}
             onChange={(e) => args.onChange(e.target.value)}
           >
-            <NativeSelectOption value="">Provider default</NativeSelectOption>
+            <NativeSelectOption value="">
+              {args.defaultOptionLabel ?? "Provider default"}
+            </NativeSelectOption>
             {args.options.map((option) => (
               <NativeSelectOption key={option.value} value={option.value}>
                 {option.label}
@@ -499,12 +502,16 @@ export function ModelProfileModal({
                 label: "Sub-agent model",
                 name: "sub-agent-model",
                 value: form.sub_agent_model,
-                placeholder: kindMeta?.default_sub_agent_model ?? "same as model",
+                placeholder: form.model.trim() || "same as model",
+                defaultOptionLabel: "Profile main model",
                 mode: subAgentModelMode,
                 setMode: setSubAgentModelMode,
                 options: subAgentModelOptions,
                 onChange: (value) => set({ sub_agent_model: value }),
               })}
+              <FieldDescription>
+                Leave blank to use this profile&apos;s main model.
+              </FieldDescription>
             </Field>
           </div>
 

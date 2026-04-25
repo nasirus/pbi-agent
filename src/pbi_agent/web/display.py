@@ -319,7 +319,10 @@ class _EventDisplayBase(DisplayProtocol):
         *,
         call_id: str = "",
         detail: str = "",
+        diff: str = "",
     ) -> None:
+        if self._tool_group.function_count:
+            self._tool_group.update_for_function("apply_patch")
         tool_name, text = route_function_result(
             "apply_patch",
             verbose=self.verbose,
@@ -329,9 +332,22 @@ class _EventDisplayBase(DisplayProtocol):
                 "path": path,
                 "operation_type": operation,
                 "detail": detail,
+                "diff": diff,
             },
         )
-        self._tool_group.add_item(_plain_text(text), classes=tool_item_class(tool_name))
+        self._tool_group.add_item(
+            _plain_text(text),
+            classes=tool_item_class(tool_name),
+            metadata={
+                "tool_name": tool_name,
+                "path": path,
+                "operation": operation,
+                "success": success,
+                "detail": detail,
+                "diff": diff,
+                "call_id": call_id,
+            },
+        )
 
     def function_start(self, count: int) -> None:
         self._tool_group.start(
@@ -355,7 +371,10 @@ class _EventDisplayBase(DisplayProtocol):
             call_id=call_id,
             arguments=arguments,
         )
-        self._tool_group.add_item(_plain_text(text), classes=tool_item_class(tool_name))
+        self._tool_group.add_item(
+            _plain_text(text),
+            classes=tool_item_class(tool_name),
+        )
 
     def tool_group_end(self) -> None:
         if not self._tool_group.items:
@@ -367,7 +386,11 @@ class _EventDisplayBase(DisplayProtocol):
                 "item_id": self._next_id("tool-group"),
                 "label": self._tool_group.label,
                 "items": [
-                    {"text": item.text, "classes": item.classes}
+                    {
+                        "text": item.text,
+                        "classes": item.classes,
+                        **({"metadata": item.metadata} if item.metadata else {}),
+                    }
                     for item in self._tool_group.items
                 ],
             },
