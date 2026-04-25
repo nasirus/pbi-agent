@@ -1,4 +1,4 @@
-[X] Locate status badge styles
-[X] Add more padding to Done/+/- badges
-[X] Run focused validation
+[X] Check current git remotes
+[X] Point origin at pbi-agent/pbi-agent
+[X] Verify remotes
 [X] Update task memory
