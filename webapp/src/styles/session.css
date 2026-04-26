@@ -221,13 +221,8 @@
 .session-card__menu-item {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  width: 100%;
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-sm);
   background: transparent;
   text-align: left;
-  font-size: var(--text-xs);
   color: var(--color-text-secondary);
   transition: background var(--duration-fast), color var(--duration-fast);
 }
@@ -331,8 +326,6 @@
   gap: var(--sp-2);
   width: 100%;
   align-items: flex-start;
-  min-height: 0;
-  padding-block: var(--sp-2);
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
 }
@@ -1312,14 +1305,9 @@
 .composer__action-item {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  width: 100%;
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-md);
   background: transparent;
   text-align: left;
   color: var(--color-text);
-  font-size: var(--text-xs);
   transition: background var(--duration-normal);
 }
 

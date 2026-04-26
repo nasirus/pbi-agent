@@ -164,6 +164,18 @@ Buttons embedded in dense chrome (sidebars, toolbars, compact headers) should us
 ### Input Fields
 Inputs use a dark background (#020617) with a subtle 1px border. On focus, the border transitions to Cobalt Blue with a very soft blue outer glow (3px spread, 10% opacity).
 
+### Floating Overlays
+Dropdown menus, selects, popovers, context menus, command palettes, and submenus are floating surfaces. They must never use edge-tight or text-tight defaults, especially inside compact headers and sidebars.
+
+Global overlay defaults:
+- Use Radix collision padding of at least `12px` so floating content stays away from viewport edges.
+- Use a side offset of at least `8px` for menus, selects, popovers, and submenus unless a component has a specific interaction reason not to; dropdown menus should prefer `10px`.
+- Floating panels use at least `p-2` internal padding; dropdown menus should prefer `p-3` so items do not touch rounded edges.
+- Menu and select items use at least `min-height: 2rem`, `line-height: var(--leading-normal)`, and readable padding equivalent to `px-2.5 py-1.5`; dropdown menu rows should prefer `min-height: 2.25rem` with `px-3 py-2`.
+- Compact icon-only chrome buttons should prefer native `title` plus `aria-label` over custom tooltip surfaces when a simple label is enough. This keeps topbar/sidebar controls consistent and avoids redundant overlay styling.
+- Do not fix overlay clipping page-by-page. Fix the shared primitive in `webapp/src/components/ui/` so existing and future components inherit the safe defaults.
+- When adding or updating shadcn components, review generated overlay primitives for tight `p-1`, `py-1`, missing `collisionPadding`, fixed heights, or `overflow-hidden` that can crop text.
+
 ### Cards & Panels
 Cards should not use shadows. They are defined by their background color difference and a 1px border. Content inside cards should follow the 8px spacing rhythm.
 

@@ -43,7 +43,8 @@ uv tool install --reinstall .
 - Keep `Detailed Task Events` append-only within the active day. Group entries under one `## YYYY-MM-DD` heading per day.
 - After each implementation, append one short task entry to the current day with only: what changed, validation, and next context if needed.
 - On the first substantive task of a new day, compact the previous day's detailed entries before appending new ones.
-- During compaction, promote durable facts into `Long-Term Memory`, carry unresolved items into an open-thread bullet if still relevant, and remove prior-day detail that is no longer needed.
+- During compaction, first review every prior-day detailed entry and explicitly write a compact resume of its durable outcome into `Long-Term Memory` before deleting the dated section. Do not delete a prior-day section unless its durable facts, decisions, validation patterns, and unresolved follow-ups have been promoted or consciously deemed non-durable.
+- Carry unresolved items into an active/open follow-up bullet if still relevant, then remove prior-day detail that is no longer needed.
 - Avoid duplicating long-term bullets. Merge with existing bullets when the fact already exists.
 - Keep the file token-efficient: prefer short bullets, avoid command noise, and do not preserve obsolete troubleshooting detail once compacted.
 

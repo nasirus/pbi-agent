@@ -22,7 +22,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { LoadingSpinner } from "./shared/LoadingSpinner";
 import { OnboardingModal } from "./OnboardingModal";
 import { themeOptions, useTheme, type AppTheme } from "./ThemeProvider";
@@ -114,17 +113,18 @@ export function AppShell() {
         <div className="header__right">
           {/* Theme dropdown */}
           <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" aria-label="Change theme">
-                    <ThemeIcon />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Theme</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="min-w-36">
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                title="Change theme"
+                aria-label="Change theme"
+              >
+                <ThemeIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
               <DropdownMenuGroup>
                 {themeOptions.map((option) => {
                   const OptionIcon = themeIcons[option.value];

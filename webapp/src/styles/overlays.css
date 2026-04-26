@@ -1,0 +1,42 @@
+/* ── Floating overlays ───────────────────────────────────────────────────── */
+
+/*
+ * Shared Radix/shadcn overlay defaults. Keep spacing here instead of patching
+ * individual dropdown instances so theme, profile, session, composer, and future
+ * menus all inherit the same production-grade chrome. Component-specific classes
+ * may change width/layout only, not the base panel/item breathing room.
+ */
+
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"] {
+  box-sizing: border-box;
+  min-width: max(10rem, var(--radix-dropdown-menu-trigger-width, 0px));
+  padding: var(--sp-3);
+  border-radius: var(--radius-lg);
+  background: var(--popover);
+  color: var(--popover-foreground);
+}
+
+[data-slot="dropdown-menu-item"],
+[data-slot="dropdown-menu-checkbox-item"],
+[data-slot="dropdown-menu-radio-item"],
+[data-slot="dropdown-menu-sub-trigger"] {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.75rem;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+[data-slot="dropdown-menu-label"] {
+  min-height: 2rem;
+  padding: var(--sp-2) var(--sp-4);
+  line-height: var(--leading-normal);
+}
+
+[data-slot="dropdown-menu-separator"] {
+  margin-block: var(--sp-2);
+}
