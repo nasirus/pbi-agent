@@ -1,6 +1,5 @@
 # TODO
 
-[X] Add V4A prefix-escaping diagnostic to apply_diff.py
-[X] Add focused regression test
-[X] Run Python validation
+[X] Add bottom spacing to Kanban task action buttons
+[X] Run focused frontend validation
 [X] Update MEMORY.md

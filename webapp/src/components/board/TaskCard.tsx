@@ -57,7 +57,14 @@ export function TaskCard({
       </CardHeader>
 
       <CardFooter className="task-card__actions">
-        <Button type="button" variant="ghost" size="sm" onClick={onEdit} disabled={isRunning}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="task-card__action-button"
+          onClick={onEdit}
+          disabled={isRunning}
+        >
           <PencilIcon data-icon="inline-start" />
           Edit
         </Button>
@@ -66,6 +73,7 @@ export function TaskCard({
             type="button"
             variant="ghost"
             size="sm"
+            className="task-card__action-button"
             onClick={onRun}
             disabled={isRunning}
           >
@@ -74,14 +82,21 @@ export function TaskCard({
           </Button>
         ) : null}
         {task.session_id ? (
-          <Button variant="ghost" size="sm" asChild>
+          <Button variant="ghost" size="sm" className="task-card__action-button" asChild>
             <a href={`/sessions/${encodeURIComponent(task.session_id)}`}>
               <ExternalLinkIcon data-icon="inline-start" />
               Session
             </a>
           </Button>
         ) : null}
-        <Button type="button" variant="destructive" size="sm" onClick={onDelete} disabled={isRunning}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="task-card__action-button"
+          onClick={onDelete}
+          disabled={isRunning}
+        >
           <Trash2Icon data-icon="inline-start" />
           Delete
         </Button>
