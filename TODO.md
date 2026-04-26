@@ -1,4 +1,5 @@
-[>] Fix web lint errors
-[ ] Simplify redundant status union types
-[ ] Run lint/typecheck
-[ ] Update memory
+[X] Replace loose status strings with explicit types
+[X] Inspect actual status/phase values
+[X] Add explicit frontend unions
+[X] Run lint/typecheck
+[X] Update memory

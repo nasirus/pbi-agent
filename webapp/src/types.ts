@@ -132,9 +132,16 @@ export type LiveSessionSnapshot = {
   last_event_seq: number;
 };
 
+export type ProcessingPhase =
+  | "starting"
+  | "model_wait"
+  | "tool_execution"
+  | "finalizing"
+  | "retry_wait";
+
 export type ProcessingState = {
   active: boolean;
-  phase: "starting" | "model_wait" | "tool_execution" | "finalizing" | "retry_wait" | string | null;
+  phase: ProcessingPhase | null;
   message: string | null;
   active_tool_count?: number;
 };
@@ -377,6 +384,10 @@ export type TimelineThinkingItem = {
   subAgentId?: string;
 };
 
+export type ToolCallStatus = "running" | "completed" | "failed";
+
+export type ToolGroupStatus = "running" | "completed";
+
 export type ApplyPatchToolMetadata = {
   tool_name?: string;
   path?: string;
@@ -385,7 +396,7 @@ export type ApplyPatchToolMetadata = {
   detail?: string;
   diff?: string;
   call_id?: string;
-  status?: "running" | "completed" | "failed" | string;
+  status?: ToolCallStatus;
 };
 
 export type TimelineToolGroupEntry = {
@@ -398,7 +409,7 @@ export type TimelineToolGroupItem = {
   kind: "tool_group";
   itemId: string;
   label: string;
-  status?: "running" | "completed" | string;
+  status?: ToolGroupStatus;
   items: TimelineToolGroupEntry[];
   subAgentId?: string;
 };

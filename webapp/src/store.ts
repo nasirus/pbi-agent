@@ -6,9 +6,12 @@ import type {
   LiveSession,
   LiveSessionRuntime,
   LiveSessionSnapshot,
+  ProcessingPhase,
   ProcessingState,
   TimelineItem,
   TimelineToolGroupEntry,
+  ToolCallStatus,
+  ToolGroupStatus,
   UsagePayload,
   WebEvent,
 } from "./types";
@@ -131,6 +134,40 @@ function readTimelineRole(
   }
 }
 
+function readProcessingPhase(value: unknown): ProcessingPhase | null {
+  switch (value) {
+    case "starting":
+    case "model_wait":
+    case "tool_execution":
+    case "finalizing":
+    case "retry_wait":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readToolCallStatus(value: unknown): ToolCallStatus | undefined {
+  switch (value) {
+    case "running":
+    case "completed":
+    case "failed":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function readToolGroupStatus(value: unknown): ToolGroupStatus | undefined {
+  switch (value) {
+    case "running":
+    case "completed":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
 function isImageAttachment(value: unknown): value is ImageAttachment {
   if (value === null || typeof value !== "object") {
     return false;
@@ -156,7 +193,7 @@ function readApplyPatchMetadata(value: unknown): ApplyPatchToolMetadata | undefi
     detail: readOptionalString(record.detail),
     diff: readOptionalString(record.diff),
     call_id: readOptionalString(record.call_id),
-    status: readOptionalString(record.status),
+    status: readToolCallStatus(record.status),
   };
 }
 
@@ -169,7 +206,7 @@ function readProcessingState(value: unknown): ProcessingState | null {
   if (!active) return null;
   return {
     active,
-    phase: readOptionalString(record.phase) ?? null,
+    phase: readProcessingPhase(record.phase),
     message: typeof record.message === "string" ? record.message : null,
     active_tool_count:
       typeof record.active_tool_count === "number" ? record.active_tool_count : undefined,
@@ -227,7 +264,7 @@ function mapSnapshotItem(raw: Record<string, unknown>): TimelineItem | null {
       kind: "tool_group",
       itemId,
       label: readString(raw.label, "Tool calls"),
-      status: readOptionalString(raw.status),
+      status: readToolGroupStatus(raw.status),
       items: readToolGroupItems(raw.items),
       subAgentId: readOptionalString(raw.sub_agent_id),
     };
@@ -548,7 +585,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             kind: "tool_group",
             itemId: String(payload.item_id),
             label: readString(payload.label, "Tool calls"),
-            status: readOptionalString(payload.status),
+            status: readToolGroupStatus(payload.status),
             items: readToolGroupItems(payload.items),
             subAgentId: readOptionalString(payload.sub_agent_id),
           };
