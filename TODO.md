@@ -1,5 +1,4 @@
-[X] Inspect task modal and existing styling
-[X] Apply DESIGN.md-aligned uncropping fix
-[X] Add/update focused test if useful
-[X] Run frontend validation
+[X] Change Kanban header badges to max two wrapped lines
+[X] Update focused StageColumn test wording
+[X] Run frontend validation/build
 [X] Update MEMORY.md

@@ -84,10 +84,11 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-3);
-  min-height: 7.25rem;
+  height: 7.25rem;
   padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .board-column__drag-handle {
@@ -120,6 +121,7 @@
   gap: var(--sp-2);
   min-width: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .board-column__name {
@@ -129,12 +131,22 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .board-column__meta {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
+  align-content: flex-start;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 4.5rem;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  padding-bottom: var(--sp-1);
 }
 
 .board-column__count {
@@ -144,14 +156,17 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
+  flex: 0 0 auto;
 }
 
 .board-column__label {
+  flex: 0 0 auto;
   min-height: 2rem;
   padding: var(--sp-1) var(--sp-2);
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .board-column__body {
