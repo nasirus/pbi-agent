@@ -1,6 +1,5 @@
-[>] Audit and enforce dropdown design across app
-[X] List all DropdownMenu usages
-[X] Find CSS overrides that can defeat shared spacing
-[X] Normalize or document allowed width/content overrides
-[X] Run frontend validation
+[X] Fix review finding: avoid misleading multi-line diff pairings
+[X] Render intraline highlights only for simple one-line replacements
+[X] Add regression test for multi-line delete/insert groups
+[X] Run focused frontend validation
 [X] Update task memory

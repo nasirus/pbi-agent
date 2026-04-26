@@ -403,11 +403,15 @@ export function SessionPage({
       return;
     }
     if (text.startsWith("/")) {
+      const uploadedImageIds =
+        images.length > 0 && sessionState?.liveSessionId
+          ? (await uploadSessionImages(sessionState.liveSessionId, images)).map((image) => image.upload_id)
+          : [];
       await sendInputMutation.mutateAsync({
         text,
         file_paths: [],
         image_paths: [],
-        image_upload_ids: [],
+        image_upload_ids: uploadedImageIds,
         profile_id: selectedSavedProfileId,
       });
       return;

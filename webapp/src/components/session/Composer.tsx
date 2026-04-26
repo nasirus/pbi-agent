@@ -408,11 +408,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     async (textValue: string) => {
       const trimmed = textValue.trim();
       if (!trimmed && pendingImages.length === 0) return;
-      if ((trimmed.startsWith("/") || trimmed.startsWith("!")) && pendingImages.length > 0) {
+      if (trimmed.startsWith("!") && pendingImages.length > 0) {
         setAttachmentMessage(
-          trimmed.startsWith("!")
-            ? "Shell commands cannot include image attachments."
-            : "Slash commands cannot include image attachments.",
+          "Shell commands cannot include image attachments.",
         );
         return;
       }

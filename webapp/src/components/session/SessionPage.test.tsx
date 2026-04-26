@@ -101,7 +101,10 @@ vi.mock("./Composer", async () => {
           <button
             type="button"
             onClick={() => {
-              void onSubmit({ text: "/plan", images: [] });
+              void onSubmit({
+                text: "/plan",
+                images: [new File(["image"], "slash-diagram.png", { type: "image/png" })],
+              });
             }}
           >
             Submit Slash
@@ -388,7 +391,7 @@ describe("SessionPage", () => {
     });
   });
 
-  it("sends slash commands directly without expansion or image uploads", async () => {
+  it("sends slash commands directly with image uploads and without expansion", async () => {
     const user = userEvent.setup();
 
     renderSessionRoute("/sessions/live/live-1");
@@ -399,12 +402,15 @@ describe("SessionPage", () => {
 
     await waitFor(() => expect(submitSessionInput).toHaveBeenCalledTimes(1));
     expect(expandSessionInput).not.toHaveBeenCalled();
-    expect(uploadSessionImages).not.toHaveBeenCalled();
+    expect(uploadSessionImages).toHaveBeenCalledWith(
+      "live-1",
+      expect.arrayContaining([expect.any(File)]),
+    );
     expect(submitSessionInput).toHaveBeenCalledWith("live-1", {
       text: "/plan",
       file_paths: [],
       image_paths: [],
-      image_upload_ids: [],
+      image_upload_ids: ["upload-1"],
       profile_id: "analysis",
     });
   });

@@ -967,6 +967,12 @@
   background: color-mix(in srgb, var(--color-bg) 82%, var(--color-card));
 }
 
+.git-diff-result__viewport--focused {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--color-surface-1) 52%, transparent), transparent 34%),
+    color-mix(in srgb, var(--color-bg) 86%, var(--color-card));
+}
+
 .git-diff-result__table {
   width: 100%;
   min-width: 640px;
@@ -981,17 +987,30 @@
 }
 
 .git-diff-result__line--added {
-  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
 }
 
 .git-diff-result__line--removed {
-  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+}
+
+.git-diff-result__line--added[data-focused="true"] {
+  background: color-mix(in srgb, var(--color-success) 11%, transparent);
+}
+
+.git-diff-result__line--removed[data-focused="true"] {
+  background: color-mix(in srgb, var(--color-error) 11%, transparent);
 }
 
 .git-diff-result__line--hunk,
 .git-diff-result__line--meta {
   background: color-mix(in srgb, var(--color-info) 10%, transparent);
   color: var(--color-info);
+}
+
+.git-diff-result__line--collapsed {
+  background: color-mix(in srgb, var(--color-surface-2) 72%, transparent);
+  color: var(--color-text-tertiary);
 }
 
 .git-diff-result__gutter,
@@ -1031,6 +1050,11 @@
   color: var(--color-error);
 }
 
+.git-diff-result__line--collapsed .git-diff-result__marker,
+.git-diff-result__line--collapsed .git-diff-result__code {
+  color: var(--color-text-tertiary);
+}
+
 .git-diff-result__code {
   min-width: 0;
   padding-inline: var(--sp-3);
@@ -1040,6 +1064,26 @@
 
 .git-diff-result__code code {
   font: inherit;
+}
+
+.git-diff-result__token {
+  border-radius: calc(var(--radius-sm) - 1px);
+  padding: 0 0.15em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  font-weight: 650;
+}
+
+.git-diff-result__token--added {
+  background: color-mix(in srgb, var(--color-success) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-success) 30%, transparent);
+  color: color-mix(in srgb, var(--color-success) 88%, var(--color-text-primary));
+}
+
+.git-diff-result__token--removed {
+  background: color-mix(in srgb, var(--color-error) 26%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-error) 30%, transparent);
+  color: color-mix(in srgb, var(--color-error) 88%, var(--color-text-primary));
 }
 
 .git-diff-result__footer {

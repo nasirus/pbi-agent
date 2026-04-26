@@ -141,9 +141,160 @@ describe("SessionTimeline", () => {
 
     expect(screen.getByText("TODO.md")).toBeInTheDocument();
     expect(screen.getByText("Updated")).toBeInTheDocument();
-    expect(screen.getByText("[ ] Old")).toBeInTheDocument();
-    expect(screen.getByText("[X] New")).toBeInTheDocument();
+    expect(screen.getByText(/Old/).closest("code")?.textContent).toBe("[ ] Old");
+    expect(screen.getByText(/New/).closest("code")?.textContent).toBe("[X] New");
     expect(screen.getByText("call_patch_1")).toBeInTheDocument();
     expect(screen.queryByText(/update_file TODO.md/)).not.toBeInTheDocument();
+  });
+
+  it("highlights only the edited span for paired apply_patch replacements", () => {
+    render(
+      <SessionTimeline
+        items={[
+          {
+            kind: "tool_group",
+            itemId: "tool-1",
+            label: "apply_patch",
+            items: [
+              {
+                text: "update_file src/config.ts done",
+                classes: "tool-call-apply-patch",
+                metadata: {
+                  tool_name: "apply_patch",
+                  path: "src/config.ts",
+                  operation: "update_file",
+                  success: true,
+                  diff: " const timeout = options.timeout ?? 30000;\n-const retries = oldValue;\n+const retries = newValue;\n return timeout;",
+                  call_id: "call_patch_2",
+                },
+              },
+            ],
+          },
+        ]}
+        subAgents={{}}
+        connection="connected"
+        waitMessage={null}
+        itemsVersion={1}
+      />,
+    );
+
+    expect(screen.getByText("1 focused change")).toBeInTheDocument();
+    expect(screen.getByText("old")).toHaveClass("git-diff-result__token--removed");
+    expect(screen.getByText("new")).toHaveClass("git-diff-result__token--added");
+    expect(screen.getByText(/const timeout/)).not.toHaveClass(
+      "git-diff-result__token--added",
+    );
+  });
+
+  it("does not pair ambiguous multi-line delete and insert blocks", () => {
+    render(
+      <SessionTimeline
+        items={[
+          {
+            kind: "tool_group",
+            itemId: "tool-1",
+            label: "apply_patch",
+            items: [
+              {
+                text: "update_file src/config.ts done",
+                classes: "tool-call-apply-patch",
+                metadata: {
+                  tool_name: "apply_patch",
+                  path: "src/config.ts",
+                  operation: "update_file",
+                  success: true,
+                  diff: "-const first = oldValue;\n-const second = oldOther;\n+const inserted = newValue;\n+const extra = newOther;",
+                  call_id: "call_patch_ambiguous",
+                },
+              },
+            ],
+          },
+        ]}
+        subAgents={{}}
+        connection="connected"
+        waitMessage={null}
+        itemsVersion={1}
+      />,
+    );
+
+    expect(screen.getByText(/const first/).closest("tr")).not.toHaveAttribute(
+      "data-focused",
+    );
+    expect(screen.getByText(/const inserted/).closest("tr")).not.toHaveAttribute(
+      "data-focused",
+    );
+    expect(screen.queryByText("old")).not.toBeInTheDocument();
+    expect(screen.queryByText("new")).not.toBeInTheDocument();
+  });
+
+  it("collapses large unchanged context in apply_patch diffs", () => {
+    render(
+      <SessionTimeline
+        items={[
+          {
+            kind: "tool_group",
+            itemId: "tool-1",
+            label: "apply_patch",
+            items: [
+              {
+                text: "update_file README.md done",
+                classes: "tool-call-apply-patch",
+                metadata: {
+                  tool_name: "apply_patch",
+                  path: "README.md",
+                  operation: "update_file",
+                  success: true,
+                  diff: Array.from({ length: 8 }, (_, index) => ` line ${index + 1}`).join("\n"),
+                  call_id: "call_patch_3",
+                },
+              },
+            ],
+          },
+        ]}
+        subAgents={{}}
+        connection="connected"
+        waitMessage={null}
+        itemsVersion={1}
+      />,
+    );
+
+    expect(screen.getByText("2 unchanged lines")).toBeInTheDocument();
+  });
+
+  it("labels failed apply_patch cards without implying the update succeeded", () => {
+    render(
+      <SessionTimeline
+        items={[
+          {
+            kind: "tool_group",
+            itemId: "tool-1",
+            label: "apply_patch",
+            items: [
+              {
+                text: "update_file TODO.md failed",
+                classes: "tool-call-apply-patch",
+                metadata: {
+                  tool_name: "apply_patch",
+                  path: "TODO.md",
+                  operation: "update_file",
+                  success: false,
+                  detail: "Invalid context",
+                  diff: "-old\n+new",
+                  call_id: "call_patch_4",
+                },
+              },
+            ],
+          },
+        ]}
+        subAgents={{}}
+        connection="connected"
+        waitMessage={null}
+        itemsVersion={1}
+      />,
+    );
+
+    expect(screen.getByText("Patch failed")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.queryByText("Updated")).not.toBeInTheDocument();
   });
 });
