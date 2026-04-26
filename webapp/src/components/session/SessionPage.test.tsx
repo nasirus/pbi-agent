@@ -272,6 +272,7 @@ function makeSnapshot(
     runtime: null,
     input_enabled: true,
     wait_message: null,
+    processing: null,
     session_usage: null,
     turn_usage: null,
     session_ended: false,

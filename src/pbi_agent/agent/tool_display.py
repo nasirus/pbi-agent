@@ -4,11 +4,28 @@ import json
 from typing import Any
 
 from pbi_agent.display.protocol import DisplayProtocol
+from pbi_agent.display.protocol import PendingToolCall
 from pbi_agent.models.messages import ToolCall
 from pbi_agent.tools.apply_patch import SPEC as APPLY_PATCH_SPEC
 from pbi_agent.tools.types import ToolResult
 
 _APPLY_PATCH_TOOL_NAME = APPLY_PATCH_SPEC.name
+
+
+def display_tool_execution_start(
+    display: DisplayProtocol,
+    calls: list[ToolCall],
+) -> None:
+    display.tool_execution_start(
+        [
+            PendingToolCall(
+                call_id=call.call_id,
+                name=call.name,
+                arguments=call.arguments,
+            )
+            for call in calls
+        ]
+    )
 
 
 def display_tool_result(
@@ -66,6 +83,7 @@ def display_tool_results(
 
     for result in pending:
         _display_function_result(display, None, result)
+    display.tool_execution_stop()
 
 
 def _display_apply_patch_result(

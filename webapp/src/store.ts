@@ -6,6 +6,7 @@ import type {
   LiveSession,
   LiveSessionRuntime,
   LiveSessionSnapshot,
+  ProcessingState,
   TimelineItem,
   TimelineToolGroupEntry,
   UsagePayload,
@@ -26,6 +27,7 @@ export type SessionRuntimeState = {
   connection: ConnectionState;
   inputEnabled: boolean;
   waitMessage: string | null;
+  processing: ProcessingState | null;
   sessionUsage: UsagePayload | null;
   turnUsage: { usage: UsagePayload | null; elapsedSeconds?: number } | null;
   sessionEnded: boolean;
@@ -66,6 +68,7 @@ function createEmptySessionState(sessionId: string | null = null): SessionRuntim
     connection: "disconnected",
     inputEnabled: false,
     waitMessage: null,
+    processing: null,
     sessionUsage: null,
     turnUsage: null,
     sessionEnded: false,
@@ -153,6 +156,23 @@ function readApplyPatchMetadata(value: unknown): ApplyPatchToolMetadata | undefi
     detail: readOptionalString(record.detail),
     diff: readOptionalString(record.diff),
     call_id: readOptionalString(record.call_id),
+    status: readOptionalString(record.status),
+  };
+}
+
+function readProcessingState(value: unknown): ProcessingState | null {
+  if (value === null || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const active = Boolean(record.active);
+  if (!active) return null;
+  return {
+    active,
+    phase: readOptionalString(record.phase) ?? null,
+    message: typeof record.message === "string" ? record.message : null,
+    active_tool_count:
+      typeof record.active_tool_count === "number" ? record.active_tool_count : undefined,
   };
 }
 
@@ -207,6 +227,7 @@ function mapSnapshotItem(raw: Record<string, unknown>): TimelineItem | null {
       kind: "tool_group",
       itemId,
       label: readString(raw.label, "Tool calls"),
+      status: readOptionalString(raw.status),
       items: readToolGroupItems(raw.items),
       subAgentId: readOptionalString(raw.sub_agent_id),
     };
@@ -270,6 +291,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             connection: "disconnected",
             inputEnabled: false,
             waitMessage: null,
+            processing: null,
             sessionEnded: false,
             // Set lastEventSeq from the server so the WS snapshot
             // replay skips events already covered by API history.
@@ -306,6 +328,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             runtime: runtimeFromSession(session),
             inputEnabled: false,
             waitMessage: null,
+            processing: null,
             sessionUsage: options.preserveItems ? current.sessionUsage : null,
             turnUsage: options.preserveItems ? current.turnUsage : null,
             sessionEnded: session.status === "ended",
@@ -363,6 +386,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             runtime: runtimeFromSession(session),
             inputEnabled: snapshot.input_enabled,
             waitMessage: snapshot.wait_message,
+            processing: snapshot.processing,
             sessionUsage: snapshot.session_usage,
             turnUsage: snapshot.turn_usage
               ? {
@@ -458,6 +482,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
           patch.itemsVersion = 0;
           patch.subAgents = {};
           patch.waitMessage = null;
+          patch.processing = null;
           patch.turnUsage = null;
           patch.sessionEnded = false;
           patch.fatalError = null;
@@ -472,6 +497,9 @@ export const useSessionStore = create<SessionStore>((set) => ({
           patch.waitMessage = payload.active
             ? readString(payload.message, "Working...")
             : null;
+          break;
+        case "processing_state":
+          patch.processing = readProcessingState(payload);
           break;
         case "usage_updated":
           if (payload.scope === "session") {
@@ -520,6 +548,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             kind: "tool_group",
             itemId: String(payload.item_id),
             label: readString(payload.label, "Tool calls"),
+            status: readOptionalString(payload.status),
             items: readToolGroupItems(payload.items),
             subAgentId: readOptionalString(payload.sub_agent_id),
           };
@@ -544,6 +573,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             patch.sessionEnded = true;
             patch.inputEnabled = false;
             patch.waitMessage = null;
+            patch.processing = null;
             patch.fatalError =
               typeof payload.fatal_error === "string" ? payload.fatal_error : null;
           } else {

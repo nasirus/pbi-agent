@@ -25,6 +25,8 @@ class DisplaySpy:
         self.markdown_calls: list[str] = []
         self.function_counts: list[int] = []
         self.function_results: list[dict[str, object]] = []
+        self.tool_execution_starts: list[list[object]] = []
+        self.tool_execution_stop_count = 0
         self.tool_group_end_count = 0
         self.web_search_sources_calls: list[list[WebSearchSource]] = []
 
@@ -97,6 +99,12 @@ class DisplaySpy:
 
     def function_start(self, count: int) -> None:
         self.function_counts.append(count)
+
+    def tool_execution_start(self, calls: list[object]) -> None:
+        self.tool_execution_starts.append(list(calls))
+
+    def tool_execution_stop(self) -> None:
+        self.tool_execution_stop_count += 1
 
     def function_result(
         self,

@@ -409,6 +409,14 @@
   animation: fade-in var(--duration-normal) var(--ease-out);
 }
 
+.processing-indicator--tool_execution {
+  color: var(--color-info);
+}
+
+.processing-indicator--finalizing {
+  color: var(--color-text-tertiary);
+}
+
 /* New messages indicator */
 .timeline__new-messages {
   position: sticky;
@@ -818,6 +826,24 @@
   color: var(--color-text-tertiary);
 }
 
+.timeline-entry__running,
+.timeline-entry__inline-spinner {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: var(--radius-pill);
+  animation: spin 0.8s linear infinite;
+}
+
+.timeline-entry__running {
+  margin-left: auto;
+}
+
+.timeline-entry__running + .timeline-entry__count {
+  margin-left: 0;
+}
+
 .timeline-entry--tool .timeline-entry__body {
   display: flex;
   flex-direction: column;
@@ -835,6 +861,17 @@
   white-space: pre-wrap;
   overflow-x: auto;
   line-height: var(--leading-relaxed);
+}
+
+.timeline-entry--tool .timeline-entry__tool-item--running {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--color-info);
+}
+
+.timeline-entry__inline-spinner {
+  flex: 0 0 auto;
 }
 
 /* Git diff result — structured apply_patch output */

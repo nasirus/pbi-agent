@@ -19,6 +19,13 @@ class PendingToolGroupItem:
 
 
 @dataclass(slots=True)
+class PendingToolCall:
+    call_id: str
+    name: str
+    arguments: Any = None
+
+
+@dataclass(slots=True)
 class QueuedInput:
     text: str
     file_paths: list[str] = field(default_factory=list)
@@ -40,6 +47,7 @@ class PendingToolGroup:
     items: list[PendingToolGroupItem] = field(default_factory=list)
     function_count: int = 0
     function_names: set[str] = field(default_factory=set)
+    item_by_call_id: dict[str, int] = field(default_factory=dict)
 
     def start(self, label: str, *, classes: str = "", function_count: int = 0) -> None:
         self.label = label
@@ -47,6 +55,7 @@ class PendingToolGroup:
         self.items.clear()
         self.function_count = function_count
         self.function_names.clear()
+        self.item_by_call_id.clear()
 
     def add_item(
         self,
@@ -61,6 +70,30 @@ class PendingToolGroup:
                 classes=classes,
                 metadata=dict(metadata or {}),
             )
+        )
+        call_id = str((metadata or {}).get("call_id") or "")
+        if call_id:
+            self.item_by_call_id[call_id] = len(self.items) - 1
+
+    def upsert_item(
+        self,
+        text: str,
+        *,
+        call_id: str = "",
+        classes: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        merged_metadata = dict(metadata or {})
+        if call_id:
+            merged_metadata["call_id"] = call_id
+        index = self.item_by_call_id.get(call_id) if call_id else None
+        if index is None or index >= len(self.items):
+            self.add_item(text, classes=classes, metadata=merged_metadata)
+            return
+        self.items[index] = PendingToolGroupItem(
+            text=text,
+            classes=classes,
+            metadata=merged_metadata,
         )
 
     def update_for_function(self, tool_name: str) -> None:
@@ -82,6 +115,7 @@ class PendingToolGroup:
         self.items.clear()
         self.function_count = 0
         self.function_names.clear()
+        self.item_by_call_id.clear()
 
 
 class DisplayProtocol(Protocol):
@@ -127,6 +161,12 @@ class DisplayProtocol(Protocol):
     def user_prompt(self) -> str | QueuedInput | QueuedRuntimeChange: ...
 
     def assistant_start(self) -> None: ...
+
+    def assistant_stop(self) -> None: ...
+
+    def tool_execution_start(self, calls: list[PendingToolCall]) -> None: ...
+
+    def tool_execution_stop(self) -> None: ...
 
     def wait_start(
         self, message: str = "model is processing your request..."
@@ -219,6 +259,7 @@ class DisplayProtocol(Protocol):
 
 __all__ = [
     "DisplayProtocol",
+    "PendingToolCall",
     "PendingToolGroup",
     "PendingToolGroupItem",
     "QueuedInput",

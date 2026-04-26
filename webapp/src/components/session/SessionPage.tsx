@@ -608,6 +608,7 @@ export function SessionPage({
               subAgents={sessionState?.subAgents ?? {}}
               connection={sessionState?.connection ?? "disconnected"}
               waitMessage={sessionState?.waitMessage ?? null}
+              processing={sessionState?.processing ?? null}
             />
             <Composer
               ref={composerRef}

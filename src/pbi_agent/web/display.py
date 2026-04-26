@@ -11,6 +11,7 @@ from pbi_agent.models.messages import TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageRecord
 from pbi_agent.display.protocol import (
     DisplayProtocol,
+    PendingToolCall,
     PendingToolGroup,
     QueuedInput,
     QueuedRuntimeChange,
@@ -100,6 +101,9 @@ class _EventDisplayBase(DisplayProtocol):
         self._tool_group = PendingToolGroup()
         self._active_thinking_widget_id: str | None = None
         self._waiting_message: str | None = None
+        self._assistant_active = False
+        self._processing_phase: str | None = None
+        self._active_tool_group_item_id: str | None = None
 
     def _next_id(self, prefix: str) -> str:
         self._counter += 1
@@ -141,7 +145,10 @@ class _EventDisplayBase(DisplayProtocol):
 
     def reset_session(self) -> None:
         self._waiting_message = None
+        self._assistant_active = False
+        self._processing_phase = None
         self._active_thinking_widget_id = None
+        self._active_tool_group_item_id = None
         self._tool_group.reset()
         self._publish("session_reset", {})
 
@@ -196,10 +203,84 @@ class _EventDisplayBase(DisplayProtocol):
         raise RuntimeError("This display does not support interactive user input.")
 
     def assistant_start(self) -> None:
-        return None
+        self._assistant_active = True
+        self._processing_phase = "starting"
+        self._publish(
+            "processing_state",
+            {
+                "active": True,
+                "phase": "starting",
+                "message": "starting assistant turn...",
+            },
+        )
+
+    def assistant_stop(self) -> None:
+        self._assistant_active = False
+        self._processing_phase = None
+        self._waiting_message = None
+        self._publish(
+            "processing_state",
+            {"active": False, "phase": None, "message": None},
+        )
+
+    def tool_execution_start(self, calls: list[PendingToolCall]) -> None:
+        displayable_calls = [call for call in calls if call.name != "sub_agent"]
+        if not displayable_calls:
+            return
+        count = len(displayable_calls)
+        label = f"Running {count} local tool{'s' if count != 1 else ''}"
+        self._processing_phase = "tool_execution"
+        self._publish(
+            "processing_state",
+            {
+                "active": True,
+                "phase": "tool_execution",
+                "message": label,
+                "active_tool_count": count,
+            },
+        )
+        if not self._tool_group.items:
+            self._tool_group.start(label, function_count=count)
+        for call in displayable_calls:
+            self._tool_group.update_for_function(call.name)
+            tool_name, text = route_function_result(
+                call.name,
+                verbose=self.verbose,
+                status="[cyan]running[/cyan]",
+                call_id=call.call_id,
+                arguments=call.arguments,
+            )
+            self._tool_group.upsert_item(
+                _plain_text(text),
+                call_id=call.call_id,
+                classes=tool_item_class(tool_name),
+                metadata={
+                    "tool_name": tool_name,
+                    "call_id": call.call_id,
+                    "status": "running",
+                },
+            )
+        self._publish_tool_group_update()
+
+    def tool_execution_stop(self) -> None:
+        if self._assistant_active:
+            self._processing_phase = "finalizing"
+            self._publish(
+                "processing_state",
+                {
+                    "active": True,
+                    "phase": "finalizing",
+                    "message": "sending tool results to model...",
+                },
+            )
 
     def wait_start(self, message: str = "model is processing your request...") -> None:
         self._waiting_message = message
+        self._processing_phase = "model_wait"
+        self._publish(
+            "processing_state",
+            {"active": True, "phase": "model_wait", "message": message},
+        )
         self._publish("wait_state", {"active": True, "message": message})
 
     def wait_stop(self) -> None:
@@ -335,8 +416,9 @@ class _EventDisplayBase(DisplayProtocol):
                 "diff": diff,
             },
         )
-        self._tool_group.add_item(
+        self._tool_group.upsert_item(
             _plain_text(text),
+            call_id=call_id,
             classes=tool_item_class(tool_name),
             metadata={
                 "tool_name": tool_name,
@@ -371,20 +453,32 @@ class _EventDisplayBase(DisplayProtocol):
             call_id=call_id,
             arguments=arguments,
         )
-        self._tool_group.add_item(
+        self._tool_group.upsert_item(
             _plain_text(text),
+            call_id=call_id,
             classes=tool_item_class(tool_name),
+            metadata={
+                "tool_name": tool_name,
+                "call_id": call_id,
+                "status": "completed" if success else "failed",
+            },
         )
 
     def tool_group_end(self) -> None:
         if not self._tool_group.items:
             self._tool_group.reset()
             return
+        self._publish_tool_group_update(final=True)
+        self._tool_group.reset()
+        self._clear_tool_group_item_id()
+
+    def _publish_tool_group_update(self, *, final: bool = False) -> None:
         self._publish(
             "tool_group_added",
             {
-                "item_id": self._next_id("tool-group"),
+                "item_id": self._tool_group_item_id(),
                 "label": self._tool_group.label,
+                "status": "completed" if final else "running",
                 "items": [
                     {
                         "text": item.text,
@@ -395,7 +489,16 @@ class _EventDisplayBase(DisplayProtocol):
                 ],
             },
         )
-        self._tool_group.reset()
+
+    def _tool_group_item_id(self) -> str:
+        current = self._active_tool_group_item_id
+        if current is None:
+            current = self._next_id("tool-group")
+            self._active_tool_group_item_id = current
+        return current
+
+    def _clear_tool_group_item_id(self) -> None:
+        self._active_tool_group_item_id = None
 
     def retry_notice(self, attempt: int, max_retries: int) -> None:
         self.wait_stop()

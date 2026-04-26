@@ -14,6 +14,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={0}
       />,
     );
@@ -46,6 +47,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={1}
       />,
     );
@@ -73,6 +75,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={1}
       />,
     );
@@ -100,6 +103,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={1}
       />,
     );
@@ -135,6 +139,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={1}
       />,
     );
@@ -174,6 +179,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={1}
       />,
     );
@@ -213,6 +219,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={1}
       />,
     );
@@ -254,6 +261,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={1}
       />,
     );
@@ -289,6 +297,7 @@ describe("SessionTimeline", () => {
         subAgents={{}}
         connection="connected"
         waitMessage={null}
+        processing={null}
         itemsVersion={1}
       />,
     );

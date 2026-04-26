@@ -17,7 +17,10 @@ import urllib.request
 from typing import Any, TYPE_CHECKING
 
 from pbi_agent.agent.system_prompt import get_system_prompt
-from pbi_agent.agent.tool_display import display_tool_results
+from pbi_agent.agent.tool_display import (
+    display_tool_execution_start,
+    display_tool_results,
+)
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
 from pbi_agent.models.messages import (
@@ -228,24 +231,30 @@ class AnthropicProvider(Provider):
         displayable_calls = [call for call in fn_calls if call.name != "sub_agent"]
         if displayable_calls:
             display.function_start(len(displayable_calls))
-        batch = _execute_tool_calls(
-            fn_calls,
-            max_workers=max_workers,
-            context=ToolContext(
-                settings=self._settings,
-                display=display,
-                session_usage=session_usage,
-                turn_usage=turn_usage,
-                sub_agent_depth=sub_agent_depth,
-                tool_catalog=self._tool_catalog,
-                parent_context=parent_context,
-                tracer=tracer,
-            ),
-        )
-        had_errors = batch.had_errors
+            display_tool_execution_start(display, displayable_calls)
+        try:
+            batch = _execute_tool_calls(
+                fn_calls,
+                max_workers=max_workers,
+                context=ToolContext(
+                    settings=self._settings,
+                    display=display,
+                    session_usage=session_usage,
+                    turn_usage=turn_usage,
+                    sub_agent_depth=sub_agent_depth,
+                    tool_catalog=self._tool_catalog,
+                    parent_context=parent_context,
+                    tracer=tracer,
+                ),
+            )
+            had_errors = batch.had_errors
 
-        tool_result_items: list[dict[str, Any]] = []
-        display_tool_results(display, fn_calls, batch.results)
+            tool_result_items: list[dict[str, Any]] = []
+            display_tool_results(display, fn_calls, batch.results)
+        except Exception:
+            if displayable_calls:
+                display.tool_execution_stop()
+            raise
         for result in batch.results:
             tool_result_items.append(
                 {

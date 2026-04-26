@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
-import type { TimelineItem } from "../../types";
+import type { ProcessingState, TimelineItem } from "../../types";
 import { EmptyState } from "../shared/EmptyState";
 import { Button } from "../ui/button";
 import { TimelineEntry } from "./TimelineEntry";
@@ -33,12 +33,14 @@ export function SessionTimeline({
   subAgents,
   connection,
   waitMessage,
+  processing,
   itemsVersion,
 }: {
   items: TimelineItem[];
   subAgents: Record<string, { title: string; status: string }>;
   connection: "disconnected" | "connecting" | "connected";
   waitMessage: string | null;
+  processing: ProcessingState | null;
   itemsVersion: number;
 }) {
   const previousLengthRef = useRef<number | undefined>(undefined);
@@ -126,7 +128,12 @@ export function SessionTimeline({
             subAgentStatus={item.subAgentId ? subAgents[item.subAgentId]?.status : undefined}
           />
         ))}
-        {waitMessage ? (
+        {processing?.active ? (
+          <div className={`processing-indicator processing-indicator--${processing.phase ?? "active"}`}>
+            <div className="spinner spinner--sm" />
+            <span>{processing.message ?? "Working..."}</span>
+          </div>
+        ) : waitMessage ? (
           <div className="processing-indicator">
             <div className="spinner spinner--sm" />
             <span>{waitMessage}</span>

@@ -177,6 +177,7 @@ def run_single_turn(
             settings,
             excluded_tools=get_custom_excluded_tools(),
         ) as provider:
+            display.assistant_start()
             _resume_session(
                 provider=provider,
                 store=store,
@@ -232,6 +233,7 @@ def run_single_turn(
                 _conversation_checkpoint_for_resume(provider, response.response_id),
                 session_usage,
             )
+            display.assistant_stop()
             elapsed = time.monotonic() - session_start
             display.turn_usage(turn_usage, elapsed)
             display.session_usage(session_usage)
@@ -247,6 +249,7 @@ def run_single_turn(
                 session_id=session_id,
             )
     except Exception as exc:
+        display.assistant_stop()
         tracer.log_error(str(exc), metadata={"phase": "run_single_turn"})
         tracer.finish(
             status="failed",
@@ -501,6 +504,7 @@ def run_session_loop(
                         session_usage,
                     )
                     had_tool_errors = had_tool_errors or loop_had_errors
+                    display.assistant_stop()
                     elapsed = time.monotonic() - turn_start
                     display.turn_usage(turn_usage, elapsed)
                     display.session_usage(session_usage)
@@ -510,6 +514,7 @@ def run_session_loop(
                         metadata={"tool_errors": loop_had_errors},
                     )
                 except Exception as exc:
+                    display.assistant_stop()
                     turn_tracer.log_error(
                         str(exc), metadata={"phase": "run_session_loop"}
                     )

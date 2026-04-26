@@ -11,7 +11,11 @@ from rich.tree import Tree
 
 from pbi_agent.models.messages import TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageRecord
-from pbi_agent.display.protocol import DisplayProtocol, PendingToolGroup
+from pbi_agent.display.protocol import (
+    DisplayProtocol,
+    PendingToolCall,
+    PendingToolGroup,
+)
 from pbi_agent.display.formatting import (
     REDACTED_THINKING_NOTICE,
     TOOL_BORDER_STYLES,
@@ -121,6 +125,21 @@ class ConsoleSubAgentDisplay(DisplayProtocol):
         raise RuntimeError("Sub-agent display does not support user input.")
 
     def assistant_start(self) -> None:
+        return None
+
+    def assistant_stop(self) -> None:
+        return None
+
+    def tool_execution_start(self, calls: list[PendingToolCall]) -> None:
+        displayable_calls = [call for call in calls if call.name != "sub_agent"]
+        if displayable_calls:
+            self.parent._console.print(
+                f"[dim]{escape_markup_text(self._name)}: running "
+                f"{len(displayable_calls)} local tool"
+                f"{'s' if len(displayable_calls) != 1 else ''}...[/dim]"
+            )
+
+    def tool_execution_stop(self) -> None:
         return None
 
     # -- rendering -----------------------------------------------------------

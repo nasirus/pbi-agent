@@ -14,7 +14,10 @@ from typing import Any, TYPE_CHECKING
 
 from pbi_agent import __version__
 from pbi_agent.agent.system_prompt import get_system_prompt
-from pbi_agent.agent.tool_display import display_tool_results
+from pbi_agent.agent.tool_display import (
+    display_tool_execution_start,
+    display_tool_results,
+)
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings, missing_api_key_message
 from pbi_agent.models.messages import (
@@ -226,23 +229,29 @@ class GoogleProvider(Provider):
         ]
         if displayable_calls:
             display.function_start(len(displayable_calls))
-        batch = _execute_tool_calls(
-            response.function_calls,
-            max_workers=max_workers,
-            context=ToolContext(
-                settings=self._settings,
-                display=display,
-                session_usage=session_usage,
-                turn_usage=turn_usage,
-                sub_agent_depth=sub_agent_depth,
-                tool_catalog=self._tool_catalog,
-                parent_context=parent_context,
-                tracer=tracer,
-            ),
-        )
+            display_tool_execution_start(display, displayable_calls)
+        try:
+            batch = _execute_tool_calls(
+                response.function_calls,
+                max_workers=max_workers,
+                context=ToolContext(
+                    settings=self._settings,
+                    display=display,
+                    session_usage=session_usage,
+                    turn_usage=turn_usage,
+                    sub_agent_depth=sub_agent_depth,
+                    tool_catalog=self._tool_catalog,
+                    parent_context=parent_context,
+                    tracer=tracer,
+                ),
+            )
 
-        tool_result_items: list[dict[str, Any]] = []
-        display_tool_results(display, response.function_calls, batch.results)
+            tool_result_items: list[dict[str, Any]] = []
+            display_tool_results(display, response.function_calls, batch.results)
+        except Exception:
+            if displayable_calls:
+                display.tool_execution_stop()
+            raise
         for result in batch.results:
             call = _find_by_id(response.function_calls, result.call_id)
             item: dict[str, Any] = {

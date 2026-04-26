@@ -17,7 +17,10 @@ from pbi_agent import __version__
 from pbi_agent.auth.models import OAuthSessionAuth
 from pbi_agent.auth.service import build_runtime_request_auth, refresh_runtime_auth
 from pbi_agent.agent.system_prompt import get_system_prompt
-from pbi_agent.agent.tool_display import display_tool_results
+from pbi_agent.agent.tool_display import (
+    display_tool_execution_start,
+    display_tool_results,
+)
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
 from pbi_agent.media import data_url_for_image
@@ -242,22 +245,28 @@ class OpenAIProvider(Provider):
         ]
         if displayable_calls:
             display.function_start(len(displayable_calls))
-        batch = _execute_tool_calls(
-            response.function_calls,
-            max_workers=max_workers,
-            context=ToolContext(
-                settings=self._settings,
-                display=display,
-                session_usage=session_usage,
-                turn_usage=turn_usage,
-                sub_agent_depth=sub_agent_depth,
-                tool_catalog=self._tool_catalog,
-                parent_context=parent_context,
-                tracer=tracer,
-            ),
-        )
+            display_tool_execution_start(display, displayable_calls)
+        try:
+            batch = _execute_tool_calls(
+                response.function_calls,
+                max_workers=max_workers,
+                context=ToolContext(
+                    settings=self._settings,
+                    display=display,
+                    session_usage=session_usage,
+                    turn_usage=turn_usage,
+                    sub_agent_depth=sub_agent_depth,
+                    tool_catalog=self._tool_catalog,
+                    parent_context=parent_context,
+                    tracer=tracer,
+                ),
+            )
 
-        display_tool_results(display, response.function_calls, batch.results)
+            display_tool_results(display, response.function_calls, batch.results)
+        except Exception:
+            if displayable_calls:
+                display.tool_execution_stop()
+            raise
         if displayable_calls:
             display.tool_group_end()
 

@@ -89,6 +89,13 @@ function renderUserContent(
   );
 }
 
+function toolItemStatus(toolItem: { metadata?: { status?: string; success?: boolean } }): string | null {
+  if (toolItem.metadata?.status) return toolItem.metadata.status;
+  if (toolItem.metadata?.success === true) return "completed";
+  if (toolItem.metadata?.success === false) return "failed";
+  return null;
+}
+
 export function TimelineEntry({
   item,
   subAgentTitle,
@@ -185,22 +192,30 @@ export function TimelineEntry({
       >
         <ChevronRightIcon className={`timeline-entry__chevron ${collapsed ? "" : "timeline-entry__chevron--open"}`} />
         <span>{item.label}</span>
+        {item.status === "running" ? (
+          <span className="timeline-entry__running" aria-label="running" />
+        ) : null}
         <Badge variant="secondary" className="timeline-entry__count">{item.items.length}</Badge>
       </Button>
       {!collapsed ? (
         <div className="timeline-entry__body">
-          {item.items.map((toolItem, index) =>
-            isApplyPatchToolMetadata(toolItem.metadata) ? (
+          {item.items.map((toolItem, index) => {
+            const status = toolItemStatus(toolItem);
+            return isApplyPatchToolMetadata(toolItem.metadata) && status !== "running" ? (
               <GitDiffResult
                 key={`${item.itemId}-${index}`}
                 metadata={toolItem.metadata}
               />
             ) : (
-              <pre key={`${item.itemId}-${index}`} className="timeline-entry__tool-item">
+              <pre
+                key={`${item.itemId}-${index}`}
+                className={`timeline-entry__tool-item${status === "running" ? " timeline-entry__tool-item--running" : ""}`}
+              >
+                {status === "running" ? <span className="timeline-entry__inline-spinner" /> : null}
                 {toolItem.text}
               </pre>
-            ),
-          )}
+            );
+          })}
         </div>
       ) : null}
     </div>

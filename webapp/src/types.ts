@@ -120,6 +120,7 @@ export type LiveSessionSnapshot = {
   runtime: RuntimeSummary | null;
   input_enabled: boolean;
   wait_message: string | null;
+  processing: ProcessingState | null;
   session_usage: UsagePayload | null;
   turn_usage:
     | { usage: UsagePayload | null; elapsed_seconds?: number | null }
@@ -129,6 +130,13 @@ export type LiveSessionSnapshot = {
   items: Record<string, unknown>[];
   sub_agents: Record<string, { title: string; status: string }>;
   last_event_seq: number;
+};
+
+export type ProcessingState = {
+  active: boolean;
+  phase: "starting" | "model_wait" | "tool_execution" | "finalizing" | "retry_wait" | string | null;
+  message: string | null;
+  active_tool_count?: number;
 };
 
 export type FileMentionItem = {
@@ -377,6 +385,7 @@ export type ApplyPatchToolMetadata = {
   detail?: string;
   diff?: string;
   call_id?: string;
+  status?: "running" | "completed" | "failed" | string;
 };
 
 export type TimelineToolGroupEntry = {
@@ -389,6 +398,7 @@ export type TimelineToolGroupItem = {
   kind: "tool_group";
   itemId: string;
   label: string;
+  status?: "running" | "completed" | string;
   items: TimelineToolGroupEntry[];
   subAgentId?: string;
 };

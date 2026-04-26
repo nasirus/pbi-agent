@@ -13,7 +13,11 @@ from rich.tree import Tree
 from pbi_agent.branding import PBI_AGENT_ACCENT
 from pbi_agent.models.messages import TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageRecord
-from pbi_agent.display.protocol import DisplayProtocol, PendingToolGroup
+from pbi_agent.display.protocol import (
+    DisplayProtocol,
+    PendingToolCall,
+    PendingToolGroup,
+)
 from pbi_agent.display.formatting import (
     REDACTED_THINKING_NOTICE,
     TOOL_BORDER_STYLES,
@@ -159,6 +163,32 @@ class ConsoleDisplay(DisplayProtocol):
 
     def assistant_start(self) -> None:
         return None
+
+    def assistant_stop(self) -> None:
+        self._stop_spinner()
+
+    def tool_execution_start(self, calls: list[PendingToolCall]) -> None:
+        displayable_calls = [call for call in calls if call.name != "sub_agent"]
+        if not displayable_calls:
+            return
+        count = len(displayable_calls)
+        self._stop_spinner()
+        message = f"running {count} local tool{'s' if count != 1 else ''}..."
+        if self._console.is_terminal:
+            from rich.status import Status
+
+            self._status = Status(
+                escape_markup_text(message),
+                console=self._console,
+                spinner="dots",
+                spinner_style="cyan",
+            )
+            self._status.start()
+        else:
+            self._console.print(f"[dim]... {escape_markup_text(message)}[/dim]")
+
+    def tool_execution_stop(self) -> None:
+        self._stop_spinner()
 
     def wait_start(self, message: str = "model is processing your request...") -> None:
         self._stop_spinner()
