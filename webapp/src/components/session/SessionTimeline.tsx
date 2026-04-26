@@ -47,17 +47,25 @@ export function SessionTimeline({
   const latestItem = items.at(-1);
   const latestItemIsUserMessage =
     latestItem?.kind === "message" && latestItem.role === "user";
-  const { containerRef, showNewMessages, setShowNewMessages, scrollToBottom, userScrolledRef } =
+  const {
+    containerRef,
+    showNewMessages,
+    setShowNewMessages,
+    scrollToBottom,
+    userScrolledRef,
+    markProgrammaticScroll,
+  } =
     useAutoScroll(itemsVersion, { followOnChange: false });
 
   const scrollToTarget = useCallback(
     (container: HTMLElement, target: HTMLElement, offset: number) => {
+      markProgrammaticScroll();
       container.scrollTo({
         top: Math.max(target.offsetTop - offset, 0),
-        behavior: "smooth",
+        behavior: "instant",
       });
     },
-    [],
+    [markProgrammaticScroll],
   );
 
   useEffect(() => {
@@ -97,12 +105,13 @@ export function SessionTimeline({
     } else if (!isNewItem) {
       // Existing item content updated — stick to bottom
       if (!userScrolledRef.current) {
+        markProgrammaticScroll();
         container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
       } else {
         setShowNewMessages(true);
       }
     }
-  }, [containerRef, itemsVersion, items.length, latestItem, latestItemIsUserMessage, userScrolledRef, setShowNewMessages, scrollToTarget]);
+  }, [containerRef, itemsVersion, items.length, latestItem, latestItemIsUserMessage, userScrolledRef, setShowNewMessages, scrollToTarget, markProgrammaticScroll]);
 
   if (items.length === 0 && connection === "connected") {
     return (

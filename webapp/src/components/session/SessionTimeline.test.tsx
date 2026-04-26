@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionTimeline } from "./SessionTimeline";
 
@@ -6,6 +6,7 @@ const EMPTY_DIFF_TEXT = "No diff content was provided for this operation.";
 
 describe("SessionTimeline", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     HTMLElement.prototype.scrollTo = vi.fn();
   });
 
@@ -397,5 +398,99 @@ describe("SessionTimeline", () => {
     expect(screen.getByText("Update failed")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.queryByText("Updated")).not.toBeInTheDocument();
+  });
+
+  it("keeps following updates after programmatically scrolling to the first apply_patch diff", async () => {
+    vi.useFakeTimers();
+
+    const firstItems = [
+      {
+        kind: "message" as const,
+        itemId: "assistant-1",
+        role: "assistant" as const,
+        content: "I will patch the file.",
+        markdown: false,
+      },
+    ];
+
+    const diffItems = [
+      ...firstItems,
+      {
+        kind: "tool_group" as const,
+        itemId: "tool-1",
+        label: "apply_patch",
+        status: "completed" as const,
+        items: [
+          {
+            text: "update_file TODO.md done",
+            classes: "tool-call-apply-patch",
+            metadata: {
+              tool_name: "apply_patch" as const,
+              path: "TODO.md",
+              operation: "update_file",
+              success: true,
+              diff: "-[ ] Old\n+[X] New",
+              call_id: "call_patch_scroll",
+            },
+          },
+        ],
+      },
+    ];
+
+    const { container, rerender } = render(
+      <SessionTimeline
+        items={firstItems}
+        subAgents={{}}
+        connection="connected"
+        waitMessage={null}
+        processing={null}
+        itemsVersion={1}
+      />,
+    );
+
+    const scrollArea = container.querySelector<HTMLElement>(".session-scroll-area");
+    expect(scrollArea).not.toBeNull();
+    Object.defineProperties(scrollArea, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 1200 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    rerender(
+      <SessionTimeline
+        items={diffItems}
+        subAgents={{}}
+        connection="connected"
+        waitMessage={null}
+        processing={null}
+        itemsVersion={2}
+      />,
+    );
+
+    expect(screen.getByText("TODO.md")).toBeInTheDocument();
+
+    fireEvent.scroll(scrollArea!);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+    });
+
+    rerender(
+      <SessionTimeline
+        items={diffItems}
+        subAgents={{}}
+        connection="connected"
+        waitMessage={null}
+        processing={{ active: true, phase: "tool_execution", message: "Still working..." }}
+        itemsVersion={3}
+      />,
+    );
+
+    const scrollCalls = vi.mocked(HTMLElement.prototype).scrollTo.mock.calls;
+    expect(scrollCalls.at(-1)?.[0]).toMatchObject({
+      top: 1200,
+      behavior: "instant",
+    });
+    expect(screen.queryByText("New messages below")).not.toBeInTheDocument();
   });
 });
