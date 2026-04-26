@@ -18,8 +18,9 @@ from typing import Any, TYPE_CHECKING
 
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_display import (
+    build_tool_result_callback,
     display_tool_execution_start,
-    display_tool_results,
+    finalize_tool_execution,
 )
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
@@ -246,11 +247,12 @@ class AnthropicProvider(Provider):
                     parent_context=parent_context,
                     tracer=tracer,
                 ),
+                on_result=build_tool_result_callback(display),
             )
             had_errors = batch.had_errors
 
             tool_result_items: list[dict[str, Any]] = []
-            display_tool_results(display, fn_calls, batch.results)
+            finalize_tool_execution(display)
         except Exception:
             if displayable_calls:
                 display.tool_execution_stop()

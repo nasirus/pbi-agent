@@ -43,7 +43,7 @@ from pbi_agent.session_store import (
     SessionStore,
     WebManagerLeaseBusyError,
 )
-from pbi_agent.display.protocol import QueuedInput, QueuedRuntimeChange
+from pbi_agent.display.protocol import PendingToolCall, QueuedInput, QueuedRuntimeChange
 from pbi_agent.web.session_manager import WebSessionManager
 from pbi_agent.web.serve import PBIWebServer, create_app
 
@@ -3852,6 +3852,82 @@ def test_live_session_apply_patch_event_includes_diff_metadata() -> None:
         "diff": "-[ ] Old\n+[X] New",
         "call_id": "call_patch_1",
     }
+
+
+def test_live_session_tool_group_updates_one_item_when_second_tool_finishes_first() -> (
+    None
+):
+    def fake_run_session_loop(_settings, display, *, resume_session_id=None):
+        del _settings, resume_session_id
+        display.function_start(2)
+        display.tool_execution_start(
+            [
+                PendingToolCall(
+                    call_id="call_1",
+                    name="shell",
+                    arguments={"command": "slow"},
+                ),
+                PendingToolCall(
+                    call_id="call_2",
+                    name="read_file",
+                    arguments={"path": "README.md"},
+                ),
+            ]
+        )
+        display.function_result(
+            "read_file",
+            True,
+            call_id="call_2",
+            arguments={"path": "README.md"},
+        )
+        display.function_result(
+            "shell",
+            True,
+            call_id="call_1",
+            arguments={"command": "slow"},
+        )
+        display.tool_group_end()
+        display.user_prompt()
+        return 0
+
+    with patch("pbi_agent.web.session_manager.run_session_loop", fake_run_session_loop):
+        app = create_app(_settings())
+
+        with TestClient(app) as client:
+            response = client.post("/api/live-sessions", json={})
+            assert response.status_code == 200
+            live_session_id = response.json()["session"]["live_session_id"]
+            detail_response = client.get(f"/api/live-sessions/{live_session_id}")
+
+    assert detail_response.status_code == 200
+    live_session = app.state.manager._live_sessions[live_session_id]
+    tool_events = [
+        event
+        for event in live_session.event_stream.snapshot()
+        if event["type"] == "tool_group_added"
+    ]
+    assert len(tool_events) == 4
+    item_id = tool_events[0]["payload"]["item_id"]
+    assert {event["payload"]["item_id"] for event in tool_events} == {item_id}
+
+    initial_items = tool_events[0]["payload"]["items"]
+    assert [item["metadata"]["status"] for item in initial_items] == [
+        "running",
+        "running",
+    ]
+
+    second_completed_items = tool_events[1]["payload"]["items"]
+    assert [item["metadata"]["status"] for item in second_completed_items] == [
+        "running",
+        "completed",
+    ]
+
+    final_event = tool_events[-1]["payload"]
+    assert final_event["status"] == "completed"
+    assert [item["metadata"]["status"] for item in final_event["items"]] == [
+        "completed",
+        "completed",
+    ]
 
 
 def test_delete_task_endpoint_removes_task() -> None:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from threading import Lock
 from typing import Any
 
 from pbi_agent.display.protocol import DisplayProtocol
@@ -38,6 +40,27 @@ def display_tool_result(
         _display_apply_patch_result(display, call, result)
         return
     _display_function_result(display, call, result)
+
+
+def build_tool_result_callback(
+    display: DisplayProtocol,
+) -> Callable[[ToolCall, ToolResult], None]:
+    """Build a per-tool completion renderer for streaming tool batches."""
+    display_lock = Lock()
+
+    def on_result(call: ToolCall, result: ToolResult) -> None:
+        if call.name == "sub_agent":
+            return
+        with display_lock:
+            display_tool_result(display, call, result)
+
+    return on_result
+
+
+def finalize_tool_execution(display: DisplayProtocol) -> None:
+    """Finish the active tool-execution display after a streamed batch."""
+
+    display.tool_execution_stop()
 
 
 def _display_function_result(

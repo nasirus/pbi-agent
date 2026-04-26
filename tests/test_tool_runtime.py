@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -13,6 +14,10 @@ from pbi_agent.tools import read_file as read_file_tool
 from pbi_agent.tools import shell as shell_tool
 from pbi_agent.tools.output import MAX_OUTPUT_CHARS
 from pbi_agent.tools.types import ToolContext, ToolResult
+
+
+def _tool_call(call_id: str, name: str = "shell") -> ToolCall:
+    return ToolCall(call_id=call_id, name=name, arguments={})
 
 
 def test_execute_tool_calls_reports_unknown_tool_error(monkeypatch) -> None:
@@ -95,6 +100,100 @@ def test_execute_tool_calls_wraps_success_payload_and_output_items(monkeypatch) 
             "output": batch.results[0].output_json,
         }
     ]
+
+
+def test_execute_tool_calls_serial_callback_fires_after_each_call(monkeypatch) -> None:
+    def fake_handler(arguments: dict[str, object], context: ToolContext) -> str:
+        del arguments, context
+        return threading.current_thread().name
+
+    monkeypatch.setattr(tool_runtime, "get_tool_handler", lambda name: fake_handler)
+    calls = [_tool_call("call_1"), _tool_call("call_2")]
+    streamed: list[tuple[str, str]] = []
+
+    batch = tool_runtime.execute_tool_calls(
+        calls,
+        max_workers=1,
+        on_result=lambda call, result: streamed.append((call.call_id, result.call_id)),
+    )
+
+    assert streamed == [("call_1", "call_1"), ("call_2", "call_2")]
+    assert [result.call_id for result in batch.results] == ["call_1", "call_2"]
+
+
+def test_execute_tool_calls_parallel_callback_uses_completion_order(
+    monkeypatch,
+) -> None:
+    first_started = threading.Event()
+    allow_first_finish = threading.Event()
+
+    def fake_handler(arguments: dict[str, object], context: ToolContext) -> str:
+        del arguments, context
+        call_id = threading.current_thread().name
+        if "call_1" in call_id:
+            first_started.set()
+            assert allow_first_finish.wait(timeout=2)
+            return "slow"
+        assert first_started.wait(timeout=2)
+        return "fast"
+
+    # ThreadPoolExecutor does not name threads by call, so close over a queue
+    # keyed by an argument that lets each worker decide its artificial delay.
+    def keyed_handler(arguments: dict[str, object], context: ToolContext) -> str:
+        del context
+        if arguments["delay"] == "slow":
+            first_started.set()
+            assert allow_first_finish.wait(timeout=2)
+            return "slow"
+        assert first_started.wait(timeout=2)
+        return "fast"
+
+    del fake_handler
+    monkeypatch.setattr(tool_runtime, "get_tool_handler", lambda name: keyed_handler)
+    calls = [
+        ToolCall(call_id="call_1", name="shell", arguments={"delay": "slow"}),
+        ToolCall(call_id="call_2", name="shell", arguments={"delay": "fast"}),
+    ]
+    streamed: list[str] = []
+
+    def on_result(call: ToolCall, result: ToolResult) -> None:
+        streamed.append(call.call_id)
+        if call.call_id == "call_2":
+            allow_first_finish.set()
+
+    batch = tool_runtime.execute_tool_calls(
+        calls,
+        max_workers=2,
+        on_result=on_result,
+    )
+
+    assert streamed == ["call_2", "call_1"]
+    assert [result.call_id for result in batch.results] == ["call_1", "call_2"]
+
+
+def test_execute_tool_calls_parallel_callback_exceptions_propagate(
+    monkeypatch,
+) -> None:
+    def fake_handler(arguments: dict[str, object], context: ToolContext) -> str:
+        del arguments, context
+        return "ok"
+
+    monkeypatch.setattr(tool_runtime, "get_tool_handler", lambda name: fake_handler)
+
+    def on_result(call: ToolCall, result: ToolResult) -> None:
+        del call, result
+        raise RuntimeError("display failed")
+
+    try:
+        tool_runtime.execute_tool_calls(
+            [_tool_call("call_1"), _tool_call("call_2")],
+            max_workers=2,
+            on_result=on_result,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "display failed"
+    else:  # pragma: no cover - assertion path
+        raise AssertionError("callback exception was not propagated")
 
 
 def test_execute_tool_calls_wraps_handler_exceptions(monkeypatch) -> None:

@@ -18,8 +18,9 @@ from pbi_agent.auth.models import OAuthSessionAuth
 from pbi_agent.auth.service import build_runtime_request_auth, refresh_runtime_auth
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.tool_display import (
+    build_tool_result_callback,
     display_tool_execution_start,
-    display_tool_results,
+    finalize_tool_execution,
 )
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
@@ -260,9 +261,10 @@ class OpenAIProvider(Provider):
                     parent_context=parent_context,
                     tracer=tracer,
                 ),
+                on_result=build_tool_result_callback(display),
             )
 
-            display_tool_results(display, response.function_calls, batch.results)
+            finalize_tool_execution(display)
         except Exception:
             if displayable_calls:
                 display.tool_execution_stop()

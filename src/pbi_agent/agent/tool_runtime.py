@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +28,7 @@ def execute_tool_calls(
     *,
     max_workers: int,
     context: ToolContext | None = None,
+    on_result: Callable[[ToolCall, ToolResult], None] | None = None,
 ) -> ToolExecutionBatch:
     if not calls:
         return ToolExecutionBatch(results=[], had_errors=False)
@@ -34,17 +36,23 @@ def execute_tool_calls(
     tool_catalog = context.tool_catalog if context is not None else None
 
     if len(calls) == 1 or max_workers == 1:
-        results = [
-            _execute_one_tool_call(call, tool_catalog=tool_catalog, context=context)
-            for call in calls
-        ]
+        results: list[ToolResult] = []
+        for call in calls:
+            result = _execute_one_tool_call(
+                call,
+                tool_catalog=tool_catalog,
+                context=context,
+            )
+            results.append(result)
+            if on_result is not None:
+                on_result(call, result)
         return ToolExecutionBatch(
             results=results, had_errors=any(r.is_error for r in results)
         )
 
     results: list[ToolResult | None] = [None] * len(calls)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures: dict[Future[ToolResult], int] = {}
+        futures: dict[Future[ToolResult], tuple[int, ToolCall]] = {}
         for idx, call in enumerate(calls):
             futures[
                 executor.submit(
@@ -53,9 +61,13 @@ def execute_tool_calls(
                     tool_catalog,
                     context,
                 )
-            ] = idx
-        for future, idx in futures.items():
-            results[idx] = future.result()
+            ] = (idx, call)
+        for future in as_completed(futures):
+            idx, call = futures[future]
+            result = future.result()
+            results[idx] = result
+            if on_result is not None:
+                on_result(call, result)
 
     ordered_results = [result for result in results if result is not None]
     return ToolExecutionBatch(

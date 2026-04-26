@@ -403,7 +403,14 @@ def test_generic_execute_tool_calls_returns_chat_completion_tool_messages(
 
     monkeypatch.setattr(
         "pbi_agent.providers.generic_provider._execute_tool_calls",
-        lambda calls, max_workers, context=None, tool_catalog=None: batch,
+        lambda calls, max_workers, context=None, on_result=None: (
+            (
+                [on_result(call, result) for call, result in zip(calls, batch.results)]
+                if on_result is not None
+                else None
+            )
+            and batch
+        ),
     )
 
     tool_result_items, had_errors = provider.execute_tool_calls(

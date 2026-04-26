@@ -886,9 +886,30 @@ def test_openai_execute_tool_calls_returns_function_call_outputs(
         had_errors=True,
     )
 
+    def fake_execute_tool_calls(
+        calls,
+        *,
+        max_workers,
+        context=None,
+        on_result=None,
+    ):
+        del max_workers, context
+        assert on_result is not None
+        on_result(calls[1], batch.results[1])
+        assert display_spy.function_results == [
+            {
+                "name": "read_file",
+                "success": False,
+                "call_id": "call_2",
+                "arguments": {"path": "README.md"},
+            }
+        ]
+        on_result(calls[0], batch.results[0])
+        return batch
+
     monkeypatch.setattr(
         "pbi_agent.providers.openai_provider._execute_tool_calls",
-        lambda calls, max_workers, context=None, tool_catalog=None: batch,
+        fake_execute_tool_calls,
     )
 
     tool_result_items, had_errors = provider.execute_tool_calls(
@@ -918,18 +939,19 @@ def test_openai_execute_tool_calls_returns_function_call_outputs(
     assert display_spy.function_counts == [2]
     assert display_spy.function_results == [
         {
-            "name": "shell",
-            "success": True,
-            "call_id": "call_1",
-            "arguments": {"command": "pwd"},
-        },
-        {
             "name": "read_file",
             "success": False,
             "call_id": "call_2",
             "arguments": {"path": "README.md"},
         },
+        {
+            "name": "shell",
+            "success": True,
+            "call_id": "call_1",
+            "arguments": {"command": "pwd"},
+        },
     ]
+    assert display_spy.tool_execution_stop_count == 1
     assert display_spy.tool_group_end_count == 1
 
 
@@ -986,7 +1008,14 @@ def test_openai_execute_tool_calls_returns_only_outputs_for_chatgpt_backend(
 
     monkeypatch.setattr(
         "pbi_agent.providers.openai_provider._execute_tool_calls",
-        lambda calls, max_workers, context=None, tool_catalog=None: batch,
+        lambda calls, max_workers, context=None, on_result=None: (
+            (
+                [on_result(call, result) for call, result in zip(calls, batch.results)]
+                if on_result is not None
+                else None
+            )
+            and batch
+        ),
     )
 
     tool_result_items, had_errors = provider.execute_tool_calls(
@@ -1040,7 +1069,14 @@ def test_openai_execute_tool_calls_skips_generic_display_for_sub_agent(
 
     monkeypatch.setattr(
         "pbi_agent.providers.openai_provider._execute_tool_calls",
-        lambda calls, max_workers, context=None, tool_catalog=None: batch,
+        lambda calls, max_workers, context=None, on_result=None: (
+            (
+                [on_result(call, result) for call, result in zip(calls, batch.results)]
+                if on_result is not None
+                else None
+            )
+            and batch
+        ),
     )
 
     tool_result_items, had_errors = provider.execute_tool_calls(
@@ -2162,7 +2198,14 @@ def test_openai_execute_tool_calls_serializes_image_attachments(
 
     monkeypatch.setattr(
         "pbi_agent.providers.openai_provider._execute_tool_calls",
-        lambda calls, max_workers, context=None, tool_catalog=None: batch,
+        lambda calls, max_workers, context=None, on_result=None: (
+            (
+                [on_result(call, result) for call, result in zip(calls, batch.results)]
+                if on_result is not None
+                else None
+            )
+            and batch
+        ),
     )
 
     tool_result_items, had_errors = provider.execute_tool_calls(

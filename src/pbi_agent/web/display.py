@@ -430,6 +430,7 @@ class _EventDisplayBase(DisplayProtocol):
                 "call_id": call_id,
             },
         )
+        self._publish_tool_group_update()
 
     def function_start(self, count: int) -> None:
         self._tool_group.start(
@@ -463,6 +464,7 @@ class _EventDisplayBase(DisplayProtocol):
                 "status": "completed" if success else "failed",
             },
         )
+        self._publish_tool_group_update()
 
     def tool_group_end(self) -> None:
         if not self._tool_group.items:
@@ -473,20 +475,21 @@ class _EventDisplayBase(DisplayProtocol):
         self._clear_tool_group_item_id()
 
     def _publish_tool_group_update(self, *, final: bool = False) -> None:
+        items = [
+            {
+                "text": item.text,
+                "classes": item.classes,
+                **({"metadata": item.metadata} if item.metadata else {}),
+            }
+            for item in self._tool_group.items
+        ]
         self._publish(
             "tool_group_added",
             {
                 "item_id": self._tool_group_item_id(),
                 "label": self._tool_group.label,
                 "status": "completed" if final else "running",
-                "items": [
-                    {
-                        "text": item.text,
-                        "classes": item.classes,
-                        **({"metadata": item.metadata} if item.metadata else {}),
-                    }
-                    for item in self._tool_group.items
-                ],
+                "items": items,
             },
         )
 
