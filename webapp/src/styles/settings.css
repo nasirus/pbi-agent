@@ -163,13 +163,15 @@
 .settings-item__actions {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  justify-content: flex-end;
+  gap: 0.125rem;
   flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 
 .settings-item__actions--provider {
   flex-wrap: wrap;
-  justify-content: flex-end;
+  row-gap: 0.125rem;
 }
 
 /* ── Page-level error banner ── */

@@ -146,8 +146,9 @@ function ProviderCard({
           <>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
+              className="task-card__action-button"
               onClick={onConnect}
               disabled={isBusy}
             >
@@ -156,8 +157,9 @@ function ProviderCard({
             </Button>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
+              className="task-card__action-button"
               onClick={onRefresh}
               disabled={isBusy || !authStatus.can_refresh}
             >
@@ -166,8 +168,9 @@ function ProviderCard({
             </Button>
             <Button
               type="button"
-              variant="destructive"
+              variant="ghost"
               size="sm"
+              className="task-card__action-button"
               onClick={onDisconnect}
               disabled={isBusy || !authStatus.has_session}
             >
@@ -176,14 +179,21 @@ function ProviderCard({
             </Button>
           </>
         )}
-        <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="task-card__action-button"
+          onClick={onEdit}
+        >
           <EditIcon data-icon="inline-start" />
           Edit
         </Button>
         <Button
           type="button"
-          variant="destructive"
+          variant="ghost"
           size="sm"
+          className="task-card__action-button"
           onClick={onDelete}
           disabled={isBusy}
         >
@@ -236,14 +246,21 @@ function ProfileCard({
         <div className="runtime-summary">{runtimeParts.join(" · ")}</div>
       </div>
       <div className="settings-item__actions">
-        <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="task-card__action-button"
+          onClick={onEdit}
+        >
           <EditIcon data-icon="inline-start" />
           Edit
         </Button>
         <Button
           type="button"
-          variant="destructive"
+          variant="ghost"
           size="sm"
+          className="task-card__action-button"
           onClick={onDelete}
         >
           <Trash2Icon data-icon="inline-start" />
@@ -495,6 +512,9 @@ export function SettingsPage() {
             </div>
             <Button
               type="button"
+              variant="ghost"
+              size="sm"
+              className="task-card__action-button"
               onClick={() => setModal({ type: "create-provider" })}
             >
               <PlusIcon data-icon="inline-start" />
@@ -539,6 +559,9 @@ export function SettingsPage() {
             </div>
             <Button
               type="button"
+              variant="ghost"
+              size="sm"
+              className="task-card__action-button"
               onClick={() => setModal({ type: "create-profile" })}
               disabled={providers.length === 0}
               title={providers.length === 0 ? "Add a provider first" : undefined}
