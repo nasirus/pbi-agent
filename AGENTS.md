@@ -10,6 +10,7 @@ This file provides guidance to Coding Agent when working with code in this repos
 
 - Do not commit, push, merge, or open PRs unless explicitly asked.
 - Stop after local changes; leave Git steps to the user.
+- Shell commands run from the workspace root by default; use relative paths and avoid `cd /full/workspace/path && ...` prefixes unless a task explicitly requires changing directories.
 - Use the `gh` CLI for GitHub work; do not call the GitHub API with `curl`.
 - Prefer `gh ... --json ...` for `pr view` / `issue view`; plain `gh pr view` and `gh issue view` can fail here because of the deprecated `projectCards` query.
 

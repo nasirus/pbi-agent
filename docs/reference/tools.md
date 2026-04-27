@@ -134,7 +134,7 @@ Runtime behavior:
 
 Read workspace files safely, with line-range support for text files, compact summaries for tabular files, and extraction for formats such as PDF and DOCX.
 
-`read_file` is also the activation path for project-local `SKILL.md` files discovered from `.agents/skills/`. When the prompt catalog lists a skill, the model should load that `SKILL.md` with `read_file` first, then inspect any referenced project-local resources with `read_file` or bounded shell commands such as `rg --files` and `rg -n`.
+`read_file` is also the activation path for project-local `SKILL.md` files discovered from `.agents/skills/`. When the prompt catalog lists a skill, the model should load that `SKILL.md` with `read_file` first, then inspect any referenced project-local resources with `read_file` or bounded shell commands.
 
 | Parameter | Type | Required | Notes |
 | --- | --- | --- | --- |

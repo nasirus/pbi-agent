@@ -104,7 +104,7 @@ description: Use this skill when the task matches this repository-specific workf
 ---
 ```
 
-At runtime, discovered skills are appended to the active system prompt as an `<available_skills>` catalog with the absolute `SKILL.md` path. The model is expected to load a relevant skill itself with `read_file` before proceeding, then use `read_file` or bounded shell commands such as `rg --files` and `rg -n` to inspect referenced project-local resources as needed.
+At runtime, discovered skills are appended to the active system prompt as an `<available_skills>` catalog with the absolute `SKILL.md` path. The model is expected to load a relevant skill itself with `read_file` before proceeding, then use `read_file` or bounded shell commands  to inspect referenced project-local resources as needed.
 
 This v1 implementation is project-only. User-level skill directories are intentionally not scanned, and any files referenced by a project skill must remain inside the workspace so the existing file tools can access them safely.
 
