@@ -371,7 +371,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
           <DialogFooter className="task-form__footer">
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               className="task-form__action-button"
               onClick={onClose}
               disabled={isPending}
@@ -380,7 +380,7 @@ export function ProviderModal({ provider, options, onSave, onClose }: Props) {
             </Button>
             <Button
               type="submit"
-              variant="ghost"
+              variant="default"
               className="task-form__action-button"
               disabled={isPending}
             >

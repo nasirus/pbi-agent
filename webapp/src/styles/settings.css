@@ -172,42 +172,6 @@
   justify-content: flex-end;
 }
 
-/* ── Button overrides for settings context ── */
-/* .btn, .btn--primary, .btn--ghost, .btn--danger are defined globally in
-   session.css and intentionally reused. Only add what settings needs on top. */
-
-/* Give all buttons in the settings page a transparent border slot so that
-   the ghost variant can show a real border without layout shift. */
-.settings-page .btn {
-  border: 1px solid transparent;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.settings-page .btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.settings-page .btn--ghost {
-  border-color: var(--color-border);
-}
-
-.settings-page .btn--ghost:hover:not(:disabled) {
-  border-color: var(--color-border-focus);
-}
-
-/* Ghost-danger: used on item card delete buttons in settings only. */
-.settings-page .btn--ghost-danger {
-  color: var(--color-error);
-  border-color: transparent;
-}
-
-.settings-page .btn--ghost-danger:hover:not(:disabled) {
-  background: var(--color-error-muted);
-  border-color: var(--color-error);
-}
-
 /* ── Page-level error banner ── */
 
 .settings-error-banner {
