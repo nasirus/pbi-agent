@@ -32,6 +32,7 @@
 - Active follow-up: web overlay primitives (`TooltipContent`, `DropdownMenuContent`/items, `SelectContent`/items, submenus) need global readable defaults: collision padding, side offsets, min-height/line-height, and p-2-ish panel padding; document in `DESIGN.md` so new shadcn components inherit safe spacing.
 
 ## Detailed Task Events
+- 2026-04-27: Fixed `tests/test_session.py` local `_DisplaySpy` after diagnostic `uv run pytest tests/test_session.py -x -vv` showed missing `assistant_start`/`assistant_stop`; added counters/no-op-compatible methods to match `DisplayProtocol`. Validation: `uv run pytest tests/test_session.py -x -vv`; `uv run ruff check tests/test_session.py`; `uv run ruff format --check tests/test_session.py`.
 
 ## 2026-04-26
 - Fixed review finding for timeline auto-scroll: internal new-item target scroll now uses `behavior: "instant"` so programmatic-scroll suppression cannot expire during a long smooth scroll and mark first `GitDiffResult` as manual scroll. Validation: focused `SessionTimeline.test.tsx`; `bun run typecheck`; `bun run lint`; `git diff --check`.

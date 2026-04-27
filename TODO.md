@@ -1,4 +1,4 @@
-[X] Change Kanban header badges to max two wrapped lines
-[X] Update focused StageColumn test wording
-[X] Run frontend validation/build
+[X] Run focused tests/test_session.py diagnostically
+[X] Fix failing session test/code
+[X] Run focused validation
 [X] Update MEMORY.md
