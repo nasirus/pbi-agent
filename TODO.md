@@ -1,4 +1,4 @@
-[X] Run focused tests/test_session.py diagnostically
-[X] Fix failing session test/code
-[X] Run focused validation
-[X] Update MEMORY.md
+[X] Inspect ~/codex edit implementation
+[X] Inspect ~/opencode edit implementation
+[X] Compare against pbi-agent/deepagents patterns
+[X] Dashboard workspace/global toggle styling: found controls, applied matching ghost hover/design, validated, and updated memory

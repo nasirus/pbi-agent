@@ -14,36 +14,79 @@
   gap: var(--sp-6);
 }
 
-/* ── Controls bar ──────────────────────────────────────────────────── */
+/* ── Header bar ──────────────────────────────────────────────────────── */
 
-.dashboard-controls {
-  padding: var(--sp-4);
-}
-
-.dashboard-controls__content {
+.dashboard-header {
   display: flex;
-  align-items: end;
-  justify-content: space-between;
+  align-items: center;
   gap: var(--sp-4);
-  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
 }
 
-.dashboard-controls__dates {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-3);
-}
-
-.dashboard-date-label {
+.dashboard-header__title {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.dashboard-header__icon {
+  width: 18px;
+  height: 18px;
+  color: var(--color-accent);
+}
+
+.dashboard-header__heading {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.dashboard-header__sep {
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.dashboard-header__filters {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.dashboard-header__date-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.dashboard-header__cal-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.dashboard-header__date-sep {
+  color: var(--color-text-tertiary);
   font-size: var(--text-xs);
-  color: var(--color-text-secondary);
+  user-select: none;
 }
 
 .dashboard-date-input {
   font-family: var(--font-mono);
+}
+
+.dashboard-date-input--compact {
+  height: 32px;
+  font-size: var(--text-xs);
+  width: 140px;
 }
 
 /* Webkit date input icon colour fix for dark theme */
@@ -53,8 +96,44 @@
 }
 
 .dashboard-controls__scope {
-  align-self: end;
+  align-self: center;
+  gap: var(--sp-1);
 }
+
+.dashboard-controls__scope .dashboard-controls__scope-button {
+  min-height: 2.5rem;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  font-weight: var(--weight-medium);
+  transition:
+    color var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease);
+}
+
+.dashboard-controls__scope .dashboard-controls__scope-button:hover,
+.dashboard-controls__scope .dashboard-controls__scope-button:focus-visible {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.dashboard-controls__scope .dashboard-controls__scope-button[data-state="on"] {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .dashboard-header {
+    flex-wrap: wrap;
+  }
+
+  .dashboard-header__sep {
+    display: none;
+  }
+}
+
 
 /* ── Metric cards grid ─────────────────────────────────────────────── */
 

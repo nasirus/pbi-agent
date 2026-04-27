@@ -336,11 +336,21 @@ export function BoardPage() {
           </p>
         </div>
         <div className="board-layout__actions">
-          <Button type="button" variant="outline" onClick={() => openBoardEditor(false)}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="board-layout__action-button"
+            onClick={() => openBoardEditor(false)}
+          >
             <Settings2Icon data-icon="inline-start" />
             Edit Stages
           </Button>
-          <Button type="button" onClick={openNewTask}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="board-layout__action-button"
+            onClick={openNewTask}
+          >
             <PlusIcon data-icon="inline-start" />
             Add Task
           </Button>

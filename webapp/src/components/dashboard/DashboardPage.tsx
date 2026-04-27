@@ -1,11 +1,10 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangleIcon } from "lucide-react";
+import { ActivityIcon, AlertTriangleIcon, CalendarIcon } from "lucide-react";
 import { fetchDashboardStats } from "../../api";
 import { Alert, AlertDescription } from "../ui/alert";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Field, FieldGroup, FieldLabel } from "../ui/field";
 import { Input } from "../ui/input";
+import { Separator } from "../ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import { LoadingSpinner } from "../shared/LoadingSpinner";
 import { MetricsCards } from "./MetricsCards";
@@ -52,47 +51,58 @@ export function DashboardPage() {
   return (
     <div className="dashboard-page">
       <div className="dashboard-page__inner">
-        {/* ── Controls ──────────────────────────────── */}
-        <Card className="dashboard-controls">
-          <CardHeader>
-            <CardTitle>Observability</CardTitle>
-          </CardHeader>
-          <CardContent className="dashboard-controls__content">
-          <FieldGroup className="dashboard-controls__dates">
-            <Field>
-              <FieldLabel>From</FieldLabel>
+        {/* ── Header ──────────────────────────── */}
+        <div className="dashboard-header">
+          <div className="dashboard-header__title">
+            <ActivityIcon className="dashboard-header__icon" />
+            <h2 className="dashboard-header__heading">Observability</h2>
+          </div>
+
+          <Separator orientation="vertical" className="dashboard-header__sep" />
+
+          <div className="dashboard-header__filters">
+            <div className="dashboard-header__date-group">
+              <CalendarIcon className="dashboard-header__cal-icon" />
               <Input
                 type="date"
-                className="dashboard-date-input"
+                className="dashboard-date-input dashboard-date-input--compact"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
               />
-            </Field>
-            <Field>
-              <FieldLabel>To</FieldLabel>
+              <span className="dashboard-header__date-sep">–</span>
               <Input
                 type="date"
-                className="dashboard-date-input"
+                className="dashboard-date-input dashboard-date-input--compact"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
               />
-            </Field>
-          </FieldGroup>
-          <ToggleGroup
-            type="single"
-            value={scope}
-            onValueChange={(value) => {
-              if (value === "workspace" || value === "global") setScope(value);
-            }}
-            className="dashboard-controls__scope"
-            spacing={1}
-            variant="outline"
-          >
-            <ToggleGroupItem value="workspace">Workspace</ToggleGroupItem>
-            <ToggleGroupItem value="global">Global</ToggleGroupItem>
-          </ToggleGroup>
-          </CardContent>
-        </Card>
+            </div>
+
+            <ToggleGroup
+              type="single"
+              value={scope}
+              onValueChange={(value) => {
+                if (value === "workspace" || value === "global") setScope(value);
+              }}
+              className="dashboard-controls__scope"
+              spacing={0}
+              variant="default"
+            >
+              <ToggleGroupItem
+                value="workspace"
+                className="dashboard-controls__scope-button"
+              >
+                Workspace
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="global"
+                className="dashboard-controls__scope-button"
+              >
+                Global
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        </div>
 
         {/* ── L1: Overview KPIs ─────────────────────── */}
         {statsQuery.isLoading ? (
