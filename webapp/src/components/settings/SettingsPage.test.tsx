@@ -184,10 +184,10 @@ function makeConfigBootstrap(
           supports_native_web_search: true,
           supports_image_inputs: true,
         },
-        azure_openai: {
-          label: "Azure OpenAI",
+        azure: {
+          label: "Azure",
           description:
-            "Uses an Azure OpenAI API key and resource-specific Responses URL. Model names are Azure deployment names.",
+            "Uses an Azure API key and resource-specific Responses URL. Model names are Azure deployment names.",
           default_auth_mode: "api_key",
           auth_modes: ["api_key"],
           auth_mode_metadata: {
@@ -616,13 +616,13 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Uses an OpenAI API key.")).toBeInTheDocument();
   });
 
-  it("configures Azure OpenAI provider fields and saves the Azure URL", async () => {
+  it("configures Azure provider fields and saves the Azure URL", async () => {
     const user = userEvent.setup();
     vi.mocked(fetchConfigBootstrap).mockResolvedValue(
       makeConfigBootstrap({
         options: {
           ...makeConfigBootstrap().options,
-          provider_kinds: ["openai", "azure_openai", "chatgpt"],
+          provider_kinds: ["openai", "azure", "chatgpt"],
         },
       }),
     );
@@ -632,11 +632,11 @@ describe("SettingsPage", () => {
     await user.click(await screen.findByRole("button", { name: "Add Provider" }));
     await user.selectOptions(
       document.querySelector('select[name="provider-kind"]') as HTMLSelectElement,
-      "azure_openai",
+      "azure",
     );
 
-    expect(screen.getByText("Azure OpenAI")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("AZURE_OPENAI_API_KEY")).toBeInTheDocument();
+    expect(screen.getByText("Azure")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("AZURE_API_KEY")).toBeInTheDocument();
     expect(screen.getByText("Azure endpoint URL")).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -657,10 +657,10 @@ describe("SettingsPage", () => {
       expect(createProvider).toHaveBeenCalledWith(
         {
           name: "Azure Main",
-          kind: "azure_openai",
+          kind: "azure",
           auth_mode: "api_key",
           api_key: null,
-          api_key_env: "AZURE_OPENAI_API_KEY",
+          api_key_env: "AZURE_API_KEY",
           responses_url:
             "https://example-resource.openai.azure.com/openai/v1/responses",
           generic_api_url: null,
@@ -844,13 +844,13 @@ describe("SettingsPage", () => {
         {
           id: "azure-main",
           name: "Azure Main",
-          kind: "azure_openai",
+          kind: "azure",
           auth_mode: "api_key",
           responses_url:
             "https://example-resource.openai.azure.com/openai/v1/responses",
           generic_api_url: null,
           secret_source: "env_var",
-          secret_env_var: "AZURE_OPENAI_API_KEY",
+          secret_env_var: "AZURE_API_KEY",
           has_secret: true,
           auth_status: {
             auth_mode: "api_key",
@@ -889,7 +889,7 @@ describe("SettingsPage", () => {
       ],
       options: {
         ...makeConfigBootstrap().options,
-        provider_kinds: ["openai", "azure_openai", "xai"],
+        provider_kinds: ["openai", "azure", "xai"],
         provider_metadata: {
           ...makeConfigBootstrap().options.provider_metadata,
           xai: {
@@ -937,7 +937,7 @@ describe("SettingsPage", () => {
       })
       .mockResolvedValueOnce({
         provider_id: "azure-main",
-        provider_kind: "azure_openai",
+        provider_kind: "azure",
         discovery_supported: false,
         manual_entry_required: true,
         models: [],

@@ -73,11 +73,11 @@ def test_create_provider_returns_expected_backend(
         ),
     ],
 )
-def test_azure_openai_routes_by_endpoint_url(url: str, expected_type: type) -> None:
+def test_azure_routes_by_endpoint_url(url: str, expected_type: type) -> None:
     provider = create_provider(
         Settings(
             api_key="azure-key",
-            provider="azure_openai",
+            provider="azure",
             responses_url=url,
         )
     )

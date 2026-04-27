@@ -81,7 +81,7 @@ def test_anthropic_parse_response_extracts_cache_usage_and_tool_calls() -> None:
     assert len(result.provider_data["content_blocks"]) == 5
 
 
-def test_azure_openai_anthropic_endpoint_uses_configured_url(
+def test_azure_anthropic_endpoint_uses_configured_url(
     monkeypatch,
     display_spy,
     make_http_response,
@@ -104,7 +104,7 @@ def test_azure_openai_anthropic_endpoint_uses_configured_url(
 
     provider = AnthropicProvider(
         _make_settings(
-            provider="azure_openai",
+            provider="azure",
             responses_url="https://mca-resource.services.ai.azure.com/anthropic/v1/messages",
             model="claude-deployment",
         )

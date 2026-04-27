@@ -218,7 +218,7 @@ class GenericProvider(Provider):
             "Authorization": f"Bearer {self._settings.api_key}",
             "User-Agent": f"pbi-agent/{__version__}",
         }
-        if self._settings.provider == "azure_openai":
+        if self._settings.provider == "azure":
             headers.pop("Authorization", None)
             headers["api-key"] = self._settings.api_key
 
@@ -397,7 +397,7 @@ def _should_send_model(settings: Settings) -> bool:
 
 
 def _request_url(settings: Settings) -> str:
-    if settings.provider == "azure_openai":
+    if settings.provider == "azure":
         return azure_chat_completions_url(settings.responses_url)
     return settings.generic_api_url
 

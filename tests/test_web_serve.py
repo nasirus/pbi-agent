@@ -3175,7 +3175,7 @@ def test_azure_provider_model_discovery_returns_manual_entry_required(
 ) -> None:
     """Azure requires deployment names — discovery is disabled."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-key")
+    monkeypatch.delenv("AZURE_API_KEY", raising=False)
     app = create_app(_settings(), runtime_args=_runtime_args("web"))
 
     with TestClient(app) as client:
@@ -3185,8 +3185,8 @@ def test_azure_provider_model_discovery_returns_manual_entry_required(
             headers={"If-Match": revision},
             json={
                 "name": "Azure Chat",
-                "kind": "azure_openai",
-                "api_key_env": "AZURE_OPENAI_API_KEY",
+                "kind": "azure",
+                "api_key_env": "AZURE_API_KEY",
                 "responses_url": "https://mca-resource.openai.azure.com/openai/v1",
             },
         )
@@ -3195,7 +3195,7 @@ def test_azure_provider_model_discovery_returns_manual_entry_required(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["provider_kind"] == "azure_openai"
+    assert payload["provider_kind"] == "azure"
     assert payload["discovery_supported"] is False
     assert payload["manual_entry_required"] is True
     assert payload["models"] == []

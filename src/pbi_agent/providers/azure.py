@@ -31,13 +31,13 @@ def azure_chat_completions_url(url: str) -> str:
 
 
 def settings_for_azure_endpoint(settings: Settings) -> Settings:
-    if settings.provider != "azure_openai":
+    if settings.provider != "azure":
         return settings
     endpoint_kind = azure_endpoint_kind(settings.responses_url)
     if endpoint_kind == AzureEndpointKind.OPENAI_CHAT_COMPLETIONS:
         return replace(
             settings,
-            provider="azure_openai",
+            provider="azure",
             generic_api_url=azure_chat_completions_url(settings.responses_url),
         )
     return settings

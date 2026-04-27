@@ -1,6 +1,5 @@
 # TODO
 
-[X] Revert AlertDialog outside-click close behavior.
-[X] Restore tests to require explicit cancel/action for dismissal.
-[X] Validate frontend checks/build.
-[X] Update memory and summarize.
+[X] Move Azure model discovery manual return before auth checks.
+[X] Add/adjust focused test for Azure no-auth discovery.
+[X] Run focused validation.

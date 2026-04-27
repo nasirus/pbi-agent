@@ -26,7 +26,7 @@ def _make_settings(**overrides: object) -> Settings:
     return Settings(**defaults)
 
 
-def test_azure_openai_chat_completions_uses_api_key_header_and_endpoint(
+def test_azure_chat_completions_uses_api_key_header_and_endpoint(
     monkeypatch,
     display_spy,
     make_http_response,
@@ -50,7 +50,7 @@ def test_azure_openai_chat_completions_uses_api_key_header_and_endpoint(
 
     provider = GenericProvider(
         _make_settings(
-            provider="azure_openai",
+            provider="azure",
             responses_url="https://mca-resource.openai.azure.com/openai/v1",
             model="deployment",
         )

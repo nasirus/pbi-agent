@@ -187,7 +187,7 @@ def test_resolve_settings_uses_openai_xhigh_default(monkeypatch) -> None:
     settings.validate()
 
 
-def test_resolve_settings_uses_azure_openai_env_and_requires_url(monkeypatch) -> None:
+def test_resolve_settings_uses_azure_env_and_requires_url(monkeypatch) -> None:
     for name in (
         "PBI_AGENT_PROVIDER",
         "PBI_AGENT_API_KEY",
@@ -198,13 +198,13 @@ def test_resolve_settings_uses_azure_openai_env_and_requires_url(monkeypatch) ->
         "OPENAI_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-test-key")
+    monkeypatch.setenv("AZURE_API_KEY", "azure-test-key")
 
     parser = build_parser()
     args = parser.parse_args(
         [
             "--provider",
-            "azure_openai",
+            "azure",
             "--responses-url",
             "https://example-resource.openai.azure.com/openai/v1/responses",
             "web",
@@ -212,7 +212,7 @@ def test_resolve_settings_uses_azure_openai_env_and_requires_url(monkeypatch) ->
     )
     settings = resolve_settings(args)
 
-    assert settings.provider == "azure_openai"
+    assert settings.provider == "azure"
     assert settings.api_key == "azure-test-key"
     assert (
         settings.responses_url
@@ -223,10 +223,10 @@ def test_resolve_settings_uses_azure_openai_env_and_requires_url(monkeypatch) ->
     settings.validate()
 
 
-def test_azure_openai_request_headers_use_api_key_header() -> None:
+def test_azure_request_headers_use_api_key_header() -> None:
     provider = OpenAIProvider(
         _make_settings(
-            provider="azure_openai",
+            provider="azure",
             responses_url="https://example-resource.openai.azure.com/openai/v1/responses",
         )
     )

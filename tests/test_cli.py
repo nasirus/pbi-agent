@@ -1272,7 +1272,7 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertIn("--service-tier", stderr.getvalue())
         self.assertIn("OpenAI", stderr.getvalue())
 
-    def test_service_tier_with_azure_openai_provider_errors(self) -> None:
+    def test_service_tier_with_azure_provider_errors(self) -> None:
         stderr = io.StringIO()
 
         with (
@@ -1282,7 +1282,7 @@ class DefaultWebCommandTests(unittest.TestCase):
             rc = cli.main(
                 [
                     "--provider",
-                    "azure_openai",
+                    "azure",
                     "--responses-url",
                     "https://example-resource.openai.azure.com/openai/v1/responses",
                     "--service-tier",

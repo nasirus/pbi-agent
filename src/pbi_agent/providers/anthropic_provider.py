@@ -669,7 +669,7 @@ def _supports_adaptive_thinking(model: str) -> bool:
 
 def _request_url(settings: Settings) -> str:
     if (
-        settings.provider == "azure_openai"
+        settings.provider == "azure"
         and azure_endpoint_kind(settings.responses_url)
         == AzureEndpointKind.ANTHROPIC_MESSAGES
     ):

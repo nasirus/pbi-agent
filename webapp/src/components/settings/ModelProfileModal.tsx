@@ -313,7 +313,7 @@ export function ModelProfileModal({
       ? "Manual model entry is required for this provider."
       : null);
   const modelFieldHint =
-    selectedProvider?.kind === "azure_openai"
+    selectedProvider?.kind === "azure"
       ? "Enter your Azure deployment name. Model discovery is not available for Azure — use a custom value."
       : null;
 

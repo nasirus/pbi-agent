@@ -524,33 +524,33 @@ def test_provider_specific_api_key_env_fallback_still_applies_after_profile_sele
     assert settings.api_key == "xai-env-key"
 
 
-def test_azure_openai_provider_specific_api_key_env(monkeypatch) -> None:
+def test_azure_provider_specific_api_key_env(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
     _clear_runtime_env(monkeypatch)
     monkeypatch.delenv("PBI_AGENT_API_KEY", raising=False)
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-env-key")
+    monkeypatch.setenv("AZURE_API_KEY", "azure-env-key")
 
     settings = resolve_settings(
         _args(
             "--provider",
-            "azure_openai",
+            "azure",
             "--responses-url",
             "https://example-resource.openai.azure.com/openai/v1/responses",
             "web",
         )
     )
 
-    assert settings.provider == "azure_openai"
+    assert settings.provider == "azure"
     assert settings.api_key == "azure-env-key"
     assert settings.model == "gpt-4.1"
 
 
-def test_azure_openai_requires_responses_url(monkeypatch) -> None:
+def test_azure_requires_responses_url(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
     _clear_runtime_env(monkeypatch)
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-env-key")
+    monkeypatch.setenv("AZURE_API_KEY", "azure-env-key")
 
-    settings = resolve_settings(_args("--provider", "azure_openai", "web"))
+    settings = resolve_settings(_args("--provider", "azure", "web"))
 
     with pytest.raises(ConfigError, match="--responses-url is required"):
         settings.validate()
@@ -805,13 +805,13 @@ def test_invalid_service_tier_on_non_openai_profile_is_rejected(monkeypatch) -> 
         )
 
 
-def test_service_tier_on_azure_openai_profile_is_rejected(monkeypatch) -> None:
+def test_service_tier_on_azure_profile_is_rejected(monkeypatch) -> None:
     monkeypatch.setattr(config_module, "load_dotenv", lambda: None)
     create_provider_config(
         ProviderConfig(
             id="azure-main",
             name="Azure Main",
-            kind="azure_openai",
+            kind="azure",
             api_key="x",
             responses_url="https://example-resource.openai.azure.com/openai/v1/responses",
         )

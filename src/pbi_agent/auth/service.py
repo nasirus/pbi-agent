@@ -234,7 +234,7 @@ def build_runtime_request_auth(
     auth: ApiKeyAuth | OAuthSessionAuth | None,
 ) -> RequestAuthConfig:
     if isinstance(auth, ApiKeyAuth):
-        header_name = "api-key" if provider_kind == "azure_openai" else "Authorization"
+        header_name = "api-key" if provider_kind == "azure" else "Authorization"
         header_value = (
             auth.api_key if header_name == "api-key" else f"Bearer {auth.api_key}"
         )
