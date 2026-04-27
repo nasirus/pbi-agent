@@ -5,7 +5,7 @@ description: 'Override the agent system prompt and add project-specific rules us
 
 # Customization
 
-`pbi-agent` supports two workspace-level Markdown files that let you tailor agent behavior without touching any configuration flags or environment variables. Both files are loaded at startup from the current working directory.
+`pbi-agent` supports two workspace-level Markdown files that let you tailor agent behavior without touching any configuration flags or environment variables. Both files are loaded from the current working directory when an agent provider starts.
 
 ## INSTRUCTIONS.md — custom system prompt
 
@@ -42,7 +42,7 @@ You are a Python expert coding agent. You help users write, review, debug, and r
 :::
 
 ::: warning
-Removing `INSTRUCTIONS.md` (or leaving it empty) restores the default built-in prompt automatically. No restart is required; the file is re-read at each agent startup.
+Removing `INSTRUCTIONS.md` (or leaving it empty) restores the default built-in prompt automatically. The file is re-read at each agent startup; in a live session, run `/reload` to apply the change before the next model request.
 :::
 
 ## AGENTS.md — project rules
@@ -133,7 +133,7 @@ Remote public catalogs are discovered from:
 
 If a source repository keeps command files under `.agents/commands/`, target that directory explicitly with a local path or GitHub tree URL.
 
-At runtime, project commands are discovered from `.agents/commands/*.md`. The normalized filename becomes the slash alias, and the file contents are injected as active turn instructions when the user starts a message with that alias. Reserved built-in local commands such as `/skills`, `/mcp`, and `/agents` still take precedence.
+At runtime, project commands are discovered from `.agents/commands/*.md`. The normalized filename becomes the slash alias, and the file contents are injected as active turn instructions when the user starts a message with that alias. Reserved built-in local commands such as `/skills`, `/mcp`, `/agents`, `/reload`, and `/compact` still take precedence.
 
 ## Project sub-agent files
 
@@ -193,6 +193,28 @@ You can inspect the discovered catalog without starting a model request:
 
 - CLI: `pbi-agent --agents`
 - Session UI: `/agents`
+
+## Reloading workspace context
+
+New one-shot runs and newly created sessions read the current workspace initialization files when their provider starts. A live session keeps its provider open between turns, so edits to workspace files are not applied to that active provider until you reload it.
+
+Use the local session command:
+
+```text
+/reload
+```
+
+`/reload` does not call the model and is not stored as a user message. It refreshes the current live provider before the next model request by re-reading:
+
+- `INSTRUCTIONS.md`
+- `AGENTS.md`
+- project skill catalogs
+- project sub-agent catalogs
+- non-MCP tool definitions
+
+In the web UI, `/reload` also refreshes the `@file` mention cache so newly created, renamed, or removed workspace files show up in autocomplete. The web app also refreshes that file-mention cache when a live session ends, which keeps the next session's file suggestions current without silently changing an active provider mid-task.
+
+`/reload` does not reload MCP server configuration or MCP tool catalogs for the active provider. Restart the session after changing `.agents/mcp.json` or an MCP server's exposed tools.
 
 ## MCP server config
 

@@ -1,6 +1,7 @@
 # TODO
 
-[X] Reproduce failing command registry test
-[X] Update command registry test expectations for /compact
+[X] Remove MCP catalog rebuilding from /reload
+[X] Revert provider refresh_tools API changes
+[X] Update docs/tests/messages
 [X] Run focused validation
-[X] Ship hotfix to master
+[X] Update MEMORY.md

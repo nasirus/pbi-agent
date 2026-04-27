@@ -7,7 +7,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pbi_agent.agent.compaction_prompt import COMPACTION_PROMPT
 from pbi_agent.agent.system_prompt import (
@@ -58,8 +58,8 @@ SUB_AGENT_DISABLED_TOOLS = {"sub_agent"}
 SKILLS_COMMAND = "/skills"
 MCP_COMMAND = "/mcp"
 AGENTS_COMMAND = "/agents"
-AGENTS_RELOAD_COMMAND = "/agents reload"
 COMPACT_COMMAND = "/compact"
+RELOAD_COMMAND = "/reload"
 COMPACTION_MARKER = "[compacted context]"
 COMPACTION_SUMMARY_PREFIX = (
     "[compacted context — reference only] "
@@ -307,6 +307,7 @@ def run_session_loop(
     display: DisplayProtocol,
     *,
     resume_session_id: str | None = None,
+    on_reload: Callable[[], None] | None = None,
 ) -> int:
     current_runtime = _coerce_runtime(settings)
     store = _open_store(current_runtime.settings)
@@ -425,10 +426,15 @@ def run_session_loop(
                 if normalized_command == AGENTS_COMMAND:
                     display.render_markdown(format_project_sub_agents_markdown())
                     continue
-                if normalized_command == AGENTS_RELOAD_COMMAND:
-                    _reload_provider_sub_agents(provider)
+                if normalized_command == RELOAD_COMMAND:
+                    _reload_provider_initialization(provider)
+                    if on_reload is not None:
+                        on_reload()
                     display.render_markdown(
-                        format_project_sub_agents_markdown(reloaded=True)
+                        "Reloaded workspace instructions, project rules, skills, "
+                        "sub-agents, tool definitions, and file mention cache. "
+                        "MCP servers are not reloaded; restart the session after "
+                        "changing MCP config."
                     )
                     continue
                 if normalized_command == COMPACT_COMMAND:
@@ -1623,7 +1629,7 @@ def _normalize_user_command(value: str) -> str:
     return " ".join(value.strip().lower().split())
 
 
-def _reload_provider_sub_agents(provider: Provider) -> None:
+def _reload_provider_initialization(provider: Provider) -> None:
     provider.set_system_prompt(get_system_prompt())
     provider.refresh_tools()
 

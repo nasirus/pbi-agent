@@ -30,7 +30,14 @@ COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand(
         name="/agents",
         description="Show discovered project sub-agents",
-        hidden_keywords="sub-agent subagent agent agents reload list",
+        hidden_keywords="sub-agent subagent agent agents list",
+    ),
+    SlashCommand(
+        name="/reload",
+        description="Reload workspace instructions and file caches",
+        hidden_keywords=(
+            "agents instructions rules skills files mentions cache refresh"
+        ),
     ),
     SlashCommand(
         name="/compact",

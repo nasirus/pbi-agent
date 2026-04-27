@@ -184,6 +184,7 @@ def test_find_command_config_by_alias_reads_command_files(
 
 def test_list_command_configs_skips_reserved_command_alias(tmp_path: Path) -> None:
     _write_command(tmp_path, "skills.md", "List project skills.")
+    _write_command(tmp_path, "reload.md", "Reload context.")
 
     assert list_command_configs(tmp_path) == []
 
