@@ -1,10 +1,8 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangleIcon } from "lucide-react";
+import { ActivityIcon, AlertTriangleIcon, CalendarIcon } from "lucide-react";
 import { fetchDashboardStats } from "../../api";
 import { Alert, AlertDescription } from "../ui/alert";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Field, FieldGroup, FieldLabel } from "../ui/field";
 import { Input } from "../ui/input";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import { LoadingSpinner } from "../shared/LoadingSpinner";
@@ -52,47 +50,68 @@ export function DashboardPage() {
   return (
     <div className="dashboard-page">
       <div className="dashboard-page__inner">
-        {/* ── Controls ──────────────────────────────── */}
-        <Card className="dashboard-controls">
-          <CardHeader>
-            <CardTitle>Observability</CardTitle>
-          </CardHeader>
-          <CardContent className="dashboard-controls__content">
-          <FieldGroup className="dashboard-controls__dates">
-            <Field>
-              <FieldLabel>From</FieldLabel>
-              <Input
-                type="date"
-                className="dashboard-date-input"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>To</FieldLabel>
-              <Input
-                type="date"
-                className="dashboard-date-input"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </Field>
-          </FieldGroup>
-          <ToggleGroup
-            type="single"
-            value={scope}
-            onValueChange={(value) => {
-              if (value === "workspace" || value === "global") setScope(value);
-            }}
-            className="dashboard-controls__scope"
-            spacing={1}
-            variant="outline"
-          >
-            <ToggleGroupItem value="workspace">Workspace</ToggleGroupItem>
-            <ToggleGroupItem value="global">Global</ToggleGroupItem>
-          </ToggleGroup>
-          </CardContent>
-        </Card>
+        {/* ── Header ──────────────────────────── */}
+        <div className="dashboard-header">
+          <div className="dashboard-header__section dashboard-header__section--left">
+            <div className="dashboard-header__title">
+              <ActivityIcon className="dashboard-header__icon" />
+              <h2 className="dashboard-header__heading">Observability</h2>
+            </div>
+          </div>
+
+          <div className="dashboard-header__section dashboard-header__section--center">
+            <div className="dashboard-header__date-group">
+              <span className="dashboard-header__date-label">From</span>
+              <label className="dashboard-date-field">
+                <span className="sr-only">Start date</span>
+                <CalendarIcon className="dashboard-date-field__icon" aria-hidden="true" />
+                <Input
+                  type="date"
+                  className="dashboard-date-input dashboard-date-input--compact"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </label>
+              <span className="dashboard-header__date-label">To</span>
+              <label className="dashboard-date-field">
+                <span className="sr-only">End date</span>
+                <CalendarIcon className="dashboard-date-field__icon" aria-hidden="true" />
+                <Input
+                  type="date"
+                  className="dashboard-date-input dashboard-date-input--compact"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="dashboard-header__section dashboard-header__section--right">
+            <ToggleGroup
+              type="single"
+              value={scope}
+              onValueChange={(value) => {
+                if (value === "workspace" || value === "global") setScope(value);
+              }}
+              className="dashboard-controls__scope"
+              spacing={0}
+              variant="default"
+            >
+              <ToggleGroupItem
+                value="workspace"
+                className="dashboard-controls__scope-button"
+              >
+                Workspace
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="global"
+                className="dashboard-controls__scope-button"
+              >
+                Global
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        </div>
 
         {/* ── L1: Overview KPIs ─────────────────────── */}
         {statsQuery.isLoading ? (
