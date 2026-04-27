@@ -322,6 +322,76 @@ def test_run_single_turn_executes_tool_loop_and_aggregates_usage(monkeypatch) ->
     ]
 
 
+def test_run_single_turn_replays_resumed_history_by_default(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    provider = _ProviderStub()
+    display = _SessionDisplaySpy([])
+    settings = Settings(api_key="test-key", provider="openai")
+
+    with SessionStore() as store:
+        session_id = store.create_session(str(tmp_path), "openai", DEFAULT_MODEL)
+        store.add_message(session_id, "user", "previous user")
+        store.add_message(session_id, "assistant", "previous assistant")
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+
+    outcome = run_single_turn(
+        "Next request",
+        settings,
+        display,
+        resume_session_id=session_id,
+    )
+
+    assert outcome.session_id == session_id
+    assert [message.content for message in provider.restored_messages] == [
+        "previous user",
+        "previous assistant",
+    ]
+    assert [message.content for message in display.replayed_history] == [
+        "previous user",
+        "previous assistant",
+    ]
+
+
+def test_run_single_turn_can_restore_without_replaying_history(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    provider = _ProviderStub()
+    display = _SessionDisplaySpy([])
+    settings = Settings(api_key="test-key", provider="openai")
+
+    with SessionStore() as store:
+        session_id = store.create_session(str(tmp_path), "openai", DEFAULT_MODEL)
+        store.add_message(session_id, "user", "previous user")
+        store.add_message(session_id, "assistant", "previous assistant")
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+
+    outcome = run_single_turn(
+        "Next request",
+        settings,
+        display,
+        resume_session_id=session_id,
+        replay_history=False,
+    )
+
+    assert outcome.session_id == session_id
+    assert [message.content for message in provider.restored_messages] == [
+        "previous user",
+        "previous assistant",
+    ]
+    assert display.replayed_history == []
+
+
 def test_run_single_turn_uses_command_specific_instructions_for_full_turn(
     monkeypatch,
     tmp_path,

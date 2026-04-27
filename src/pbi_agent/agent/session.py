@@ -166,6 +166,7 @@ def run_single_turn(
     resume_session_id: str | None = None,
     image_paths: list[str] | None = None,
     persisted_user_message_id: int | None = None,
+    replay_history: bool = True,
 ) -> AgentOutcome:
     runtime = _coerce_runtime(settings)
     store = _open_store(runtime.settings)
@@ -226,6 +227,7 @@ def run_single_turn(
                 session_usage=session_usage,
                 display=display,
                 before_message_id=persisted_user_message_id,
+                replay_history=replay_history,
             )
             if persisted_user_message_id is None:
                 _add_message(

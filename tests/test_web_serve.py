@@ -1221,10 +1221,12 @@ def test_auto_start_stage_runs_once_before_done(monkeypatch, tmp_path) -> None:
     _write_default_commands(tmp_path)
     app = create_app(_settings())
     call_count = 0
+    replay_history_flags: list[bool | None] = []
 
     def fake_run_single_turn_in_directory(*args, **kwargs):
         nonlocal call_count
         call_count += 1
+        replay_history_flags.append(kwargs.get("replay_history"))
         return SimpleNamespace(
             tool_errors=[],
             text=f"Completed run {call_count}.",
@@ -1278,6 +1280,7 @@ def test_auto_start_stage_runs_once_before_done(monkeypatch, tmp_path) -> None:
             task_payload = client.get("/api/tasks").json()["tasks"][0]
 
     assert call_count == 2
+    assert replay_history_flags == [False, False]
     assert task_payload["stage"] == "done"
     assert task_payload["run_status"] == "completed"
     assert task_payload["session_id"] == "session-2"
@@ -1292,10 +1295,12 @@ def test_auto_started_stage_prompt_is_visible_while_running(
     second_run_started = threading.Event()
     release_second_run = threading.Event()
     call_count = 0
+    replay_history_flags: list[bool | None] = []
 
     def fake_run_single_turn_in_directory(prompt, _runtime, _display, **kwargs):
         nonlocal call_count
         call_count += 1
+        replay_history_flags.append(kwargs.get("replay_history"))
         assert isinstance(kwargs["persisted_user_message_id"], int)
         if call_count == 2:
             assert prompt == "/implement"
@@ -1356,6 +1361,7 @@ def test_auto_started_stage_prompt_is_visible_while_running(
     assert [item["role"] for item in history] == ["user", "user"]
     assert history[0]["content"] == "/plan\n# Task\nTask A\n\n## Goal\nInvestigate"
     assert history[1]["content"] == "/implement"
+    assert replay_history_flags == [False, False]
 
 
 def test_second_manager_start_does_not_mark_running_task_failed(
