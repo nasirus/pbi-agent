@@ -1,6 +1,7 @@
 # TODO
 
-[X] Reproduce shadcn add prompt behavior from repo root and webapp.
-[X] Identify config/package cause and fix command/workspace setup.
-[X] Validate add command dry-run/info.
-[X] Update memory and summarize.
+[X] Locate @-mention/file path parsing and warning source
+[X] Change behavior so pasted/import aliases like `@/components/...` are not treated as workspace paths/warnings
+[X] Add/update focused tests if available
+[X] Validate touched frontend surface
+[X] Update memory
