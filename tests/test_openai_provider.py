@@ -717,7 +717,7 @@ def test_openai_request_turn_replays_chatgpt_turn_state_within_turn(
 data: {"type":"response.created","response":{"id":"resp_1"}}
 
 event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":5,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0}},"output":[{"type":"function_call","call_id":"call_1","name":"list_files","arguments":"{\\"path\\":\\".\\"}"}]}}
+data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":5,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0}},"output":[{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{\\"path\\":\\"README.md\\"}"}]}}
 
 """,
                 headers={"x-codex-turn-state": "ts-1"},
@@ -787,8 +787,8 @@ data: {"type":"response.completed","response":{"id":"resp_3","model":"gpt-5","us
             {
                 "type": "function_call",
                 "call_id": "call_1",
-                "name": "list_files",
-                "arguments": '{"path":"."}',
+                "name": "read_file",
+                "arguments": '{"path":"README.md"}',
             },
             {
                 "type": "function_call_output",
@@ -1477,7 +1477,7 @@ def test_openai_chatgpt_http_replays_explicit_transcript_with_reasoning(
 data: {"type":"response.created","response":{"id":"resp_1"}}
 
 event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":5,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1}},"output":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Need to inspect files"}],"content":[{"type":"reasoning_text","text":"Checking the workspace before answering."}]},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"list_files","status":"completed","arguments":"{\\"path\\":\\".\\"}"}]}}
+data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":5,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1}},"output":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Need to inspect files"}],"content":[{"type":"reasoning_text","text":"Checking the workspace before answering."}]},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read_file","status":"completed","arguments":"{\\"path\\":\\"README.md\\"}"}]}}
 
 """
             ),
@@ -1564,9 +1564,9 @@ data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-5","us
         {
             "type": "function_call",
             "call_id": "call_1",
-            "name": "list_files",
+            "name": "read_file",
             "status": "completed",
-            "arguments": '{"path":"."}',
+            "arguments": '{"path":"README.md"}',
         },
         {
             "type": "function_call_output",
