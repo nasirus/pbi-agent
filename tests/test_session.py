@@ -15,12 +15,12 @@ from pbi_agent.agent.compaction_prompt import COMPACTION_PROMPT
 from pbi_agent.agent.system_prompt import get_system_prompt
 from pbi_agent.agent.session import (
     AGENTS_COMMAND,
-    AGENTS_RELOAD_COMMAND,
     MCP_COMMAND,
     COMPACT_COMMAND,
     COMPACTION_MARKER,
     _open_compaction_provider,
     NEW_SESSION_SENTINEL,
+    RELOAD_COMMAND,
     _resume_session,
     SKILLS_COMMAND,
     run_session_loop,
@@ -1003,7 +1003,7 @@ def test_run_session_loop_handles_agents_command_locally(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "pbi_agent.agent.session.format_project_sub_agents_markdown",
-        lambda reloaded=False: "### Sub-Agents\n\n- `reviewer`: Reviews code",
+        lambda: "### Sub-Agents\n\n- `reviewer`: Reviews code",
     )
 
     exit_code = run_session_loop(settings, display)
@@ -1014,10 +1014,35 @@ def test_run_session_loop_handles_agents_command_locally(monkeypatch) -> None:
     assert display.assistant_start_calls == 0
 
 
-def test_run_session_loop_handles_agents_reload_command_locally(monkeypatch) -> None:
+def test_run_session_loop_treats_agents_reload_as_user_message(monkeypatch) -> None:
     provider = _ChatProviderStub()
-    display = _SessionDisplaySpy([AGENTS_RELOAD_COMMAND, "quit"])
+    display = _SessionDisplaySpy(["/agents reload", "quit"])
     settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+
+    exit_code = run_session_loop(settings, display)
+
+    assert exit_code == 0
+    assert provider.request_messages == ["/agents reload"]
+    assert provider.system_prompts == []
+    assert provider.refresh_tools_calls == 0
+    assert display.markdown_calls == []
+    assert display.assistant_start_calls == 1
+
+
+def test_run_session_loop_handles_reload_command_locally(monkeypatch) -> None:
+    provider = _ChatProviderStub()
+    display = _SessionDisplaySpy([RELOAD_COMMAND, "quit"])
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+    reload_calls = 0
+
+    def on_reload() -> None:
+        nonlocal reload_calls
+        reload_calls += 1
 
     monkeypatch.setattr(
         "pbi_agent.agent.session._open_runtime_provider",
@@ -1027,20 +1052,19 @@ def test_run_session_loop_handles_agents_reload_command_locally(monkeypatch) -> 
         "pbi_agent.agent.session.get_system_prompt",
         lambda: "updated prompt",
     )
-    monkeypatch.setattr(
-        "pbi_agent.agent.session.format_project_sub_agents_markdown",
-        lambda reloaded=False: (
-            "### Sub-Agents\n\nReloaded" if reloaded else "### Sub-Agents\n\nInitial"
-        ),
-    )
 
-    exit_code = run_session_loop(settings, display)
+    exit_code = run_session_loop(settings, display, on_reload=on_reload)
 
     assert exit_code == 0
     assert provider.request_messages == []
     assert provider.system_prompts == ["updated prompt"]
     assert provider.refresh_tools_calls == 1
-    assert display.markdown_calls == ["### Sub-Agents\n\nReloaded"]
+    assert reload_calls == 1
+    assert display.markdown_calls == [
+        "Reloaded workspace instructions, project rules, skills, sub-agents, "
+        "tool definitions, and file mention cache. MCP servers are not "
+        "reloaded; restart the session after changing MCP config."
+    ]
     assert display.assistant_start_calls == 0
 
 

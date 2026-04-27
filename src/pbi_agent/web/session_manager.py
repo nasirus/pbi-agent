@@ -547,6 +547,10 @@ class WebSessionManager:
     def warm_file_mentions_cache(self) -> None:
         self._mention_index.warm_cache()
 
+    def refresh_file_mentions_cache(self) -> None:
+        self._mention_index.refresh_cache()
+        self._mention_index.warm_cache()
+
     def search_file_mentions(
         self,
         query: str,
@@ -2030,6 +2034,7 @@ class WebSessionManager:
                 live_session.runtime,
                 live_session.display,
                 resume_session_id=live_session.bound_session_id,
+                on_reload=self.refresh_file_mentions_cache,
             )
             live_session.exit_code = exit_code
         except Exception as exc:
@@ -2046,6 +2051,7 @@ class WebSessionManager:
                 },
             )
         finally:
+            self.refresh_file_mentions_cache()
             live_session.status = "ended"
             live_session.ended_at = _now_iso()
             self._publish_live_event(

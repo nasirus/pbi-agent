@@ -455,6 +455,11 @@ def test_slash_command_search_endpoint_returns_web_commands(
             "kind": "local_command",
         },
         {
+            "name": "/reload",
+            "description": "Reload workspace instructions and file caches",
+            "kind": "local_command",
+        },
+        {
             "name": "/compact",
             "description": "Summarize the live session to reduce model context",
             "kind": "local_command",
@@ -489,6 +494,11 @@ def test_slash_command_search_endpoint_includes_command_file_commands(
         {
             "name": "/agents",
             "description": "Show discovered project sub-agents",
+            "kind": "local_command",
+        },
+        {
+            "name": "/reload",
+            "description": "Reload workspace instructions and file caches",
             "kind": "local_command",
         },
         {
@@ -1677,6 +1687,37 @@ def test_web_display_wait_stop_clears_model_wait_processing() -> None:
         ("wait_state", {"active": False}),
         ("processing_state", {"active": False, "phase": None, "message": None}),
     ]
+
+
+def test_live_session_worker_refreshes_mentions_on_reload_and_end() -> None:
+    observed: dict[str, object] = {}
+
+    def fake_run_session_loop(
+        _settings, _display, *, resume_session_id=None, on_reload=None
+    ):
+        del _settings, _display, resume_session_id
+        observed["on_reload_callable"] = callable(on_reload)
+        if on_reload is not None:
+            on_reload()
+        return 0
+
+    manager = WebSessionManager(_settings())
+    refresh_calls = 0
+
+    def fake_refresh_file_mentions_cache() -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+
+    manager.refresh_file_mentions_cache = fake_refresh_file_mentions_cache  # type: ignore[method-assign]
+
+    with patch("pbi_agent.web.session_manager.run_session_loop", fake_run_session_loop):
+        live_session = manager.create_live_session()
+        worker = manager._live_sessions[live_session["live_session_id"]].worker
+        assert worker is not None
+        worker.join(timeout=2)
+
+    assert observed["on_reload_callable"] is True
+    assert refresh_calls == 2
 
 
 def test_interrupt_live_session_requires_active_processing() -> None:

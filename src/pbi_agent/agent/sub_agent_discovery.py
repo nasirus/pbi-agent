@@ -21,18 +21,9 @@ class ProjectSubAgent:
     location: Path
 
 
-def format_project_sub_agents_markdown(
-    workspace: Path | None = None,
-    *,
-    reloaded: bool = False,
-) -> str:
+def format_project_sub_agents_markdown(workspace: Path | None = None) -> str:
     agents = discover_project_sub_agents(workspace)
     lines = ["### Sub-Agents", ""]
-    if reloaded:
-        lines.append(
-            "Reloaded project sub-agent definitions from `.agents/agents/*.md`."
-        )
-        lines.append("")
     lines.append(
         "Default: use `sub_agent` without `agent_type` for the built-in generalist sub-agent."
     )

@@ -12,13 +12,17 @@ def test_list_slash_commands_for_web_excludes_local_only_commands() -> None:
         "/skills",
         "/mcp",
         "/agents",
+        "/reload",
         "/compact",
     ]
 
 
 def test_search_slash_commands_ranks_matches_by_name_and_keywords() -> None:
-    assert [command.name for command in search_slash_commands("ag")] == ["/agents"]
+    assert [command.name for command in search_slash_commands("ag", limit=1)] == [
+        "/agents"
+    ]
     assert [command.name for command in search_slash_commands("serv")] == ["/mcp"]
+    assert [command.name for command in search_slash_commands("refresh")] == ["/reload"]
 
 
 def test_search_slash_command_tuples_preserves_registry_order_on_empty_query() -> None:
