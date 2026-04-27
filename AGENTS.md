@@ -24,7 +24,7 @@ uv run pytest -m slow
 bun run test:web
 bun run test:web:watch
 uv run ruff check .
-uv run ruff format --check .
+uv run ruff format .
 bun run lint
 bun run lint:fix
 bun run typecheck
