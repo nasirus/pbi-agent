@@ -1,2 +1,5 @@
-[X] Locate edit file tool description in hermes-agent file operations
-[X] Report exact file/line references
+# TODO
+
+- [X] Read and compress `.agents/commands/review.md`
+- [X] Validate compressed file
+- [X] Update MEMORY.md

@@ -190,11 +190,6 @@
 
 .board-column__label {
   flex: 0 0 auto;
-  min-height: 2rem;
-  padding: var(--sp-1) var(--sp-2);
-  font-size: var(--text-xs);
-  line-height: var(--leading-normal);
-  font-family: var(--font-mono);
   white-space: nowrap;
 }
 

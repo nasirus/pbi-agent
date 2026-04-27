@@ -125,7 +125,7 @@
 }
 
 .settings-item__tag {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
   min-height: 2rem;
@@ -136,12 +136,6 @@
   color: var(--color-accent);
   background: var(--color-accent-muted);
   border-color: var(--color-accent-border);
-  font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  line-height: var(--leading-normal);
-  font-weight: var(--weight-medium);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .settings-item__tag--success {
@@ -152,7 +146,11 @@
 
 .settings-item__tag--warning {
   color: var(--color-warning, #f2b84b);
-  background: color-mix(in srgb, var(--color-warning, #f2b84b) 14%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--color-warning, #f2b84b) 14%,
+    transparent
+  );
   border-color: transparent;
 }
 
@@ -239,8 +237,43 @@
 
 .task-form__row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-3);
+}
+
+.task-form__body .task-form__row > [data-slot="field"] {
+  min-width: 0;
+}
+
+.task-form__body [data-slot="field-description"] {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.task-form__body .secret-mode-tabs {
+  width: 100%;
+  min-width: 0;
+}
+
+.task-form__body .secret-mode-tabs [data-slot="toggle-group-item"] {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.task-form__body .settings-inline-note {
+  margin: 0;
+}
+
+.task-form__body .task-form__error,
+.task-form__body .task-form__hint {
+  margin: 0;
+}
+
+@media (max-width: 40rem) {
+  .task-form__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .task-form__error {
@@ -271,7 +304,9 @@
   font-weight: var(--weight-medium);
   color: var(--color-text-secondary);
   border-radius: calc(var(--radius-md) - 2px);
-  transition: background var(--duration-fast), color var(--duration-fast);
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast);
   text-align: center;
   cursor: pointer;
 }

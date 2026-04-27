@@ -187,6 +187,64 @@ def test_resolve_settings_uses_openai_xhigh_default(monkeypatch) -> None:
     settings.validate()
 
 
+def test_resolve_settings_uses_azure_openai_env_and_requires_url(monkeypatch) -> None:
+    for name in (
+        "PBI_AGENT_PROVIDER",
+        "PBI_AGENT_API_KEY",
+        "PBI_AGENT_RESPONSES_URL",
+        "PBI_AGENT_MODEL",
+        "PBI_AGENT_REASONING_EFFORT",
+        "PBI_AGENT_SUB_AGENT_MODEL",
+        "OPENAI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-test-key")
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--provider",
+            "azure_openai",
+            "--responses-url",
+            "https://example-resource.openai.azure.com/openai/v1/responses",
+            "web",
+        ]
+    )
+    settings = resolve_settings(args)
+
+    assert settings.provider == "azure_openai"
+    assert settings.api_key == "azure-test-key"
+    assert (
+        settings.responses_url
+        == "https://example-resource.openai.azure.com/openai/v1/responses"
+    )
+    assert settings.model == "gpt-4.1"
+    assert settings.sub_agent_model == "gpt-4.1-mini"
+    settings.validate()
+
+
+def test_azure_openai_request_headers_use_api_key_header() -> None:
+    provider = OpenAIProvider(
+        _make_settings(
+            provider="azure_openai",
+            responses_url="https://example-resource.openai.azure.com/openai/v1/responses",
+        )
+    )
+
+    headers = provider._request_headers(
+        request_auth=type(
+            "RequestAuth",
+            (),
+            {"headers": {"api-key": "azure-test-key"}},
+        )(),
+        session_id=None,
+        input_items=[],
+    )
+
+    assert headers["api-key"] == "azure-test-key"
+    assert "Authorization" not in headers
+
+
 def test_openai_build_request_body_uses_http_responses_shape() -> None:
     provider = OpenAIProvider(_make_settings())
 

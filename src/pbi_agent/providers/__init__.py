@@ -24,6 +24,7 @@ def create_provider(
     The ``settings.provider`` field selects the backend:
 
     - ``"openai"`` (default) → OpenAI Responses HTTP provider
+    - ``"azure_openai"``     → Azure OpenAI Responses HTTP provider
     - ``"chatgpt"``          → ChatGPT account-backed Responses HTTP provider
     - ``"github_copilot"``   → GitHub Copilot Responses HTTP provider
     - ``"xai"``              → xAI Responses HTTP provider
@@ -35,7 +36,7 @@ def create_provider(
     effective_excluded_tools = set(excluded_tools or set())
     effective_excluded_tools.update(image_excluded_tools(name))
 
-    if name in {"openai", "chatgpt"}:
+    if name in {"openai", "azure_openai", "chatgpt"}:
         from pbi_agent.providers.openai_provider import OpenAIProvider
 
         return OpenAIProvider(
@@ -97,7 +98,7 @@ def create_provider(
 
     raise ValueError(
         "Unknown provider "
-        f"{name!r}. Supported: openai, chatgpt, github_copilot, xai, google, anthropic, generic."
+        f"{name!r}. Supported: openai, azure_openai, chatgpt, github_copilot, xai, google, anthropic, generic."
     )
 
 

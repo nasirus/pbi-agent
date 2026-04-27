@@ -18,6 +18,7 @@ from pbi_agent.providers.xai_provider import XAIProvider
     ("provider_name", "expected_type"),
     [
         ("openai", OpenAIProvider),
+        ("azure_openai", OpenAIProvider),
         ("chatgpt", OpenAIProvider),
         ("github_copilot", GitHubCopilotProvider),
         ("xai", XAIProvider),

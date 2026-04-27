@@ -18,7 +18,16 @@ from pbi_agent.providers.github_copilot_backend import GITHUB_COPILOT_MODELS_URL
 
 _DISCOVERY_TIMEOUT_SECS = 30.0
 _SUPPORTED_DISCOVERY_PROVIDERS = frozenset(
-    {"openai", "chatgpt", "github_copilot", "xai", "google", "anthropic", "generic"}
+    {
+        "openai",
+        "azure_openai",
+        "chatgpt",
+        "github_copilot",
+        "xai",
+        "google",
+        "anthropic",
+        "generic",
+    }
 )
 _OPENAI_CHATGPT_MIN_CLIENT_VERSION = "0.124.0"
 _MANUAL_ENTRY_ONLY_REASONS: dict[str, str] = {}
@@ -74,7 +83,7 @@ def discover_provider_models(settings: Settings) -> ProviderModelDiscoveryResult
         )
 
     try:
-        if provider_kind in {"openai", "chatgpt"}:
+        if provider_kind in {"openai", "azure_openai", "chatgpt"}:
             models = _discover_openai_models(settings)
         elif provider_kind == "github_copilot":
             models = _discover_github_copilot_models(settings)
@@ -502,14 +511,11 @@ def _append_query_params(url: str, params: dict[str, str | None]) -> str:
 
 
 def _missing_auth_error(settings: Settings) -> ProviderModelDiscoveryError | None:
-    if settings.provider == "openai":
+    if settings.provider in {"openai", "azure_openai"}:
         if settings.auth is None:
             return ProviderModelDiscoveryError(
                 code="auth_required",
-                message=(
-                    "Missing authentication for provider 'openai'. Configure an API key "
-                    "or a ChatGPT account session."
-                ),
+                message=missing_api_key_message(settings.provider),
             )
         return None
     if settings.provider == "chatgpt":

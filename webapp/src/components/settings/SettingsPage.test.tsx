@@ -402,7 +402,7 @@ describe("SettingsPage", () => {
 
     expect(await screen.findByText(/First-time setup:/)).toBeInTheDocument();
     expect(screen.getByText("No providers configured")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ Add Profile" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add Profile" })).toBeDisabled();
   });
 
   it("updates the active default profile through the API", async () => {
@@ -550,6 +550,30 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Generate device code" }));
     expect(startProviderAuthFlow).toHaveBeenCalledWith("copilot-main", "device");
+  });
+
+  it("uses the standard task form shell for the provider form", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(<SettingsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Add Provider" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Add Provider" });
+    expect(dialog).toHaveClass("task-form-dialog");
+    expect(dialog.querySelector(".task-form__body")).not.toBeNull();
+    expect(document.querySelector('input[name="provider-name"]')).toHaveClass(
+      "task-form__input",
+    );
+    expect(document.querySelector('select[name="provider-kind"]')).toHaveClass(
+      "task-form__select",
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass(
+      "task-form__action-button",
+    );
+    expect(screen.getByRole("button", { name: "Add Provider" })).toHaveClass(
+      "task-form__action-button",
+    );
   });
 
   it("uses provider kind labels and descriptions in the provider form", async () => {
@@ -814,7 +838,7 @@ describe("SettingsPage", () => {
 
     renderWithProviders(<SettingsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "+ Add Profile" }));
+    await user.click(await screen.findByRole("button", { name: "Add Profile" }));
     await waitFor(() =>
       expect(fetchProviderModels).toHaveBeenCalledWith("openai-main"),
     );
@@ -829,11 +853,34 @@ describe("SettingsPage", () => {
     );
   });
 
+  it("uses the standard task form shell for the profile form", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Add Profile" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Add Profile" });
+    expect(dialog).toHaveClass("task-form-dialog");
+    expect(dialog.querySelector(".task-form__body")).not.toBeNull();
+    expect(document.querySelector('input[name="profile-name"]')).toHaveClass(
+      "task-form__input",
+    );
+    expect(document.querySelector('select[name="provider-id"]')).toHaveClass(
+      "task-form__select",
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass(
+      "task-form__action-button",
+    );
+    expect(screen.getByRole("button", { name: "Add Profile" })).toHaveClass(
+      "task-form__action-button",
+    );
+  });
+
   it("renders fetched provider models as dropdowns in the profile modal", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SettingsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "+ Add Profile" }));
+    await user.click(await screen.findByRole("button", { name: "Add Profile" }));
 
     await waitFor(() =>
       expect(fetchProviderModels).toHaveBeenCalledWith("openai-main"),
@@ -862,7 +909,7 @@ describe("SettingsPage", () => {
 
     renderWithProviders(<SettingsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "+ Add Profile" }));
+    await user.click(await screen.findByRole("button", { name: "Add Profile" }));
     await waitFor(() =>
       expect(fetchProviderModels).toHaveBeenCalledWith("openai-main"),
     );
@@ -913,7 +960,7 @@ describe("SettingsPage", () => {
 
     renderWithProviders(<SettingsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "+ Add Profile" }));
+    await user.click(await screen.findByRole("button", { name: "Add Profile" }));
 
     await screen.findByText("Missing authentication for provider 'openai'.");
     expect(document.querySelector('input[name="model"]')).not.toBeNull();
@@ -938,7 +985,7 @@ describe("SettingsPage", () => {
 
     renderWithProviders(<SettingsPage />);
 
-    await screen.findByRole("button", { name: "+ Add Profile" });
+    await screen.findByRole("button", { name: "Add Profile" });
     await user.click(screen.getAllByRole("button", { name: "Edit" })[2]);
 
     await waitFor(() =>
