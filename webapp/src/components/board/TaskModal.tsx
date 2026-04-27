@@ -1,5 +1,21 @@
-import { useEffect, type FormEvent } from "react";
+import { type FormEvent } from "react";
 import type { BoardStage, ModelProfileView } from "../../types";
+import { Button } from "../ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+} from "../ui/field";
+import { Input } from "../ui/input";
+import { NativeSelect, NativeSelectOption } from "../ui/native-select";
+import { Textarea } from "../ui/textarea";
 
 export type EditableTask = {
   taskId?: string;
@@ -28,89 +44,105 @@ export function TaskModal({
   onSave: (event: FormEvent<HTMLFormElement>) => void;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  const titleId = "task-form-title";
+  const promptId = "task-form-prompt";
+  const stageId = "task-form-stage";
+  const profileId = "task-form-profile";
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-card__header">
-          <h2 className="modal-card__title">
+    <Dialog open onOpenChange={(open) => {
+      if (!open) onClose();
+    }}>
+      <DialogContent className="task-form-dialog">
+        <DialogHeader>
+          <DialogTitle>
             {task.taskId ? "Edit Task" : "New Task"}
-          </h2>
-          <button type="button" className="modal-card__close" onClick={onClose}>
-            &times;
-          </button>
-        </div>
+          </DialogTitle>
+        </DialogHeader>
 
         <form className="task-form" onSubmit={onSave}>
-          <div className="task-form__field">
-            <label className="task-form__label">Title</label>
-            <input
-              className="task-form__input"
-              value={task.title}
-              onChange={(e) => onChange({ title: e.target.value })}
-              required
-              autoFocus
-            />
+          <div className="task-form__body">
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={titleId}>Title</FieldLabel>
+                <Input
+                  id={titleId}
+                  className="task-form__input"
+                  value={task.title}
+                  onChange={(e) => onChange({ title: e.target.value })}
+                  required
+                  autoFocus
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor={promptId}>Prompt</FieldLabel>
+                <Textarea
+                  id={promptId}
+                  className="task-form__textarea"
+                  value={task.prompt}
+                  onChange={(e) => onChange({ prompt: e.target.value })}
+                  required
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor={stageId}>Stage</FieldLabel>
+                <NativeSelect
+                  id={stageId}
+                  className="task-form__select"
+                  value={task.stage}
+                  onChange={(e) => onChange({ stage: e.target.value })}
+                  required
+                >
+                  {boardStages.map((stage) => (
+                    <NativeSelectOption key={stage.id} value={stage.id}>
+                      {stage.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor={profileId}>Profile Override</FieldLabel>
+                <NativeSelect
+                  id={profileId}
+                  className="task-form__select"
+                  value={task.profileId}
+                  onChange={(e) => onChange({ profileId: e.target.value })}
+                >
+                  <NativeSelectOption value="">Use stage/default runtime</NativeSelectOption>
+                  {profiles.map((profile) => (
+                    <NativeSelectOption key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+            </FieldGroup>
           </div>
 
-          <div className="task-form__field">
-            <label className="task-form__label">Prompt</label>
-            <textarea
-              className="task-form__textarea"
-              value={task.prompt}
-              onChange={(e) => onChange({ prompt: e.target.value })}
-              required
-            />
-          </div>
-
-          <div className="task-form__field">
-            <label className="task-form__label">Stage</label>
-            <select
-              className="task-form__select"
-              value={task.stage}
-              onChange={(e) => onChange({ stage: e.target.value })}
-              required
+          <DialogFooter className="task-form__footer">
+            <Button
+              type="button"
+              variant="ghost"
+              className="task-form__action-button"
+              onClick={onClose}
+              disabled={isSaving}
             >
-              {boardStages.map((stage) => (
-                <option key={stage.id} value={stage.id}>
-                  {stage.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="task-form__field">
-            <label className="task-form__label">Profile Override</label>
-            <select
-              className="task-form__select"
-              value={task.profileId}
-              onChange={(e) => onChange({ profileId: e.target.value })}
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="ghost"
+              className="task-form__action-button"
+              disabled={isSaving}
             >
-              <option value="">Use stage/default runtime</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            className="task-form__submit"
-            disabled={isSaving}
-          >
-            {isSaving ? "Saving..." : "Save Task"}
-          </button>
+              {isSaving ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

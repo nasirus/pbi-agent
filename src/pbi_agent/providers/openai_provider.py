@@ -17,6 +17,11 @@ from pbi_agent import __version__
 from pbi_agent.auth.models import OAuthSessionAuth
 from pbi_agent.auth.service import build_runtime_request_auth, refresh_runtime_auth
 from pbi_agent.agent.system_prompt import get_system_prompt
+from pbi_agent.agent.tool_display import (
+    build_tool_result_callback,
+    display_tool_execution_start,
+    finalize_tool_execution,
+)
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
 from pbi_agent.media import data_url_for_image
@@ -56,6 +61,7 @@ _RETRYABLE_RESPONSE_ERROR_CODES = {
     "api_error",
     "internal",
     "server_error",
+    "server_is_overloaded",
     "service_unavailable",
     "unavailable",
     "overloaded_error",
@@ -240,30 +246,29 @@ class OpenAIProvider(Provider):
         ]
         if displayable_calls:
             display.function_start(len(displayable_calls))
-        batch = _execute_tool_calls(
-            response.function_calls,
-            max_workers=max_workers,
-            context=ToolContext(
-                settings=self._settings,
-                display=display,
-                session_usage=session_usage,
-                turn_usage=turn_usage,
-                sub_agent_depth=sub_agent_depth,
-                tool_catalog=self._tool_catalog,
-                parent_context=parent_context,
-                tracer=tracer,
-            ),
-        )
+            display_tool_execution_start(display, displayable_calls)
+        try:
+            batch = _execute_tool_calls(
+                response.function_calls,
+                max_workers=max_workers,
+                context=ToolContext(
+                    settings=self._settings,
+                    display=display,
+                    session_usage=session_usage,
+                    turn_usage=turn_usage,
+                    sub_agent_depth=sub_agent_depth,
+                    tool_catalog=self._tool_catalog,
+                    parent_context=parent_context,
+                    tracer=tracer,
+                ),
+                on_result=build_tool_result_callback(display),
+            )
 
-        for result in batch.results:
-            call = _find_by_id(response.function_calls, result.call_id)
-            if not (call and call.name == "sub_agent"):
-                display.function_result(
-                    name=call.name if call else "unknown",
-                    success=not result.is_error,
-                    call_id=result.call_id,
-                    arguments=call.arguments if call else None,
-                )
+            finalize_tool_execution(display)
+        except Exception:
+            if displayable_calls:
+                display.tool_execution_stop()
+            raise
         if displayable_calls:
             display.tool_group_end()
 
@@ -1090,13 +1095,6 @@ def _parse_function_call(item: dict[str, Any]) -> ToolCall:
         name=str(item.get("name", "")),
         arguments=arguments,
     )
-
-
-def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
-    for call in calls:
-        if call.call_id == call_id:
-            return call
-    return None
 
 
 def _extract_web_search_sources(item: dict[str, Any]) -> list[WebSearchSource]:

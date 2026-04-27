@@ -178,7 +178,10 @@ def build_parser() -> argparse.ArgumentParser:
     model_group.add_argument(
         "--sub-agent-model",
         dest="sub_agent_model",
-        help="Override the sub_agent model; defaults to the provider-specific sub-agent model.",
+        help=(
+            "Override the sub_agent model; saved profiles without one use "
+            "the profile main model."
+        ),
     )
     model_group.add_argument(
         "--max-tokens",
@@ -672,7 +675,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--sub-agent-model",
             dest="sub_agent_model",
             default=None,
-            help="Sub-agent model override.",
+            help="Sub-agent model override; omit to use the profile main model.",
         )
         target.add_argument(
             "--reasoning-effort",

@@ -1001,18 +1001,29 @@ def resolve_runtime(args: argparse.Namespace) -> ResolvedRuntime:
         else _default_auth_mode(provider_kind)
     )
     provider_secret = _resolve_secret(args, provider_kind, resolved_provider)
+    cli_model = getattr(args, "model", None)
+    env_model = os.getenv("PBI_AGENT_MODEL")
+    selected_profile_model = selected_profile.model if selected_profile else None
 
     model = (
-        getattr(args, "model", None)
-        or os.getenv("PBI_AGENT_MODEL")
-        or (selected_profile.model if selected_profile else None)
+        cli_model
+        or env_model
+        or selected_profile_model
         or _default_model(provider_kind)
+    )
+    selected_profile_base_model = (
+        selected_profile_model or _default_model(provider_kind)
+        if selected_profile is not None
+        else model
     )
     sub_agent_model = (
         getattr(args, "sub_agent_model", None)
         or os.getenv("PBI_AGENT_SUB_AGENT_MODEL")
-        or (selected_profile.sub_agent_model if selected_profile else None)
-        or _default_sub_agent_model(provider_kind)
+        or _resolved_sub_agent_model_for_profile(
+            selected_profile,
+            provider_kind=provider_kind,
+            model=selected_profile_base_model,
+        )
     )
     max_tool_workers = _resolve_int_setting(
         cli_value=getattr(args, "max_tool_workers", None),
@@ -1109,6 +1120,17 @@ def resolve_settings(args: argparse.Namespace) -> Settings:
 
 def _coalesce[T](value: T | None, default: T) -> T:
     return default if value is None else value
+
+
+def _resolved_sub_agent_model_for_profile(
+    profile: ModelProfileConfig | None,
+    *,
+    provider_kind: str,
+    model: str,
+) -> str | None:
+    if profile is not None:
+        return profile.sub_agent_model or model or None
+    return _default_sub_agent_model(provider_kind)
 
 
 def _resolve_int_setting(
@@ -1212,18 +1234,21 @@ def _settings_from_runtime_parts(
         api_key_env=secret.api_key_env,
     )
 
+    model = _coalesce(
+        profile.model if profile else None,
+        _default_model(provider.kind),
+    )
     return Settings(
         api_key=secret.api_key,
         auth=auth,
         responses_url=provider.responses_url
         or _default_responses_url_for_auth(provider.kind, provider.auth_mode),
         generic_api_url=provider.generic_api_url or DEFAULT_GENERIC_API_URL,
-        model=_coalesce(
-            profile.model if profile else None, _default_model(provider.kind)
-        ),
-        sub_agent_model=_coalesce(
-            profile.sub_agent_model if profile else None,
-            _default_sub_agent_model(provider.kind),
+        model=model,
+        sub_agent_model=_resolved_sub_agent_model_for_profile(
+            profile,
+            provider_kind=provider.kind,
+            model=model,
         ),
         max_tokens=_coalesce(
             profile.max_tokens if profile else None, DEFAULT_MAX_TOKENS
@@ -1298,14 +1323,16 @@ def _concrete_profile_for_saved_profile(
     *,
     provider_kind: str,
 ) -> ModelProfileConfig:
+    model = _coalesce(profile.model, _default_model(provider_kind))
     return ModelProfileConfig(
         id=profile.id,
         name=profile.name,
         provider_id=profile.provider_id,
-        model=_coalesce(profile.model, _default_model(provider_kind)),
-        sub_agent_model=_coalesce(
-            profile.sub_agent_model,
-            _default_sub_agent_model(provider_kind),
+        model=model,
+        sub_agent_model=_resolved_sub_agent_model_for_profile(
+            profile,
+            provider_kind=provider_kind,
+            model=model,
         ),
         reasoning_effort=_coalesce(
             profile.reasoning_effort,

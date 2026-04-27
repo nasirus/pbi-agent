@@ -424,6 +424,7 @@ class LiveSessionSnapshot:
     runtime: dict[str, str | None] | None = None
     input_enabled: bool = False
     wait_message: str | None = None
+    processing: dict[str, Any] | None = None
     session_usage: dict[str, Any] | None = None
     turn_usage: dict[str, Any] | None = None
     session_ended: bool = False
@@ -2471,6 +2472,7 @@ class WebSessionManager:
             "runtime": live_session.snapshot.runtime,
             "input_enabled": live_session.snapshot.input_enabled,
             "wait_message": live_session.snapshot.wait_message,
+            "processing": live_session.snapshot.processing,
             "session_usage": live_session.snapshot.session_usage,
             "turn_usage": live_session.snapshot.turn_usage,
             "session_ended": live_session.snapshot.session_ended,
@@ -2749,6 +2751,7 @@ class WebSessionManager:
             snapshot.items = []
             snapshot.sub_agents = {}
             snapshot.wait_message = None
+            snapshot.processing = None
             snapshot.turn_usage = None
             snapshot.session_ended = False
             snapshot.fatal_error = None
@@ -2769,6 +2772,9 @@ class WebSessionManager:
                 if payload.get("active")
                 else None
             )
+            return
+        if event_type == "processing_state":
+            snapshot.processing = dict(payload) if payload.get("active") else None
             return
         if event_type == "usage_updated":
             if payload.get("scope") == "session":
@@ -2809,6 +2815,7 @@ class WebSessionManager:
                 snapshot.session_ended = True
                 snapshot.input_enabled = False
                 snapshot.wait_message = None
+                snapshot.processing = None
                 snapshot.fatal_error = (
                     str(payload["fatal_error"])
                     if isinstance(payload.get("fatal_error"), str)

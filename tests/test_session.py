@@ -57,6 +57,8 @@ class _DisplaySpy:
         self.debug_messages: list[str] = []
         self.markdown_calls: list[str] = []
         self.reset_session_calls = 0
+        self.assistant_start_calls = 0
+        self.assistant_stop_calls = 0
 
     def welcome(
         self,
@@ -89,6 +91,12 @@ class _DisplaySpy:
 
     def reset_session(self) -> None:
         self.reset_session_calls += 1
+
+    def assistant_start(self) -> None:
+        self.assistant_start_calls += 1
+
+    def assistant_stop(self) -> None:
+        self.assistant_stop_calls += 1
 
     def replay_history(self, messages) -> None:
         pass

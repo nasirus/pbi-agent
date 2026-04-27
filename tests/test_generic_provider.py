@@ -101,6 +101,63 @@ def test_generic_parse_response_normalizes_assistant_message_and_tool_calls() ->
     }
 
 
+def test_generic_parse_response_merges_split_choice_text_and_tool_calls() -> None:
+    provider = GenericProvider(_make_settings())
+
+    result = provider._parse_response(
+        {
+            "id": "chatcmpl_split",
+            "model": "claude-opus-4.6",
+            "usage": {"prompt_tokens": 12, "completion_tokens": 4},
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": "Let me inspect the file first.",
+                    },
+                },
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "toolu_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": '{"path":"src/app.py"}',
+                                },
+                            }
+                        ],
+                    },
+                },
+            ],
+        }
+    )
+
+    assert result.text == "Let me inspect the file first."
+    assert result.function_calls == [
+        ToolCall(call_id="toolu_1", name="read_file", arguments={"path": "src/app.py"})
+    ]
+    assert result.has_tool_calls is True
+    assert result.provider_data["assistant_message"] == {
+        "role": "assistant",
+        "content": "Let me inspect the file first.",
+        "tool_calls": [
+            {
+                "id": "toolu_1",
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "arguments": '{"path":"src/app.py"}',
+                },
+            }
+        ],
+    }
+
+
 def test_generic_request_turn_preserves_history_and_tool_results(
     monkeypatch,
     display_spy,
@@ -346,7 +403,14 @@ def test_generic_execute_tool_calls_returns_chat_completion_tool_messages(
 
     monkeypatch.setattr(
         "pbi_agent.providers.generic_provider._execute_tool_calls",
-        lambda calls, max_workers, context=None, tool_catalog=None: batch,
+        lambda calls, max_workers, context=None, on_result=None: (
+            (
+                [on_result(call, result) for call, result in zip(calls, batch.results)]
+                if on_result is not None
+                else None
+            )
+            and batch
+        ),
     )
 
     tool_result_items, had_errors = provider.execute_tool_calls(

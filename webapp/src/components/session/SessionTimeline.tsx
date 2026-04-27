@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
-import type { TimelineItem } from "../../types";
+import type { ProcessingState, TimelineItem } from "../../types";
 import { EmptyState } from "../shared/EmptyState";
+import { Button } from "../ui/button";
 import { TimelineEntry } from "./TimelineEntry";
 
 const USER_MESSAGE_TOP_OFFSET = 8;
@@ -32,29 +33,39 @@ export function SessionTimeline({
   subAgents,
   connection,
   waitMessage,
+  processing,
   itemsVersion,
 }: {
   items: TimelineItem[];
   subAgents: Record<string, { title: string; status: string }>;
   connection: "disconnected" | "connecting" | "connected";
   waitMessage: string | null;
+  processing: ProcessingState | null;
   itemsVersion: number;
 }) {
   const previousLengthRef = useRef<number | undefined>(undefined);
   const latestItem = items.at(-1);
   const latestItemIsUserMessage =
     latestItem?.kind === "message" && latestItem.role === "user";
-  const { containerRef, showNewMessages, setShowNewMessages, scrollToBottom, userScrolledRef } =
+  const {
+    containerRef,
+    showNewMessages,
+    setShowNewMessages,
+    scrollToBottom,
+    userScrolledRef,
+    markProgrammaticScroll,
+  } =
     useAutoScroll(itemsVersion, { followOnChange: false });
 
   const scrollToTarget = useCallback(
     (container: HTMLElement, target: HTMLElement, offset: number) => {
+      markProgrammaticScroll();
       container.scrollTo({
         top: Math.max(target.offsetTop - offset, 0),
-        behavior: "smooth",
+        behavior: "instant",
       });
     },
-    [],
+    [markProgrammaticScroll],
   );
 
   useEffect(() => {
@@ -94,12 +105,13 @@ export function SessionTimeline({
     } else if (!isNewItem) {
       // Existing item content updated — stick to bottom
       if (!userScrolledRef.current) {
+        markProgrammaticScroll();
         container.scrollTo({ top: container.scrollHeight, behavior: "instant" });
       } else {
         setShowNewMessages(true);
       }
     }
-  }, [containerRef, itemsVersion, items.length, latestItem, latestItemIsUserMessage, userScrolledRef, setShowNewMessages, scrollToTarget]);
+  }, [containerRef, itemsVersion, items.length, latestItem, latestItemIsUserMessage, userScrolledRef, setShowNewMessages, scrollToTarget, markProgrammaticScroll]);
 
   if (items.length === 0 && connection === "connected") {
     return (
@@ -125,20 +137,27 @@ export function SessionTimeline({
             subAgentStatus={item.subAgentId ? subAgents[item.subAgentId]?.status : undefined}
           />
         ))}
-        {waitMessage ? (
+        {processing?.active ? (
+          <div className={`processing-indicator processing-indicator--${processing.phase ?? "active"}`}>
+            <div className="spinner spinner--sm" />
+            <span>{processing.message ?? "Working..."}</span>
+          </div>
+        ) : waitMessage ? (
           <div className="processing-indicator">
             <div className="spinner spinner--sm" />
             <span>{waitMessage}</span>
           </div>
         ) : null}
         {showNewMessages ? (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             className="timeline__new-messages"
             onClick={scrollToBottom}
           >
             New messages below
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>

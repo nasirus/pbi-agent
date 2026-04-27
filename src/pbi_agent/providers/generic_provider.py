@@ -14,6 +14,11 @@ from typing import Any, TYPE_CHECKING
 
 from pbi_agent import __version__
 from pbi_agent.agent.system_prompt import get_system_prompt
+from pbi_agent.agent.tool_display import (
+    build_tool_result_callback,
+    display_tool_execution_start,
+    finalize_tool_execution,
+)
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
 from pbi_agent.models.messages import (
@@ -148,31 +153,31 @@ class GenericProvider(Provider):
         ]
         if displayable_calls:
             display.function_start(len(displayable_calls))
-        batch = _execute_tool_calls(
-            response.function_calls,
-            max_workers=max_workers,
-            context=ToolContext(
-                settings=self._settings,
-                display=display,
-                session_usage=session_usage,
-                turn_usage=turn_usage,
-                sub_agent_depth=sub_agent_depth,
-                tool_catalog=self._tool_catalog,
-                parent_context=parent_context,
-                tracer=tracer,
-            ),
-        )
+            display_tool_execution_start(display, displayable_calls)
+        try:
+            batch = _execute_tool_calls(
+                response.function_calls,
+                max_workers=max_workers,
+                context=ToolContext(
+                    settings=self._settings,
+                    display=display,
+                    session_usage=session_usage,
+                    turn_usage=turn_usage,
+                    sub_agent_depth=sub_agent_depth,
+                    tool_catalog=self._tool_catalog,
+                    parent_context=parent_context,
+                    tracer=tracer,
+                ),
+                on_result=build_tool_result_callback(display),
+            )
 
-        tool_result_items: list[dict[str, Any]] = []
+            tool_result_items: list[dict[str, Any]] = []
+            finalize_tool_execution(display)
+        except Exception:
+            if displayable_calls:
+                display.tool_execution_stop()
+            raise
         for result in batch.results:
-            call = _find_by_id(response.function_calls, result.call_id)
-            if not (call and call.name == "sub_agent"):
-                display.function_result(
-                    name=call.name if call else "unknown",
-                    success=not result.is_error,
-                    call_id=result.call_id,
-                    arguments=call.arguments if call else None,
-                )
             tool_result_items.append(
                 {
                     "role": "tool",
@@ -326,14 +331,17 @@ class GenericProvider(Provider):
 
     def _parse_response(self, response_json: dict[str, Any]) -> CompletedResponse:
         choices = response_json.get("choices", [])
-        first_choice = choices[0] if choices and isinstance(choices[0], dict) else {}
-        message = first_choice.get("message", {})
-        if not isinstance(message, dict):
-            message = {}
+        messages = _extract_choice_messages(choices)
+        text = "".join(
+            _extract_message_text(message.get("content")) for message in messages
+        )
+        function_calls = [
+            function_call
+            for message in messages
+            for function_call in _parse_tool_calls(message.get("tool_calls"))
+        ]
 
-        text = _extract_message_text(message.get("content"))
-
-        function_calls = _parse_tool_calls(message.get("tool_calls"))
+        assistant_message = _normalize_assistant_messages(messages)
 
         usage_obj = response_json.get("usage", {})
         prompt_tokens = int(usage_obj.get("prompt_tokens", 0) or 0)
@@ -357,20 +365,27 @@ class GenericProvider(Provider):
                 model=_response_model_name(response_json),
             ),
             function_calls=function_calls,
-            provider_data={"assistant_message": _normalize_assistant_message(message)},
+            provider_data={"assistant_message": assistant_message},
         )
-
-
-def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
-    for call in calls:
-        if call.call_id == call_id:
-            return call
-    return None
 
 
 def _response_model_name(response_json: dict[str, Any]) -> str:
     model = response_json.get("model")
     return model if isinstance(model, str) else ""
+
+
+def _extract_choice_messages(choices: Any) -> list[dict[str, Any]]:
+    if not isinstance(choices, list):
+        return []
+
+    messages: list[dict[str, Any]] = []
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message", {})
+        if isinstance(message, dict):
+            messages.append(message)
+    return messages
 
 
 def _should_send_model(settings: Settings) -> bool:
@@ -438,6 +453,39 @@ def _normalize_assistant_message(message: dict[str, Any]) -> dict[str, Any]:
     if "content" not in normalized and "tool_calls" not in normalized:
         normalized["content"] = ""
 
+    return normalized
+
+
+def _normalize_assistant_messages(messages: list[dict[str, Any]]) -> dict[str, Any]:
+    if not messages:
+        return _normalize_assistant_message({})
+    if len(messages) == 1:
+        return _normalize_assistant_message(messages[0])
+
+    normalized: dict[str, Any] = {"role": "assistant"}
+    content_parts: list[Any] = []
+    tool_calls: list[dict[str, Any]] = []
+    for message in messages:
+        normalized_message = _normalize_assistant_message(message)
+        content = normalized_message.get("content")
+        if isinstance(content, str):
+            if content:
+                content_parts.append(content)
+        elif isinstance(content, list):
+            content_parts.extend(content)
+        raw_tool_calls = normalized_message.get("tool_calls")
+        if isinstance(raw_tool_calls, list):
+            tool_calls.extend(call for call in raw_tool_calls if isinstance(call, dict))
+
+    if content_parts:
+        if all(isinstance(part, str) for part in content_parts):
+            normalized["content"] = "".join(content_parts)
+        else:
+            normalized["content"] = content_parts
+    if tool_calls:
+        normalized["tool_calls"] = tool_calls
+    if "content" not in normalized and "tool_calls" not in normalized:
+        normalized["content"] = ""
     return normalized
 
 

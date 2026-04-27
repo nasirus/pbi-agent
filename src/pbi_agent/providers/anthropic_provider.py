@@ -17,6 +17,11 @@ import urllib.request
 from typing import Any, TYPE_CHECKING
 
 from pbi_agent.agent.system_prompt import get_system_prompt
+from pbi_agent.agent.tool_display import (
+    build_tool_result_callback,
+    display_tool_execution_start,
+    finalize_tool_execution,
+)
 from pbi_agent.agent.tool_runtime import execute_tool_calls as _execute_tool_calls
 from pbi_agent.config import Settings
 from pbi_agent.models.messages import (
@@ -227,32 +232,32 @@ class AnthropicProvider(Provider):
         displayable_calls = [call for call in fn_calls if call.name != "sub_agent"]
         if displayable_calls:
             display.function_start(len(displayable_calls))
-        batch = _execute_tool_calls(
-            fn_calls,
-            max_workers=max_workers,
-            context=ToolContext(
-                settings=self._settings,
-                display=display,
-                session_usage=session_usage,
-                turn_usage=turn_usage,
-                sub_agent_depth=sub_agent_depth,
-                tool_catalog=self._tool_catalog,
-                parent_context=parent_context,
-                tracer=tracer,
-            ),
-        )
-        had_errors = batch.had_errors
+            display_tool_execution_start(display, displayable_calls)
+        try:
+            batch = _execute_tool_calls(
+                fn_calls,
+                max_workers=max_workers,
+                context=ToolContext(
+                    settings=self._settings,
+                    display=display,
+                    session_usage=session_usage,
+                    turn_usage=turn_usage,
+                    sub_agent_depth=sub_agent_depth,
+                    tool_catalog=self._tool_catalog,
+                    parent_context=parent_context,
+                    tracer=tracer,
+                ),
+                on_result=build_tool_result_callback(display),
+            )
+            had_errors = batch.had_errors
 
-        tool_result_items: list[dict[str, Any]] = []
+            tool_result_items: list[dict[str, Any]] = []
+            finalize_tool_execution(display)
+        except Exception:
+            if displayable_calls:
+                display.tool_execution_stop()
+            raise
         for result in batch.results:
-            call = _find_by_id(fn_calls, result.call_id)
-            if not (call and call.name == "sub_agent"):
-                display.function_result(
-                    name=call.name if call else "unknown",
-                    success=not result.is_error,
-                    call_id=result.call_id,
-                    arguments=call.arguments if call else None,
-                )
             tool_result_items.append(
                 {
                     "type": "tool_result",
@@ -615,13 +620,6 @@ class AnthropicProvider(Provider):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _find_by_id(calls: list[ToolCall], call_id: str) -> ToolCall | None:
-    for c in calls:
-        if c.call_id == call_id:
-            return c
-    return None
 
 
 def _anthropic_user_content_blocks(user_input: UserTurnInput) -> list[dict[str, Any]]:

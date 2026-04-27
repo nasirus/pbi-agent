@@ -11,7 +11,11 @@ from rich.tree import Tree
 
 from pbi_agent.models.messages import TokenUsage, WebSearchSource
 from pbi_agent.session_store import MessageRecord
-from pbi_agent.display.protocol import DisplayProtocol, PendingToolGroup
+from pbi_agent.display.protocol import (
+    DisplayProtocol,
+    PendingToolCall,
+    PendingToolGroup,
+)
 from pbi_agent.display.formatting import (
     REDACTED_THINKING_NOTICE,
     TOOL_BORDER_STYLES,
@@ -123,6 +127,21 @@ class ConsoleSubAgentDisplay(DisplayProtocol):
     def assistant_start(self) -> None:
         return None
 
+    def assistant_stop(self) -> None:
+        return None
+
+    def tool_execution_start(self, calls: list[PendingToolCall]) -> None:
+        displayable_calls = [call for call in calls if call.name != "sub_agent"]
+        if displayable_calls:
+            self.parent._console.print(
+                f"[dim]{escape_markup_text(self._name)}: running "
+                f"{len(displayable_calls)} local tool"
+                f"{'s' if len(displayable_calls) != 1 else ''}...[/dim]"
+            )
+
+    def tool_execution_stop(self) -> None:
+        return None
+
     # -- rendering -----------------------------------------------------------
 
     def wait_start(self, message: str = "model is processing your request...") -> None:
@@ -228,7 +247,12 @@ class ConsoleSubAgentDisplay(DisplayProtocol):
         *,
         call_id: str = "",
         detail: str = "",
+        diff: str = "",
+        diff_line_numbers: list[dict[str, int | None]] | None = None,
     ) -> None:
+        del diff_line_numbers
+        if self._tool_group.function_count:
+            self._tool_group.update_for_function("apply_patch")
         self._tool_group.add_item(
             format_patch_tool_item(
                 path,
@@ -237,6 +261,7 @@ class ConsoleSubAgentDisplay(DisplayProtocol):
                 status=status_markup(success=success),
                 call_id=call_id,
                 detail=detail,
+                diff=diff,
             ),
             classes=tool_item_class("apply_patch"),
         )

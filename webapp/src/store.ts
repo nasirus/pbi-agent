@@ -1,11 +1,17 @@
 import { create } from "zustand";
 
 import type {
+  ApplyPatchToolMetadata,
   ImageAttachment,
   LiveSession,
   LiveSessionRuntime,
   LiveSessionSnapshot,
+  ProcessingPhase,
+  ProcessingState,
   TimelineItem,
+  TimelineToolGroupEntry,
+  ToolCallStatus,
+  ToolGroupStatus,
   UsagePayload,
   WebEvent,
 } from "./types";
@@ -24,6 +30,7 @@ export type SessionRuntimeState = {
   connection: ConnectionState;
   inputEnabled: boolean;
   waitMessage: string | null;
+  processing: ProcessingState | null;
   sessionUsage: UsagePayload | null;
   turnUsage: { usage: UsagePayload | null; elapsedSeconds?: number } | null;
   sessionEnded: boolean;
@@ -64,6 +71,7 @@ function createEmptySessionState(sessionId: string | null = null): SessionRuntim
     connection: "disconnected",
     inputEnabled: false,
     waitMessage: null,
+    processing: null,
     sessionUsage: null,
     turnUsage: null,
     sessionEnded: false,
@@ -126,12 +134,125 @@ function readTimelineRole(
   }
 }
 
+function readProcessingPhase(value: unknown): ProcessingPhase | null {
+  switch (value) {
+    case "starting":
+    case "model_wait":
+    case "tool_execution":
+    case "finalizing":
+    case "retry_wait":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readToolCallStatus(value: unknown): ToolCallStatus | undefined {
+  switch (value) {
+    case "running":
+    case "completed":
+    case "failed":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function readToolGroupStatus(value: unknown): ToolGroupStatus | undefined {
+  switch (value) {
+    case "running":
+    case "completed":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
 function isImageAttachment(value: unknown): value is ImageAttachment {
   if (value === null || typeof value !== "object") {
     return false;
   }
   return "upload_id" in value
     && typeof (value as { upload_id: unknown }).upload_id === "string";
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readLineNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function readDiffLineNumbers(
+  value: unknown,
+): Array<{ old: number | null; new: number | null }> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.map((item) => {
+    if (item === null || typeof item !== "object") {
+      return { old: null, new: null };
+    }
+    const record = item as Record<string, unknown>;
+    return {
+      old: readLineNumber(record.old),
+      new: readLineNumber(record.new),
+    };
+  });
+}
+
+function readApplyPatchMetadata(value: unknown): ApplyPatchToolMetadata | undefined {
+  if (value === null || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    tool_name: readOptionalString(record.tool_name),
+    path: readOptionalString(record.path),
+    operation: readOptionalString(record.operation),
+    success: readBoolean(record.success),
+    detail: readOptionalString(record.detail),
+    diff: readOptionalString(record.diff),
+    diff_line_numbers: readDiffLineNumbers(record.diff_line_numbers),
+    call_id: readOptionalString(record.call_id),
+    status: readToolCallStatus(record.status),
+  };
+}
+
+function readProcessingState(value: unknown): ProcessingState | null {
+  if (value === null || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const active = Boolean(record.active);
+  if (!active) return null;
+  return {
+    active,
+    phase: readProcessingPhase(record.phase),
+    message: typeof record.message === "string" ? record.message : null,
+    active_tool_count:
+      typeof record.active_tool_count === "number" ? record.active_tool_count : undefined,
+  };
+}
+
+function readToolGroupItems(value: unknown): TimelineToolGroupEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => {
+    if (item === null || typeof item !== "object") {
+      return { text: String(item ?? "") };
+    }
+    const record = item as Record<string, unknown>;
+    return {
+      text: readString(record.text),
+      classes: readOptionalString(record.classes),
+      metadata: readApplyPatchMetadata(record.metadata),
+    };
+  });
 }
 
 function mapSnapshotItem(raw: Record<string, unknown>): TimelineItem | null {
@@ -168,9 +289,8 @@ function mapSnapshotItem(raw: Record<string, unknown>): TimelineItem | null {
       kind: "tool_group",
       itemId,
       label: readString(raw.label, "Tool calls"),
-      items: Array.isArray(raw.items)
-        ? (raw.items as { text: string; classes?: string }[])
-        : [],
+      status: readToolGroupStatus(raw.status),
+      items: readToolGroupItems(raw.items),
       subAgentId: readOptionalString(raw.sub_agent_id),
     };
   }
@@ -233,6 +353,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             connection: "disconnected",
             inputEnabled: false,
             waitMessage: null,
+            processing: null,
             sessionEnded: false,
             // Set lastEventSeq from the server so the WS snapshot
             // replay skips events already covered by API history.
@@ -269,6 +390,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             runtime: runtimeFromSession(session),
             inputEnabled: false,
             waitMessage: null,
+            processing: null,
             sessionUsage: options.preserveItems ? current.sessionUsage : null,
             turnUsage: options.preserveItems ? current.turnUsage : null,
             sessionEnded: session.status === "ended",
@@ -326,6 +448,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             runtime: runtimeFromSession(session),
             inputEnabled: snapshot.input_enabled,
             waitMessage: snapshot.wait_message,
+            processing: snapshot.processing,
             sessionUsage: snapshot.session_usage,
             turnUsage: snapshot.turn_usage
               ? {
@@ -421,6 +544,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
           patch.itemsVersion = 0;
           patch.subAgents = {};
           patch.waitMessage = null;
+          patch.processing = null;
           patch.turnUsage = null;
           patch.sessionEnded = false;
           patch.fatalError = null;
@@ -435,6 +559,9 @@ export const useSessionStore = create<SessionStore>((set) => ({
           patch.waitMessage = payload.active
             ? readString(payload.message, "Working...")
             : null;
+          break;
+        case "processing_state":
+          patch.processing = readProcessingState(payload);
           break;
         case "usage_updated":
           if (payload.scope === "session") {
@@ -483,9 +610,8 @@ export const useSessionStore = create<SessionStore>((set) => ({
             kind: "tool_group",
             itemId: String(payload.item_id),
             label: readString(payload.label, "Tool calls"),
-            items: Array.isArray(payload.items)
-              ? (payload.items as { text: string; classes?: string }[])
-              : [],
+            status: readToolGroupStatus(payload.status),
+            items: readToolGroupItems(payload.items),
             subAgentId: readOptionalString(payload.sub_agent_id),
           };
           patch.items = upsertItem(current.items, item);
@@ -509,6 +635,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             patch.sessionEnded = true;
             patch.inputEnabled = false;
             patch.waitMessage = null;
+            patch.processing = null;
             patch.fatalError =
               typeof payload.fatal_error === "string" ? payload.fatal_error : null;
           } else {

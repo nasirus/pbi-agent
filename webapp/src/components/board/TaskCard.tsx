@@ -1,15 +1,15 @@
 import { useDraggable } from "@dnd-kit/core";
+import { ExternalLinkIcon, GripVerticalIcon, PencilIcon, PlayIcon, Trash2Icon } from "lucide-react";
 import type { TaskRecord } from "../../types";
+import { Button } from "../ui/button";
+import { Card, CardFooter, CardHeader, CardTitle } from "../ui/card";
 import { StatusPill } from "../shared/StatusPill";
 
 /** Presentational card body — reused in DragOverlay */
 export function TaskCardContent({ task }: { task: TaskRecord }) {
   return (
     <>
-      <div className="task-card__top">
-        <span className="task-card__title">{task.title}</span>
-        <StatusPill status={task.run_status} />
-      </div>
+      <CardTitle className="task-card__title">{task.title}</CardTitle>
       <p className="task-card__prompt">{task.prompt}</p>
       <div className="task-card__meta">
         <span>{task.project_dir}</span>
@@ -43,41 +43,64 @@ export function TaskCard({
   });
 
   return (
-    <article
+    <Card
       ref={setNodeRef}
       className={`task-card${isDragging ? " task-card--dragging" : ""}${isRunning ? " task-card--readonly" : ""}`}
     >
       {/* Drag handle — only this region initiates drag */}
-      <div className="task-card__drag-handle" {...listeners} {...attributes}>
+      <CardHeader className="task-card__drag-handle" {...listeners} {...attributes}>
+        <div className="task-card__chrome-row">
+          <GripVerticalIcon className="task-card__grip" aria-hidden="true" />
+          <StatusPill status={task.run_status} />
+        </div>
         <TaskCardContent task={task} />
-      </div>
+      </CardHeader>
 
-      <div className="task-card__actions">
-        <button type="button" className="btn btn--ghost btn--sm" onClick={onEdit} disabled={isRunning}>
+      <CardFooter className="task-card__actions">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="task-card__action-button"
+          onClick={onEdit}
+          disabled={isRunning}
+        >
+          <PencilIcon data-icon="inline-start" />
           Edit
-        </button>
+        </Button>
         {canRun ? (
-          <button
+          <Button
             type="button"
-            className="btn btn--ghost btn--sm"
+            variant="ghost"
+            size="sm"
+            className="task-card__action-button"
             onClick={onRun}
             disabled={isRunning}
           >
+            <PlayIcon data-icon="inline-start" />
             Start
-          </button>
+          </Button>
         ) : null}
         {task.session_id ? (
-          <a
-            className="btn btn--ghost btn--sm"
-            href={`/sessions/${encodeURIComponent(task.session_id)}`}
-          >
-            Session
-          </a>
+          <Button variant="ghost" size="sm" className="task-card__action-button" asChild>
+            <a href={`/sessions/${encodeURIComponent(task.session_id)}`}>
+              <ExternalLinkIcon data-icon="inline-start" />
+              Session
+            </a>
+          </Button>
         ) : null}
-        <button type="button" className="btn btn--danger btn--sm" onClick={onDelete} disabled={isRunning}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="task-card__action-button"
+          onClick={onDelete}
+          disabled={isRunning}
+        >
+          <Trash2Icon data-icon="inline-start" />
           Delete
-        </button>
-      </div>
-    </article>
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }

@@ -120,6 +120,7 @@ export type LiveSessionSnapshot = {
   runtime: RuntimeSummary | null;
   input_enabled: boolean;
   wait_message: string | null;
+  processing: ProcessingState | null;
   session_usage: UsagePayload | null;
   turn_usage:
     | { usage: UsagePayload | null; elapsed_seconds?: number | null }
@@ -129,6 +130,20 @@ export type LiveSessionSnapshot = {
   items: Record<string, unknown>[];
   sub_agents: Record<string, { title: string; status: string }>;
   last_event_seq: number;
+};
+
+export type ProcessingPhase =
+  | "starting"
+  | "model_wait"
+  | "tool_execution"
+  | "finalizing"
+  | "retry_wait";
+
+export type ProcessingState = {
+  active: boolean;
+  phase: ProcessingPhase | null;
+  message: string | null;
+  active_tool_count?: number;
 };
 
 export type FileMentionItem = {
@@ -369,11 +384,34 @@ export type TimelineThinkingItem = {
   subAgentId?: string;
 };
 
+export type ToolCallStatus = "running" | "completed" | "failed";
+
+export type ToolGroupStatus = "running" | "completed";
+
+export type ApplyPatchToolMetadata = {
+  tool_name?: string;
+  path?: string;
+  operation?: string;
+  success?: boolean;
+  detail?: string;
+  diff?: string;
+  diff_line_numbers?: Array<{ old: number | null; new: number | null }>;
+  call_id?: string;
+  status?: ToolCallStatus;
+};
+
+export type TimelineToolGroupEntry = {
+  text: string;
+  classes?: string;
+  metadata?: ApplyPatchToolMetadata;
+};
+
 export type TimelineToolGroupItem = {
   kind: "tool_group";
   itemId: string;
   label: string;
-  items: { text: string; classes?: string }[];
+  status?: ToolGroupStatus;
+  items: TimelineToolGroupEntry[];
   subAgentId?: string;
 };
 

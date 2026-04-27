@@ -9,9 +9,8 @@ export function ConnectionBadge({
     : "Disconnected";
 
   return (
-    <div className="connection-badge">
+    <div className="connection-badge" aria-label={label}>
       <span className={`indicator-dot indicator-dot--${connection}`} />
-      <span>{label}</span>
     </div>
   );
 }
