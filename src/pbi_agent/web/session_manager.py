@@ -2149,6 +2149,7 @@ class WebSessionManager:
                     workspace_root=self._workspace_root,
                     resume_session_id=record.session_id,
                     persisted_user_message_id=current_user_message_id,
+                    replay_history=False,
                 )
                 current_user_message_id = None
                 if live_session is not None:

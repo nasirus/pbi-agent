@@ -1,6 +1,5 @@
-# TODO
-
-[X] Restore web `/reload` immediate cache refresh behavior
-[X] Update affected web `run_session_loop` test fakes for `on_reload`
-[X] Run focused/full web tests and linters
-[X] Update MEMORY.md
+[X] Inspect current run/session code paths for history replay
+[X] Implement replay_history flag and Kanban suppression
+[X] Add/update regression tests
+[X] Run focused validation
+[X] Update MEMORY.md and handoff
