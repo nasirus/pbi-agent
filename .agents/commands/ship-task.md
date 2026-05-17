@@ -1,6 +1,7 @@
 ---
 name: ship-task
 description: Ship Task Mode
+model_profile_id: worker-mini
 ---
 
 # Ship Task Mode

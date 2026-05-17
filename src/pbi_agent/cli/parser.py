@@ -259,6 +259,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resume a previous session by ID to continue the conversation.",
     )
 
+    init_parser = add_command_parser(
+        "init",
+        "Create a starter AGENTS.md instructions file.",
+    )
+    init_parser.add_argument(
+        "--force",
+        "--overwrite",
+        dest="force",
+        action="store_true",
+        help="Overwrite AGENTS.md if it already exists.",
+    )
+
     web_parser = add_command_parser("web", "Serve the browser interface.")
     web_parser.add_argument(
         "--host",

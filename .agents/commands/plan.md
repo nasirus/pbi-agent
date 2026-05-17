@@ -1,6 +1,7 @@
 ---
 name: plan
 description: Plan Mode (Non-Interactive)
+model_profile_id: planner
 ---
 
 # Plan Mode (Non-Interactive)

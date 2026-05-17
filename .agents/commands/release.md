@@ -1,6 +1,7 @@
 ---
 name: release
 description: Release Workflow Mode
+model_profile_id: worker-mini
 ---
 
 # Release Workflow Mode

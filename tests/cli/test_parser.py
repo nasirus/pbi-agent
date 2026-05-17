@@ -112,6 +112,17 @@ class DefaultWebCommandTests(unittest.TestCase):
         self.assertNotIn("[GLOBAL OPTIONS] [<command>] [COMMAND OPTIONS] web", web_help)
         self.assertIn("Serve the browser interface.", web_help)
 
+    def test_parser_accepts_init_force_aliases(self) -> None:
+        parser = cli.build_parser()
+
+        args = parser.parse_args(["init", "--force"])
+        overwrite_args = parser.parse_args(["init", "--overwrite"])
+
+        self.assertEqual(args.command, "init")
+        self.assertTrue(args.force)
+        self.assertEqual(overwrite_args.command, "init")
+        self.assertTrue(overwrite_args.force)
+
     def test_root_help_omits_removed_console_and_open_commands(self) -> None:
         help_text = cli.build_parser().format_help()
 

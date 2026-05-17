@@ -1,6 +1,7 @@
 ---
 name: fix-review
 description: Fix Review Findings
+model_profile_id: worker
 ---
 
 # Fix Review Findings

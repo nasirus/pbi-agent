@@ -1,6 +1,7 @@
 ---
 name: plan-interactive
 description: Plan Mode (Interactive)
+model_profile_id: planner
 ---
 
 # Plan Mode (Interactive)

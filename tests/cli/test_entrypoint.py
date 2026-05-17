@@ -143,6 +143,77 @@ class DefaultWebCommandTests(unittest.TestCase):
         mock_resolve_runtime.assert_not_called()
         mock_resolve_web_runtime.assert_not_called()
 
+    def test_main_init_creates_agents_file_without_settings(self) -> None:
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            root_dir = Path(tmpdir).resolve()
+            try:
+                os.chdir(root_dir)
+                with (
+                    patch("sys.stdout", stdout),
+                    patch(
+                        "pbi_agent.cli.entrypoint.resolve_runtime"
+                    ) as mock_resolve_runtime,
+                    patch(
+                        "pbi_agent.cli.entrypoint.resolve_web_runtime"
+                    ) as mock_resolve_web_runtime,
+                ):
+                    rc = cli.main(["init"])
+            finally:
+                os.chdir(original_cwd)
+
+            agents_path = root_dir / "AGENTS.md"
+            content = agents_path.read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 0)
+        self.assertIn("Created", stdout.getvalue())
+        self.assertTrue(content.startswith("# AGENTS.md"))
+        mock_resolve_runtime.assert_not_called()
+        mock_resolve_web_runtime.assert_not_called()
+
+    def test_main_init_protects_existing_agents_file_by_default(self) -> None:
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            root_dir = Path(tmpdir).resolve()
+            agents_path = root_dir / "AGENTS.md"
+            agents_path.write_text("existing", encoding="utf-8")
+            try:
+                os.chdir(root_dir)
+                with patch("sys.stdout", stdout):
+                    rc = cli.main(["init"])
+            finally:
+                os.chdir(original_cwd)
+            content = agents_path.read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(content, "existing")
+        self.assertIn("already exists", stdout.getvalue())
+        self.assertIn("--force", stdout.getvalue())
+
+    def test_main_init_force_overwrites_existing_agents_file(self) -> None:
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            root_dir = Path(tmpdir).resolve()
+            agents_path = root_dir / "AGENTS.md"
+            agents_path.write_text("existing", encoding="utf-8")
+            try:
+                os.chdir(root_dir)
+                with patch("sys.stdout", stdout):
+                    rc = cli.main(["init", "--force"])
+            finally:
+                os.chdir(original_cwd)
+            content = agents_path.read_text(encoding="utf-8")
+
+        self.assertEqual(rc, 0)
+        self.assertIn("Overwrote", stdout.getvalue())
+        self.assertTrue(content.startswith("# AGENTS.md"))
+
     def test_service_tier_with_non_openai_provider_errors(self) -> None:
         stderr = io.StringIO()
 

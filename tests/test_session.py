@@ -17,6 +17,7 @@ from pbi_agent.agent.session import (
     MCP_COMMAND,
     COMPACT_COMMAND,
     COMPACTION_MARKER,
+    INIT_COMMAND,
     _open_compaction_provider,
     NEW_SESSION_SENTINEL,
     RELOAD_COMMAND,
@@ -1355,6 +1356,78 @@ def test_run_session_loop_handles_agents_command_locally(monkeypatch) -> None:
     assert exit_code == 0
     assert provider.request_messages == []
     assert display.markdown_calls == ["### Sub-Agents\n\n- `reviewer`: Reviews code"]
+    assert display.assistant_start_calls == 0
+
+
+def test_run_session_loop_handles_init_command_locally(monkeypatch, tmp_path) -> None:
+    provider = _ChatProviderStub()
+    display = _SessionDisplaySpy([INIT_COMMAND, "quit"])
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+
+    exit_code = run_session_loop(settings, display)
+
+    content = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert provider.request_messages == []
+    assert display.markdown_calls == [f"Created {tmp_path / 'AGENTS.md'}"]
+    assert content.startswith("# AGENTS.md")
+    assert display.assistant_start_calls == 0
+
+
+def test_run_session_loop_init_command_protects_existing_file(
+    monkeypatch, tmp_path
+) -> None:
+    provider = _ChatProviderStub()
+    display = _SessionDisplaySpy([INIT_COMMAND, "quit"])
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+    agents_path = tmp_path / "AGENTS.md"
+    agents_path.write_text("existing", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+
+    exit_code = run_session_loop(settings, display)
+
+    assert exit_code == 0
+    assert agents_path.read_text(encoding="utf-8") == "existing"
+    assert provider.request_messages == []
+    assert display.markdown_calls == [
+        f"Skipped {agents_path}; AGENTS.md already exists. Use --force to overwrite."
+    ]
+    assert display.assistant_start_calls == 0
+
+
+def test_run_session_loop_init_command_force_overwrites_existing_file(
+    monkeypatch, tmp_path
+) -> None:
+    provider = _ChatProviderStub()
+    display = _SessionDisplaySpy([f"{INIT_COMMAND} --force", "quit"])
+    settings = Settings(api_key="test-key", provider="openai", max_tool_workers=2)
+    agents_path = tmp_path / "AGENTS.md"
+    agents_path.write_text("existing", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "pbi_agent.agent.session._open_runtime_provider",
+        _stub_runtime_provider(provider),
+    )
+
+    exit_code = run_session_loop(settings, display)
+
+    content = agents_path.read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert provider.request_messages == []
+    assert display.markdown_calls == [f"Overwrote {agents_path}"]
+    assert content.startswith("# AGENTS.md")
     assert display.assistant_start_calls == 0
 
 

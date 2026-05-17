@@ -1,7 +1,7 @@
 ---
 name: commit
 description: Commit Mode
-model_profile_id: gpt-5.4-mini-gpt
+model_profile_id: worker-mini
 ---
 
 # Commit Mode

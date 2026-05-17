@@ -10,6 +10,7 @@ from pbi_agent.agent.session import (
     COMPACT_COMMAND,
     TEMPORARY_LOCAL_COMMANDS,
     _normalize_user_command,
+    _parse_init_command_force,
 )
 from pbi_agent.config import ConfigError, find_command_config_by_alias
 from pbi_agent.display.protocol import QueuedInput, UserQuestionAnswer
@@ -316,8 +317,10 @@ class LiveSessionsMixin:
             )
         optimistic_item_id = f"user-{uuid.uuid4().hex}"
         if message_text or message_image_attachments:
+            normalized_message = _normalize_user_command(message_text)
             is_temporary_command = (
-                _normalize_user_command(message_text) in TEMPORARY_LOCAL_COMMANDS
+                normalized_message in TEMPORARY_LOCAL_COMMANDS
+                or _parse_init_command_force(message_text) is not None
             )
             self._publish_live_event(
                 live_session_id,
