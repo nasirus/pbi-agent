@@ -1710,6 +1710,11 @@ def test_slash_command_search_endpoint_returns_web_commands(
             "kind": "local_command",
         },
         {
+            "name": "/init",
+            "description": "Create a starter AGENTS.md instructions file",
+            "kind": "local_command",
+        },
+        {
             "name": "/reload",
             "description": "Reload workspace instructions and file caches",
             "kind": "local_command",
@@ -1749,6 +1754,11 @@ def test_slash_command_search_endpoint_includes_command_file_commands(
         {
             "name": "/agents",
             "description": "Show discovered project sub-agents",
+            "kind": "local_command",
+        },
+        {
+            "name": "/init",
+            "description": "Create a starter AGENTS.md instructions file",
             "kind": "local_command",
         },
         {

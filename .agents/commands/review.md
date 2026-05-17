@@ -1,6 +1,7 @@
 ---
 name: review
 description: Review Mode
+model_profile_id: reviewer
 ---
 
 # Review Mode

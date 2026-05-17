@@ -1,6 +1,7 @@
 ---
 name: refine-task
 description: Refine Task Prompt Mode
+model_profile_id: worker
 ---
 
 # Refine Task Prompt Mode

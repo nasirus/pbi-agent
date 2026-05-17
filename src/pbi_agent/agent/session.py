@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import json
 import logging
+import shlex
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -24,6 +25,7 @@ from pbi_agent.config import (
     find_command_config_by_alias,
     resolve_runtime_for_profile_id,
 )
+from pbi_agent.init_agents import format_init_agents_result, init_agents_file
 from pbi_agent.media import load_workspace_image
 from pbi_agent.mcp import format_project_mcp_servers_markdown
 from pbi_agent.models.messages import (
@@ -58,10 +60,11 @@ SUB_AGENT_DISABLED_TOOLS = {"sub_agent"} | INTERACTIVE_ONLY_TOOLS
 SKILLS_COMMAND = "/skills"
 MCP_COMMAND = "/mcp"
 AGENTS_COMMAND = "/agents"
+INIT_COMMAND = "/init"
 COMPACT_COMMAND = "/compact"
 RELOAD_COMMAND = "/reload"
 TEMPORARY_LOCAL_COMMANDS = frozenset(
-    {SKILLS_COMMAND, MCP_COMMAND, AGENTS_COMMAND, RELOAD_COMMAND}
+    {SKILLS_COMMAND, MCP_COMMAND, AGENTS_COMMAND, INIT_COMMAND, RELOAD_COMMAND}
 )
 COMPACTION_MARKER = "[compacted context]"
 COMPACTION_SUMMARY_PREFIX = (
@@ -482,6 +485,13 @@ def run_session_loop(
                 if normalized_command == AGENTS_COMMAND:
                     _render_temporary_command_markdown(
                         format_project_sub_agents_markdown()
+                    )
+                    continue
+                init_force = _parse_init_command_force(user_input)
+                if init_force is not None:
+                    result = init_agents_file(force=init_force)
+                    _render_temporary_command_markdown(
+                        format_init_agents_result(result)
                     )
                     continue
                 if normalized_command == RELOAD_COMMAND:
@@ -2153,6 +2163,19 @@ def _build_user_turn_input(
 
 def _normalize_user_command(value: str) -> str:
     return " ".join(value.strip().lower().split())
+
+
+def _parse_init_command_force(value: str) -> bool | None:
+    try:
+        parts = shlex.split(value)
+    except ValueError:
+        return None
+    if not parts or parts[0].lower() != INIT_COMMAND:
+        return None
+    flags = {part.lower() for part in parts[1:]}
+    if flags <= {"--force", "--overwrite"}:
+        return bool(flags)
+    return None
 
 
 def _reload_provider_initialization(provider: Provider) -> None:

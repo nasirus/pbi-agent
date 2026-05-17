@@ -1,6 +1,7 @@
 ---
 name: orchestrate
 description: Decompose work into sub-agent tasks with main-agent review and validation gates.
+model_profile_id: worker
 ---
 
 # Orchestrate Mode

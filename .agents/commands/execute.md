@@ -1,6 +1,7 @@
 ---
 name: execute
 description: Execute Mode
+model_profile_id: worker
 ---
 
 # Execute Mode
