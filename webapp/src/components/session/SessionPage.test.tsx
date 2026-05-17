@@ -2095,6 +2095,113 @@ describe("SessionPage", () => {
     ]);
   });
 
+  it("keeps pre-history active snapshot work before saved messages", async () => {
+    vi.mocked(fetchSessionDetail).mockResolvedValue({
+      session: makeSessionRecord({ status: "running", active_run_id: "live-1" }),
+      history_items: [
+        {
+          item_id: "history-user",
+          message_id: "msg-user",
+          part_ids: { content: "msg-user:content", file_paths: [], image_attachments: [] },
+          role: "user",
+          content: "/refine-task",
+          file_paths: [],
+          image_attachments: [],
+          markdown: false,
+          historical: true,
+          created_at: "2026-05-17T09:20:34Z",
+        },
+        {
+          item_id: "history-assistant",
+          message_id: "msg-assistant",
+          part_ids: { content: "msg-assistant:content", file_paths: [], image_attachments: [] },
+          role: "assistant",
+          content: "Refined task",
+          file_paths: [],
+          image_attachments: [],
+          markdown: true,
+          historical: true,
+          created_at: "2026-05-17T09:22:45Z",
+        },
+      ],
+      active_live_session: makeLiveSession({
+        live_session_id: "live-1",
+        session_id: "session-1",
+        status: "running",
+      }),
+      active_run: null,
+      timeline: {
+        live_session_id: "live-1",
+        session_id: "session-1",
+        runtime: null,
+        input_enabled: true,
+        wait_message: null,
+        processing: null,
+        session_usage: null,
+        turn_usage: null,
+        session_ended: false,
+        fatal_error: null,
+        pending_user_questions: null,
+        items: [
+          {
+            kind: "thinking",
+            itemId: "thinking-before-user",
+            title: "Thinking",
+            content: "preparing",
+            created_at: "2026-05-17T09:20:29Z",
+          },
+          {
+            kind: "message",
+            itemId: "pre-user-assistant",
+            role: "assistant",
+            content: "I’ll inspect first.",
+            markdown: true,
+            created_at: "2026-05-17T09:20:30Z",
+          },
+          {
+            kind: "message",
+            itemId: "snapshot-user",
+            messageId: "msg-user",
+            role: "user",
+            content: "/refine-task",
+            markdown: false,
+            created_at: "2026-05-17T09:20:34Z",
+          },
+          {
+            kind: "thinking",
+            itemId: "thinking-refine",
+            title: "Thinking",
+            content: "refining",
+            created_at: "2026-05-17T09:20:38Z",
+          },
+          {
+            kind: "message",
+            itemId: "snapshot-assistant",
+            messageId: "msg-assistant",
+            role: "assistant",
+            content: "Refined task",
+            markdown: true,
+            created_at: "2026-05-17T09:22:45Z",
+          },
+        ],
+        sub_agents: {},
+        last_event_seq: 20,
+      },
+    } satisfies SessionDetailPayload);
+
+    renderSessionRoute("/sessions/session-1");
+
+    expect(await screen.findByText("Timeline 5")).toBeInTheDocument();
+    const state = useSessionStore.getState().sessionsByKey[getSavedSessionKey("session-1")];
+    expect(state?.items.map((item) => item.itemId)).toEqual([
+      "history-user",
+      "thinking-before-user",
+      "pre-user-assistant",
+      "thinking-refine",
+      "history-assistant",
+    ]);
+  });
+
   it("keeps duplicate historical work traces anchored before later saved messages", async () => {
     vi.mocked(fetchSessionDetail).mockResolvedValue({
       session: makeSessionRecord({ status: "ended", active_run_id: null }),
