@@ -1,5 +1,4 @@
-[X] Inspect WebSocket provider code/tests
-[X] Implement split timeouts + wall-clock deadline
-[X] Add start/retry observability and retry backoff
-[X] Update/add tests
-[X] Run focused validation
+[X] Verify PR approval/check status
+[X] Merge approved release PR
+[X] Verify release workflow/published release
+[X] Update memory and summarize
