@@ -1,4 +1,4 @@
-[X] Fix all-runs reasoning_effort serialization
-[X] Add/adjust focused regression coverage
+[X] Add deterministic sandbox container name
+[X] Update sandbox tests for name normalization
 [X] Run focused validation
-[X] Update task memory
+[X] Update memory and handoff
