@@ -1,7 +1,7 @@
 # MEMORY.md
 
 ## Metadata
-- Last compacted: 2026-05-15
+- Last compacted: 2026-05-17
 - Scope: durable repo memory + active-day task events.
 - Format: only `Metadata`, `Long-Term Memory`, and `Detailed Task Events`.
 
@@ -57,12 +57,6 @@
 - Working summaries: final per-turn summaries can show cost; intermediate Working headers/sub-agent cards omit cost; active durations tick timestamp-to-now and stale turn usage clears on new user turns.
 
 ## Detailed Task Events
-## 2026-05-15
-- Added `.agents/commands/refine-task.md` as `/refine-task` to refine draft task prompts through non-mutating context gathering and `ask_user` clarification without proposing solutions; validated discovery/parsing with a focused `uv run python3` snippet.
-- Rewrote `.agents/commands/refine-task.md` to match existing command style: authoritative mode instructions, explicit non-mutating grounding, strict no-solution constraints, and `ask_user` clarification loop; validated with `uv run pbi-agent commands list`.
-- Fixed per-turn summary cost persistence by attaching turn usage to the assistant message that closes each turn in live store state and persisted web-event timeline rebuilds; deduped saved history now preserves that turn usage. Validation passed with focused SessionTimeline/SessionPage/store Vitest, full web Vitest, focused web pytest, Bun typecheck/lint/web build, Ruff check/format check, basedpyright, and git diff check.
-- Mirrored frontend turn-usage reset in backend live snapshots for user `message_added`/`message_rekeyed` events so refresh/reconnect cannot hydrate stale turn timing/cost; validated with focused `test_web_serve` pytest, Ruff checks, basedpyright, and git diff check.
-- Fixed review finding by adding message `turnUsage` to timeline projection signatures so memoized timelines rerender when historical per-turn costs hydrate; validated focused projection Vitest, Bun typecheck/lint/web build, and git diff check.
-- Compressed `.agents/commands/refine-task.md` prose while preserving frontmatter, headings, inline code, and fenced final-output template; skipped automated validation because prose-only compression skill forbids external CLIs.
-- Added Run Detail reasoning-effort display: run-session API now exposes `reasoning_effort` from run metadata/snapshots, traced runs persist current effort metadata, modal renders `main · provider/model · effort`, API types/static app rebuilt; validation passed with focused pytest/API type tests, Ruff, basedpyright, frontend lint/typecheck, focused Vitest, full `bun run test:web`, and `bun run web:build` (existing act/chunk warnings only).
-- Fixed review finding for all-runs API: `/api/runs` now derives `reasoning_effort` while serializing raw run rows; focused all-runs pytest, Ruff check/format check, and basedpyright passed.
+## 2026-05-17
+- Fixed saved-session active snapshot ordering when an active timeline has no-id assistant/work items timestamped before the first persisted history item: the merge now anchors the first saved history message before those live items so final assistant messages stay after Working blocks; added SessionPage regression coverage. Validation: `bun run typecheck`, `bun run lint`, `bun run web:build` passed; focused `bun run test:web -- SessionPage.test.tsx` currently fails before assertions because `fetchBootstrap` is not mocked as a vi.fn.
+- Fixed review finding in saved-session active snapshot ordering: when a pre-history non-message work item is pending and the next unmatched live message is before the first saved history item, merge now flushes pending work immediately after the anchored first history item and before the live message; extended SessionPage regression to cover non-message pre-history work. Validation: `bun run typecheck`, `bun run lint`, `bun run web:build` passed; focused `bun run test:web -- SessionPage.test.tsx` still fails before assertions because `fetchBootstrap` is not mocked as a vi.fn.

@@ -1116,10 +1116,37 @@ function timelineForDisplay(
     compactionMarkerIndex >= 0 && compactionMarkerIndex < index
   );
   const createdAtTime = (item: Record<string, unknown>): number | null => {
-    const createdAt = item.created_at;
+    const createdAt = typeof item.created_at === "string" ? item.created_at : item.createdAt;
     if (typeof createdAt !== "string") return null;
     const time = Date.parse(createdAt);
     return Number.isNaN(time) ? null : time;
+  };
+  const firstUnconsumedHistoryIndex = (): number => {
+    for (let index = 0; index < historyItems.length; index += 1) {
+      if (consumedHistoryIndexes.has(index)) continue;
+      return index;
+    }
+    return -1;
+  };
+  const firstUnconsumedHistoryTime = (): number | null => {
+    const index = firstUnconsumedHistoryIndex();
+    if (index < 0) {
+      return null;
+    }
+    return createdAtTime(historyItems[index]);
+  };
+  const appendFirstUnconsumedHistory = (): boolean => {
+    const index = firstUnconsumedHistoryIndex();
+    if (index < 0) {
+      return false;
+    }
+    appendHistoryRange(index, true);
+    return true;
+  };
+  const isBeforeFirstUnconsumedHistory = (item: Record<string, unknown>): boolean => {
+    const itemTime = createdAtTime(item);
+    const historyTime = firstUnconsumedHistoryTime();
+    return itemTime !== null && historyTime !== null && itemTime < historyTime;
   };
   const hasWorkBeforeNextMessage = (itemIndex: number): boolean => {
     for (let index = itemIndex + 1; index < timeline.items.length; index += 1) {
@@ -1292,6 +1319,14 @@ function timelineForDisplay(
       continue;
     }
     if (activeTimeline && consumedHistoryIndexes.size === 0) {
+      if (isBeforeFirstUnconsumedHistory(item)) {
+        appendFirstUnconsumedHistory();
+        mergedItems.push(...pendingUnanchoredItems);
+        pendingUnanchoredItems.length = 0;
+        pendingHistoryBoundaryIndex = null;
+        mergedItems.push(item);
+        continue;
+      }
       appendRemainingHistory();
       mergedItems.push(...pendingUnanchoredItems);
       pendingUnanchoredItems.length = 0;

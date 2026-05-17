@@ -1,4 +1,4 @@
-[X] Fix all-runs reasoning_effort serialization
-[X] Add/adjust focused regression coverage
-[X] Run focused validation
-[X] Update task memory
+[X] Fix pending pre-history work ordering review finding
+[X] Add regression coverage for non-message pre-history work
+[X] Run focused frontend validation
+[X] Update memory
