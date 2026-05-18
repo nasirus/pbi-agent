@@ -70,7 +70,7 @@ DEFAULT_INTERNAL_CONFIG_PATH = Path.home() / ".pbi-agent" / "config.json"
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 SLASH_ALIAS_RE = re.compile(r"^/[a-z0-9][a-z0-9-]*$")
 RESERVED_COMMAND_ALIASES = frozenset(
-    {"/skills", "/mcp", "/agents", "/init", "/reload", "/compact"}
+    {"/skills", "/mcp", "/agents", "/init", "/reload", "/compact", "/extensions"}
 )
 PROJECT_COMMANDS_DIR = Path(".agents") / "commands"
 

@@ -273,7 +273,7 @@ export type SkillMentionSearchResponse = { items: SkillMentionItemModel[] };
 
 export type SkillViewModel = { id: string; name: string; description: string; instructions: string; path: string };
 
-export type SlashCommandItemModel = { name: string; description: string; kind: "local_command" | "command" };
+export type SlashCommandItemModel = { name: string; description: string; kind: "local_command" | "command" | "extension" };
 
 export type SlashCommandSearchResponse = { items: SlashCommandItemModel[] };
 

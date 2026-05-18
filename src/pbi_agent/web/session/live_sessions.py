@@ -14,6 +14,7 @@ from pbi_agent.agent.session import (
 )
 from pbi_agent.config import ConfigError, find_command_config_by_alias
 from pbi_agent.display.protocol import QueuedInput, UserQuestionAnswer
+from pbi_agent.extensions import find_extension_for_slash
 from pbi_agent.media import load_workspace_image
 from pbi_agent.models.messages import ImageAttachment
 from pbi_agent.session_store import (
@@ -23,6 +24,7 @@ from pbi_agent.session_store import (
     SessionStore,
 )
 from pbi_agent.tools import shell as shell_tool
+from pbi_agent.tools.catalog import ToolCatalog
 from pbi_agent.tools.types import ToolContext
 from pbi_agent.web.display import WebDisplay, persisted_message_payload
 from pbi_agent.web.session.serializers import (
@@ -318,9 +320,33 @@ class LiveSessionsMixin:
         optimistic_item_id = f"user-{uuid.uuid4().hex}"
         if message_text or message_image_attachments:
             normalized_message = _normalize_user_command(message_text)
+            message_head = ""
+            is_project_command = False
+            if normalized_message:
+                message_head = normalized_message.split(maxsplit=1)[0]
+                try:
+                    is_project_command = (
+                        find_command_config_by_alias(
+                            message_head,
+                            workspace=self._workspace_root,
+                        )
+                        is not None
+                    )
+                except ConfigError:
+                    is_project_command = False
             is_temporary_command = (
                 normalized_message in TEMPORARY_LOCAL_COMMANDS
                 or _parse_init_command_force(message_text) is not None
+                or (
+                    message_head
+                    and not is_project_command
+                    and find_extension_for_slash(
+                        message_head,
+                        self._workspace_root,
+                        reserved_names=_reserved_extension_names(),
+                    )
+                    is not None
+                )
             )
             self._publish_live_event(
                 live_session_id,
@@ -414,7 +440,18 @@ class LiveSessionsMixin:
             command = find_command_config_by_alias(head, workspace=self._workspace_root)
         except ConfigError:
             return None
-        if command is None or command.model_profile_id is None:
+        if command is None:
+            if (
+                find_extension_for_slash(
+                    head,
+                    self._workspace_root,
+                    reserved_names=_reserved_extension_names(),
+                )
+                is not None
+            ):
+                return None
+            return None
+        if command.model_profile_id is None:
             return None
         return command.model_profile_id
 
@@ -943,3 +980,9 @@ class LiveSessionsMixin:
             event_type,
             {"live_session": self._serialize_live_session(live_session)},
         )
+
+
+def _reserved_extension_names() -> set[str]:
+    return {command.lstrip("/") for command in _LOCAL_COMMANDS} | set(
+        ToolCatalog.from_builtin_registry().names()
+    )

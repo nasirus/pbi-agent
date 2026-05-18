@@ -243,13 +243,14 @@ def _execute_one_tool_call(
         display_metadata = dict(tool_context.display_metadata)
         is_codex_apply_patch = _is_codex_apply_patch_call(call, spec)
         if isinstance(output, ToolOutput):
-            payload = {"ok": True, "result": output.result}
+            is_error = output.is_error
+            payload = {"ok": not is_error, "result": output.result}
             attachments = list(output.attachments)
             display_metadata.update(output.display_metadata)
         else:
             payload = {"ok": True, "result": output}
+            is_error = False
         output_json = json.dumps(payload)
-        is_error = False
         output_payload: Any = payload
         if is_codex_apply_patch:
             result_payload = payload["result"]

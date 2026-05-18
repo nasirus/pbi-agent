@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import Mock
 
 from pbi_agent.agent import tool_runtime
@@ -15,7 +16,8 @@ from pbi_agent.tools import apply_patch as apply_patch_tool
 from pbi_agent.tools import read_file as read_file_tool
 from pbi_agent.tools import shell as shell_tool
 from pbi_agent.tools.output import MAX_OUTPUT_CHARS
-from pbi_agent.tools.types import ToolContext, ToolResult
+from pbi_agent.tools.catalog import ToolCatalog, ToolCatalogEntry
+from pbi_agent.tools.types import ToolContext, ToolOutput, ToolResult, ToolSpec
 
 
 def _tool_call(call_id: str, name: str = "shell") -> ToolCall:
@@ -39,6 +41,37 @@ def test_execute_tool_calls_reports_unknown_tool_error(monkeypatch) -> None:
             "message": "Tool 'missing_tool' is not registered.",
         },
         "tool": "missing_tool",
+    }
+
+
+def test_execute_tool_calls_preserves_tool_output_error_state() -> None:
+    catalog = ToolCatalog(
+        {
+            "custom": ToolCatalogEntry(
+                spec=ToolSpec(
+                    name="custom",
+                    description="Custom tool",
+                    parameters_schema={"type": "object"},
+                ),
+                handler=lambda arguments, context: ToolOutput(
+                    result={"message": "failed"},
+                    is_error=True,
+                ),
+            )
+        }
+    )
+
+    batch = tool_runtime.execute_tool_calls(
+        [ToolCall(call_id="call_1", name="custom", arguments={})],
+        max_workers=1,
+        context=ToolContext(tool_catalog=catalog),
+    )
+
+    assert batch.had_errors is True
+    assert batch.results[0].is_error is True
+    assert json.loads(batch.results[0].output_json) == {
+        "ok": False,
+        "result": {"message": "failed"},
     }
 
 
@@ -336,7 +369,7 @@ def test_shell_tool_uses_configured_bootstrap_and_executable(
         seen["args"] = args
         seen["kwargs"] = kwargs
         return subprocess.CompletedProcess(
-            args=args[0],
+            args=cast(Any, args[0]),
             returncode=0,
             stdout=b"ok\n",
             stderr=b"",

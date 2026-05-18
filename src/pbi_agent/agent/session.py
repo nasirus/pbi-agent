@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import json
 import logging
 import shlex
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -23,7 +25,14 @@ from pbi_agent.config import (
     ResolvedRuntime,
     Settings,
     find_command_config_by_alias,
+    list_command_configs,
     resolve_runtime_for_profile_id,
+)
+from pbi_agent.extensions import (
+    find_extension_for_slash,
+    format_extensions_markdown,
+    run_extension,
+    tool_catalog_with_extensions,
 )
 from pbi_agent.init_agents import format_init_agents_result, init_agents_file
 from pbi_agent.media import load_workspace_image
@@ -50,6 +59,12 @@ from pbi_agent.display.protocol import (
 from pbi_agent.workspace_context import current_workspace_context
 
 _log = logging.getLogger(__name__)
+_ACTIVE_MCP_TOOL_NAMES: ContextVar[frozenset[str]] = ContextVar(
+    "active_mcp_tool_names",
+    default=frozenset(),
+)
+_ACTIVE_MCP_TOOL_NAMES_BY_WORKSPACE: dict[Path, tuple[frozenset[str], ...]] = {}
+_ACTIVE_MCP_TOOL_NAMES_LOCK = threading.Lock()
 
 NEW_SESSION_SENTINEL = "__new_session__"
 RESUME_SESSION_PREFIX = "__resume_session__:"
@@ -63,8 +78,16 @@ AGENTS_COMMAND = "/agents"
 INIT_COMMAND = "/init"
 COMPACT_COMMAND = "/compact"
 RELOAD_COMMAND = "/reload"
+EXTENSIONS_COMMAND = "/extensions"
 TEMPORARY_LOCAL_COMMANDS = frozenset(
-    {SKILLS_COMMAND, MCP_COMMAND, AGENTS_COMMAND, INIT_COMMAND, RELOAD_COMMAND}
+    {
+        SKILLS_COMMAND,
+        MCP_COMMAND,
+        AGENTS_COMMAND,
+        INIT_COMMAND,
+        RELOAD_COMMAND,
+        EXTENSIONS_COMMAND,
+    }
 )
 COMPACTION_MARKER = "[compacted context]"
 COMPACTION_SUMMARY_PREFIX = (
@@ -487,6 +510,13 @@ def run_session_loop(
                         format_project_sub_agents_markdown()
                     )
                     continue
+                if normalized_command == EXTENSIONS_COMMAND:
+                    _render_temporary_command_markdown(
+                        format_extensions_markdown(
+                            reserved_names=_reserved_slash_extension_names()
+                        )
+                    )
+                    continue
                 init_force = _parse_init_command_force(user_input)
                 if init_force is not None:
                     result = init_agents_file(force=init_force)
@@ -503,6 +533,22 @@ def run_session_loop(
                         "sub-agents, tool definitions, and file mention cache. "
                         "MCP servers are not reloaded; restart the session after "
                         "changing MCP config."
+                    )
+                    continue
+                extension = None
+                if normalized_command:
+                    extension = find_extension_for_slash(
+                        normalized_command.split(maxsplit=1)[0],
+                        reserved_names=_reserved_slash_extension_names(),
+                    )
+                if extension is not None:
+                    parts = user_input.split(maxsplit=1)
+                    result = run_extension(
+                        extension,
+                        {"text": parts[1] if len(parts) > 1 else ""},
+                    )
+                    _render_temporary_command_markdown(
+                        _format_extension_run_markdown(extension.name, result)
                     )
                     continue
                 if normalized_command == COMPACT_COMMAND:
@@ -967,15 +1013,44 @@ def _open_runtime_provider(
         with provider:
             yield provider
     else:
-        with McpServerPool(Path.cwd()) as mcp_pool:
-            provider = create_provider(
-                settings,
-                system_prompt=system_prompt,
-                excluded_tools=excluded_tools,
-                tool_catalog=mcp_pool.to_tool_catalog(),
+        workspace = Path.cwd()
+        with McpServerPool(workspace) as mcp_pool:
+            mcp_tool_catalog = mcp_pool.to_tool_catalog()
+            mcp_tool_names = frozenset(mcp_tool_catalog.names())
+            mcp_tool_names_token = _ACTIVE_MCP_TOOL_NAMES.set(mcp_tool_names)
+            workspace_key = _mcp_workspace_key(workspace)
+            with _ACTIVE_MCP_TOOL_NAMES_LOCK:
+                _ACTIVE_MCP_TOOL_NAMES_BY_WORKSPACE[workspace_key] = (
+                    *_ACTIVE_MCP_TOOL_NAMES_BY_WORKSPACE.get(workspace_key, ()),
+                    mcp_tool_names,
+                )
+            tool_catalog, _extension_diagnostics = tool_catalog_with_extensions(
+                mcp_tool_catalog,
+                workspace,
+                reserved_names=_reserved_slash_extension_names,
             )
-            with provider:
-                yield provider
+            try:
+                provider = create_provider(
+                    settings,
+                    system_prompt=system_prompt,
+                    excluded_tools=excluded_tools,
+                    tool_catalog=tool_catalog,
+                )
+                with provider:
+                    yield provider
+            finally:
+                with _ACTIVE_MCP_TOOL_NAMES_LOCK:
+                    remaining_workspace_mcp_names = _remove_active_mcp_tool_names(
+                        _ACTIVE_MCP_TOOL_NAMES_BY_WORKSPACE.get(workspace_key, ()),
+                        mcp_tool_names,
+                    )
+                    if remaining_workspace_mcp_names:
+                        _ACTIVE_MCP_TOOL_NAMES_BY_WORKSPACE[workspace_key] = (
+                            remaining_workspace_mcp_names
+                        )
+                    else:
+                        _ACTIVE_MCP_TOOL_NAMES_BY_WORKSPACE.pop(workspace_key, None)
+                _ACTIVE_MCP_TOOL_NAMES.reset(mcp_tool_names_token)
 
 
 @contextmanager
@@ -2178,9 +2253,68 @@ def _parse_init_command_force(value: str) -> bool | None:
     return None
 
 
+def active_mcp_tool_names(workspace: Path | None = None) -> set[str]:
+    if workspace is None:
+        return set(_ACTIVE_MCP_TOOL_NAMES.get())
+    with _ACTIVE_MCP_TOOL_NAMES_LOCK:
+        active: set[str] = set()
+        for names in _ACTIVE_MCP_TOOL_NAMES_BY_WORKSPACE.get(
+            _mcp_workspace_key(workspace), ()
+        ):
+            active.update(names)
+        return active
+
+
+def _mcp_workspace_key(workspace: Path) -> Path:
+    return workspace.expanduser().resolve()
+
+
+def _remove_active_mcp_tool_names(
+    entries: tuple[frozenset[str], ...],
+    target: frozenset[str],
+) -> tuple[frozenset[str], ...]:
+    remaining = list(entries)
+    for index in range(len(remaining) - 1, -1, -1):
+        if remaining[index] == target:
+            del remaining[index]
+            break
+    return tuple(remaining)
+
+
+def _reserved_slash_extension_names() -> set[str]:
+    reserved = {
+        command.lstrip("/") for command in TEMPORARY_LOCAL_COMMANDS | {COMPACT_COMMAND}
+    }
+    reserved.update(ToolCatalog.from_builtin_registry().names())
+    reserved.update(_ACTIVE_MCP_TOOL_NAMES.get())
+    for command in list_command_configs(Path.cwd()):
+        reserved.add(command.slash_alias.lstrip("/"))
+    return reserved
+
+
 def _reload_provider_initialization(provider: Provider) -> None:
     provider.set_system_prompt(get_system_prompt())
     provider.refresh_tools()
+
+
+def _format_extension_run_markdown(name: str, result: Any) -> str:
+    lines = [f"# Extension `/{name}`"]
+    if result.ok:
+        lines.append("")
+        lines.append("Completed.")
+        lines.append("")
+        lines.append("```json")
+        lines.append(json.dumps(result.result or {}, indent=2, sort_keys=True))
+        lines.append("```")
+    else:
+        error = result.error or {}
+        lines.append("")
+        lines.append(f"Failed: {error.get('message') or 'Extension failed.'}")
+    if result.stdout:
+        lines.extend(["", "## stdout", "```", result.stdout, "```"])
+    if result.stderr:
+        lines.extend(["", "## stderr", "```", result.stderr, "```"])
+    return "\n".join(lines)
 
 
 def _request_user_turn(

@@ -284,6 +284,15 @@ def test_list_command_configs_skips_reserved_command_alias(tmp_path: Path) -> No
         "reload.md",
         _command_markdown("reload", "Reload context.", "Reload context."),
     )
+    _write_command(
+        tmp_path,
+        "extensions.md",
+        _command_markdown(
+            "extensions",
+            "List project extensions.",
+            "List project extensions.",
+        ),
+    )
 
     assert list_command_configs(tmp_path) == []
 

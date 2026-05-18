@@ -1710,6 +1710,11 @@ def test_slash_command_search_endpoint_returns_web_commands(
             "kind": "local_command",
         },
         {
+            "name": "/extensions",
+            "description": "Show discovered project extensions",
+            "kind": "local_command",
+        },
+        {
             "name": "/init",
             "description": "Create a starter AGENTS.md instructions file",
             "kind": "local_command",
@@ -1754,6 +1759,11 @@ def test_slash_command_search_endpoint_includes_command_file_commands(
         {
             "name": "/agents",
             "description": "Show discovered project sub-agents",
+            "kind": "local_command",
+        },
+        {
+            "name": "/extensions",
+            "description": "Show discovered project extensions",
             "kind": "local_command",
         },
         {
@@ -5601,6 +5611,53 @@ def test_saved_session_continuation_persists_uploaded_image_attachments(
     assert history[0]["image_attachments"][0]["upload_id"] == upload["upload_id"]
     assert history[0]["image_attachments"][0]["name"] == "chart.png"
     assert history[1]["image_attachments"] == []
+
+
+def test_saved_session_continuation_accepts_image_only_submission(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(SESSION_DB_PATH_ENV, str(tmp_path / "sessions.db"))
+    queued_seen = threading.Event()
+
+    with SessionStore(db_path=tmp_path / "sessions.db") as store:
+        session_id = store.create_session(
+            str(tmp_path),
+            "openai",
+            "gpt-5.4",
+            "Image-only continuation",
+        )
+
+    def fake_run_session_loop(_settings, display, *, resume_session_id=None, **kwargs):
+        del _settings, resume_session_id, kwargs
+        queued = display.user_prompt()
+        assert getattr(queued, "text", None) == ""
+        assert len(getattr(queued, "images", [])) == 1
+        assert len(getattr(queued, "image_attachments", [])) == 1
+        queued_seen.set()
+        return 0
+
+    app = create_app(_settings())
+    with patch(
+        "pbi_agent.web.session.workers.run_session_loop",
+        fake_run_session_loop,
+    ):
+        with TestClient(app) as client:
+            upload_response = client.post(
+                f"/api/sessions/{session_id}/images",
+                files={"files": ("chart.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+            )
+            assert upload_response.status_code == 200
+            upload_id = upload_response.json()["uploads"][0]["upload_id"]
+
+            run_response = client.post(
+                f"/api/sessions/{session_id}/runs",
+                json={"image_upload_ids": [upload_id]},
+            )
+
+    assert run_response.status_code == 200
+    assert queued_seen.wait(timeout=2)
 
 
 def test_second_manager_start_does_not_mark_running_task_failed(

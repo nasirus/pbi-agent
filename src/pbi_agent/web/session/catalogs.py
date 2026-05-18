@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from pbi_agent.agent.session import active_mcp_tool_names
 from pbi_agent.config import ResolvedRuntime, list_command_configs
+from pbi_agent.extensions import discover_extensions
+from pbi_agent.tools.catalog import ToolCatalog
 from pbi_agent.web.command_registry import (
     list_slash_commands,
     search_slash_command_tuples,
@@ -127,6 +130,23 @@ class CatalogsMixin:
                     command.description or f"Activate {command.name}",
                     f"{command.name} command prompt preset",
                     "command",
+                )
+            )
+        reserved_names = {item[0].lstrip("/") for item in command_tuples}
+        reserved_names.update(ToolCatalog.from_builtin_registry().names())
+        reserved_names.update(
+            active_mcp_tool_names(self._catalogs_manager()._workspace_root)
+        )
+        for extension in discover_extensions(
+            self._catalogs_manager()._workspace_root,
+            reserved_names=reserved_names,
+        ).extensions:
+            command_tuples.append(
+                (
+                    f"/{extension.name}",
+                    extension.description,
+                    f"{extension.name} extension python tool",
+                    "extension",
                 )
             )
         return [

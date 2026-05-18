@@ -43,7 +43,7 @@ class FileMentionSearchResponse(BaseModel):
 class SlashCommandItemModel(BaseModel):
     name: str
     description: str
-    kind: Literal["local_command", "command"]
+    kind: Literal["local_command", "command", "extension"]
 
 
 class SlashCommandSearchResponse(BaseModel):

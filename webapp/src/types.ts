@@ -236,7 +236,7 @@ export type SkillMentionSearchPayload = {
 export type SlashCommandItem = {
   name: string;
   description: string;
-  kind: "local_command" | "command";
+  kind: "local_command" | "command" | "extension";
 };
 
 export type ImageAttachment = {

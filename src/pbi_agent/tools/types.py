@@ -68,6 +68,7 @@ class ToolOutput:
     result: dict[str, Any] | str
     attachments: list[ImageAttachment] = field(default_factory=list)
     display_metadata: dict[str, Any] = field(default_factory=dict)
+    is_error: bool = False
 
 
 class ToolHandler(Protocol):

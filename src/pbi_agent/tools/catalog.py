@@ -26,6 +26,9 @@ class ToolCatalog:
     def __bool__(self) -> bool:
         return True
 
+    def names(self) -> list[str]:
+        return list(self._entries)
+
     @classmethod
     def from_builtin_registry(cls) -> "ToolCatalog":
         entries: dict[str, ToolCatalogEntry] = {}
@@ -36,12 +39,18 @@ class ToolCatalog:
             entries[spec.name] = ToolCatalogEntry(spec=spec, handler=handler)
         return cls(entries)
 
-    def merged(self, extra_entries: list[ToolCatalogEntry]) -> "ToolCatalog":
+    def merged(
+        self,
+        extra_entries: list[ToolCatalogEntry],
+        *,
+        source_label: str = "MCP",
+    ) -> "ToolCatalog":
         merged = dict(self._entries)
         for entry in extra_entries:
             if entry.spec.name in self._entries:
                 _log.warning(
-                    "Skipping MCP tool %r: shadows a built-in tool with the same name",
+                    "Skipping %s tool %r: shadows an existing tool with the same name",
+                    source_label,
                     entry.spec.name,
                 )
                 continue
