@@ -13,7 +13,6 @@ Evaluate whether completed work is production-shippable. Base answer on current 
 Before answering, inspect enough local context to avoid guessing:
 
 - Read current task memory/TODO when useful.
-- When delegated by orchestrate, read root `PLAN.md` and root `REVIEW.md` if present.
 - Inspect workspace status and relevant diffs if code changes exist.
 - Consider review findings, fixes, validations run, skipped checks, remaining dirty/unrelated files.
 - If evidence incomplete, say so and lower confidence instead of assuming success.

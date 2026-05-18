@@ -6,7 +6,7 @@ model_profile_id: worker
 
 # Fix Review Findings
 
-Fix findings from previous `/review` turn in this session.
+Fix findings from previous review in this session.
 
 Use latest review output in current conversation as source of truth. Do not ask clarifying questions. Do not perform new general review.
 
@@ -25,17 +25,6 @@ When findings exist:
 - Preserve unrelated user/workspace changes.
 - Do not make opportunistic refactors or style-only edits.
 - Do not commit, push, merge, or open pull requests.
-
-## Orchestrate artifact mode
-
-When delegated by orchestrate manager:
-- Read root `PLAN.md` and root `REVIEW.md` before editing code.
-- Treat `REVIEW.md` as source-of-truth checklist for review fixes.
-- Fix only unchecked/actionable `REVIEW.md` checklist items.
-- Update `REVIEW.md` as fixes complete: mark fixed items done and add brief validation notes.
-- Update `PLAN.md` only when review fix completes, reopens, or changes plan checklist item.
-- Do not perform fresh general review; manager will call review sub-agent again.
-- Do not edit TODO.md; main instance owns it for orchestration tracking.
 
 ## Validation
 

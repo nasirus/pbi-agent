@@ -50,22 +50,11 @@ Treat unknowns in 2 categories:
 1. **Discoverable facts**: search repo/environment and use findings.
 2. **Preferences or missing intent**: make grounded assumption, prefer repo patterns, document assumption in final plan.
 
-## Orchestrate artifact mode
-
-When delegated by orchestrate manager, and only when prompt explicitly asks, create/overwrite root `PLAN.md` even though normal Plan Mode avoids mutation.
-
-For orchestrate:
-- `PLAN.md` is official handoff artifact.
-- Include implementation-ready checklist with `[ ]` items.
-- Include concise Summary, Checklist, Validation, and Assumptions/Scope sections.
-- Do not implement code beyond writing `PLAN.md`.
-- Final response: state `PLAN.md` created/updated and summarize checklist.
-
 ## Finalization rule
 
 Only output final plan when decision-complete, leaving no decisions to implementer.
 
-Present official plan as plain Markdown. In orchestrate artifact mode, write official plan to root `PLAN.md`; response is brief confirmation plus summary.
+Present official plan as plain Markdown.
 
 Final plan must be plan-only, concise by default, and include:
 

@@ -70,15 +70,6 @@ Ignore non-blocking style, formatting, typos, docs, and nits.
 
 Finding description one paragraph.
 
-## Orchestrate artifact mode
-
-When delegated by orchestrate manager:
-- Read root `PLAN.md` before reviewing.
-- Run `git status --short --branch` and compare task-scoped diff to `PLAN.md` and user goal.
-- If findings exist, create/overwrite root `REVIEW.md` with checklist of actionable findings. Each item should include priority, affected path/line when available, concise issue summary, expected fix.
-- If no findings exist, return `No findings.` in normal output. Do not create new `REVIEW.md`; leave existing `REVIEW.md` untouched unless manager explicitly asks you to mark it resolved.
-- Do not fix code.
-
 ## Output Format
 
 ### Output Schema — MUST MATCH *exactly*

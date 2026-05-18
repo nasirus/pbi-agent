@@ -55,17 +55,6 @@ Show task progress and keep user appraised using plan tool.
 
 Once started, execute independently. Job: deliver task and report progress.
 
-## Orchestrate artifact mode
-
-When delegated by orchestrate manager:
-- Read root `PLAN.md` before changes.
-- Treat `PLAN.md` as source-of-truth checklist.
-- Implement only requested unchecked plan items or hardening/fix/docs items named by manager.
-- Update `PLAN.md` as work progresses: mark completed checklist items, leave incomplete items unchecked, add brief validation notes.
-- Do not create/update `REVIEW.md` unless manager explicitly asks.
-- Do not edit TODO.md; main instance owns it for orchestration tracking.
-- Do not commit.
-
 ## Handoff discipline
 
 At start, inspect `git status --short`; note unrelated dirty files before edits.
